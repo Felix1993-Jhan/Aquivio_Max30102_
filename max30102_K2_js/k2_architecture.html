@@ -1,0 +1,1759 @@
+<!doctype html>
+<html lang="zh-Hant" data-lang="zh" data-view="start">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAX30102 K2 — 介面說明 / Interface Guide</title>
+<style>
+/* ── 設計基調 ─────────────────────────────────────────────
+   主題:嵌入式訊號處理模組的整合說明。技術性、精確、可列印。
+   色彩:冷調中性底 + 三個角色各自的識別色(軟體灰藍 / 模組青 / 演算靛)
+        剔除用琥珀、關鍵用玫瑰 —— 語意色與角色識別色刻意分開。
+   ──────────────────────────────────────────────────────── */
+:root{
+  --bg:#f4f6f8; --surface:#ffffff; --surface-2:#eef1f4;
+  --ink:#1b2229; --ink-2:#4a5561; --ink-3:#7a8792;
+  --line:#d6dde3;
+  --ui:#5b6b7c; --ui-bg:#eef1f4;
+  --ctrl:#0f766e; --ctrl-bg:#e6f4f2;
+  --base:#4338ca; --base-bg:#eceafb;
+  --drop:#b45309; --drop-bg:#fdf3e3;
+  --crit:#be123c; --crit-bg:#fdeaee;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"Courier New",monospace;
+  --cjk:"PingFang TC","Microsoft JhengHei","Noto Sans TC","Hiragino Sans TC",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#11151a; --surface:#181e25; --surface-2:#1f262e;
+    --ink:#e2e8ee; --ink-2:#a9b4c0; --ink-3:#7c8793;
+    --line:#2b3540;
+    --ui:#93a3b4; --ui-bg:#1e252d;
+    --ctrl:#5eead4; --ctrl-bg:#10312e;
+    --base:#a5b4fc; --base-bg:#1e1b3a;
+    --drop:#fbbf24; --drop-bg:#33260f;
+    --crit:#fb7185; --crit-bg:#361119;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;padding:30px 20px 64px;background:var(--bg);color:var(--ink);
+  font-family:var(--cjk);line-height:1.65;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1120px;margin:0 auto}
+
+/* ── 語言 / 頁籤切換:只隱藏,不覆寫 display → 任何元素型別都成立 ── */
+html[data-lang="zh"] [lang="en"]{display:none}
+html[data-lang="en"] [lang="zh"]{display:none}
+html[data-lang="en"] body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+html[data-view="start"] .view:not(#v-start){display:none}
+html[data-view="api"]   .view:not(#v-api){display:none}
+html[data-view="chain"] .view:not(#v-chain){display:none}
+html[data-view="arch"]  .view:not(#v-arch){display:none}
+html[data-view="proto"] .view:not(#v-proto){display:none}
+
+/* ── 頁首 ── */
+header{margin-bottom:16px;display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap}
+.hd-text{flex:1 1 380px;min-width:0}
+h1{font-size:25px;margin:0 0 5px;letter-spacing:-.01em}
+.sub{color:var(--ink-2);font-size:13.5px;margin:0}
+.stamp{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);margin-top:8px}
+
+.langbtn{flex:none;display:flex;border:1px solid var(--line);border-radius:20px;
+  overflow:hidden;background:var(--surface);font-family:var(--mono);font-size:12px}
+.langbtn button{border:0;background:transparent;color:var(--ink-2);padding:6px 15px;
+  cursor:pointer;font:inherit;transition:background .12s,color .12s}
+.langbtn button:hover{background:var(--surface-2)}
+.langbtn button:focus-visible{outline:2px solid var(--ctrl);outline-offset:-2px}
+html[data-lang="zh"] .langbtn button[data-set="zh"],
+html[data-lang="en"] .langbtn button[data-set="en"]{background:var(--ctrl);color:var(--bg)}
+
+/* ── 頁籤 ── */
+.tabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin-bottom:28px;flex-wrap:wrap}
+.tabs button{
+  border:1px solid transparent;border-bottom:0;background:transparent;color:var(--ink-2);
+  padding:9px 16px;cursor:pointer;font:inherit;font-size:13.5px;
+  border-radius:8px 8px 0 0;margin-bottom:-2px;transition:background .12s,color .12s;
+}
+.tabs button:hover{background:var(--surface-2)}
+.tabs button:focus-visible{outline:2px solid var(--ctrl);outline-offset:-3px}
+.tabs button .k{font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-right:7px}
+html[data-view="start"] .tabs button[data-go="start"],
+html[data-view="api"]   .tabs button[data-go="api"],
+html[data-view="chain"] .tabs button[data-go="chain"],
+html[data-view="arch"]  .tabs button[data-go="arch"],
+html[data-view="proto"] .tabs button[data-go="proto"]{
+  background:var(--surface);border-color:var(--line);border-bottom:2px solid var(--surface);
+  color:var(--ink);font-weight:600;
+}
+html[data-view="start"] .tabs button[data-go="start"] .k,
+html[data-view="api"]   .tabs button[data-go="api"] .k,
+html[data-view="chain"] .tabs button[data-go="chain"] .k,
+html[data-view="arch"]  .tabs button[data-go="arch"] .k,
+html[data-view="proto"] .tabs button[data-go="proto"] .k{color:var(--ctrl)}
+
+/* ── 0. 程式碼區塊 ── */
+.code{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--surface);
+  border:1px solid var(--line);border-radius:8px;padding:13px 15px;overflow-x:auto;
+  white-space:pre;margin:10px 0;color:var(--ink)}
+.code .cm{color:var(--ink-3)}
+.code .kw{color:var(--base);font-weight:600}
+.code .hi{color:var(--ctrl);font-weight:600}
+.code .wr{color:var(--drop)}
+.code .sec{color:var(--ctrl);font-weight:700}
+.ent{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;align-items:baseline;
+  font-size:12.5px;margin-top:10px}
+.ent .lhs{font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+.ent .lhs.inst{color:var(--ctrl);font-weight:700}
+.ent .lhs.stat{color:var(--ui)}
+
+/* ── D. 協定表 ── */
+.pkt{font-family:var(--mono);font-size:12px;display:flex;flex-wrap:wrap;gap:3px;margin:8px 0}
+.pkt span{border:1px solid var(--line);border-radius:4px;padding:3px 7px;background:var(--surface-2);
+  text-align:center;min-width:44px}
+.pkt span b{display:block;font-size:9.5px;color:var(--ink-3);font-weight:600;margin-top:1px}
+.pkt span.hd{background:var(--ui-bg);border-color:color-mix(in srgb,var(--ui) 35%,transparent)}
+.pkt span.cmd{background:var(--ctrl-bg);border-color:var(--ctrl);color:var(--ctrl);font-weight:700}
+.pkt span.var{background:var(--drop-bg);border-color:color-mix(in srgb,var(--drop) 45%,transparent);color:var(--drop)}
+.pkt span.cs{background:var(--crit-bg);border-color:color-mix(in srgb,var(--crit) 35%,transparent);color:var(--crit)}
+.sub{border:1px solid var(--line);border-radius:9px;background:var(--surface);
+  padding:12px 15px 14px;margin-bottom:14px}
+.sub-hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.sub-hd .op{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--ctrl);
+  background:var(--ctrl-bg);border:1px solid var(--ctrl);border-radius:5px;padding:1px 8px}
+.sub-hd .nm{font-size:14px;font-weight:700}
+.sub-hd .len{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.sub p{margin:6px 0 0;font-size:12.5px;color:var(--ink-2)}
+.io{display:grid;grid-template-columns:38px 1fr;gap:5px 9px;margin-top:9px;align-items:center}
+.io .dir{font-family:var(--mono);font-size:10.5px;font-weight:700;text-align:center;
+  border-radius:4px;padding:2px 0}
+.io .dir.tx{background:var(--ui-bg);color:var(--ui);border:1px solid color-mix(in srgb,var(--ui) 35%,transparent)}
+.io .dir.rx{background:var(--base-bg);color:var(--base);border:1px solid color-mix(in srgb,var(--base) 35%,transparent)}
+.io .by{font-family:var(--mono);font-size:12px}
+
+/* ── 通用 ── */
+section{margin:0 0 38px}
+h2{font-size:16px;margin:0 0 4px;display:flex;align-items:baseline;gap:9px}
+h2 .n{font-family:var(--mono);font-size:12px;color:var(--ctrl);
+  border:1px solid var(--ctrl);border-radius:4px;padding:1px 6px;flex:none}
+.lead{color:var(--ink-2);font-size:13px;margin:0 0 16px}
+.scroll{overflow-x:auto;padding-bottom:6px}
+code{font-family:var(--mono);font-size:.92em;background:var(--surface-2);
+  padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
+.note{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--drop);
+  border-radius:0 7px 7px 0;padding:11px 14px;font-size:12.5px;color:var(--ink-2);margin-top:14px}
+.note b{color:var(--ink)}
+.note.crit{border-left-color:var(--crit)}
+table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:12px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11.5px;color:var(--ink-3);font-weight:600;letter-spacing:.03em}
+tbody tr:last-child td{border-bottom:none}
+td code{white-space:nowrap}
+
+/* ══════════ A. API 樹 ══════════ */
+.grp{margin-bottom:22px;border:1px solid var(--line);border-radius:10px;
+  background:var(--surface);overflow:hidden}
+.grp-hd{display:flex;align-items:center;gap:10px;padding:10px 14px;
+  background:var(--surface-2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.grp-hd .ic{font-family:var(--mono);font-size:11.5px;font-weight:700;padding:2px 9px;
+  border-radius:20px;background:var(--ctrl);color:var(--bg);flex:none}
+.grp-hd .t{font-size:14px;font-weight:700}
+.grp-hd .d{font-size:11.5px;color:var(--ink-3)}
+.grp-body{padding:12px 14px 14px}
+
+.tree{font-size:12.5px}
+.tree ul{list-style:none;margin:0;padding-left:20px;border-left:1px solid var(--line);position:relative}
+.tree>ul{border-left:0;padding-left:0}
+.tree li{position:relative;padding:4px 0}
+.tree ul li::before{content:"";position:absolute;left:-20px;top:15px;width:16px;height:1px;background:var(--line)}
+.tree>ul>li::before{display:none}
+.node{display:inline-block;max-width:100%}
+.node .sig{font-family:var(--mono);font-size:12.5px;color:var(--ink);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:5px;padding:1px 7px}
+.node .ret{font-family:var(--mono);font-size:12px;color:var(--ctrl);margin-left:6px}
+.node .ret::before{content:"→ ";color:var(--ink-3)}
+.node .desc{display:block;color:var(--ink-2);font-size:11.5px;margin-top:2px;padding-left:2px}
+.node.field .sig{background:transparent;border-color:transparent;padding-left:0;color:var(--base)}
+.node.warnrow .desc{color:var(--drop)}
+.tag{display:inline-block;font-family:var(--mono);font-size:10px;padding:0 6px;border-radius:10px;
+  margin-left:6px;vertical-align:1px}
+.tag.null{background:var(--crit-bg);color:var(--crit);border:1px solid color-mix(in srgb,var(--crit) 35%,transparent)}
+.tag.key{background:var(--ctrl-bg);color:var(--ctrl);border:1px solid color-mix(in srgb,var(--ctrl) 40%,transparent)}
+.tag.rw{background:var(--drop-bg);color:var(--drop);border:1px solid color-mix(in srgb,var(--drop) 40%,transparent)}
+
+/* ══════════ B. 呼叫鏈 ══════════ */
+.seq{min-width:800px;position:relative}
+.lanes{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:6px}
+.lane{text-align:center;padding:8px 6px;border-radius:8px;font-size:13px;font-weight:700}
+.lane small{display:block;font-weight:400;font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+.lane.app{background:var(--ui-bg);border:1px solid color-mix(in srgb,var(--ui) 30%,transparent)}
+.lane.mod{background:var(--ctrl-bg);border:2px solid var(--ctrl)}
+.lane.mcu{background:var(--base-bg);border:1px solid color-mix(in srgb,var(--base) 30%,transparent)}
+.flow{position:relative;padding:6px 0;
+  background:
+    linear-gradient(var(--line),var(--line)) 16.6% 0/1px 100% no-repeat,
+    linear-gradient(var(--line),var(--line)) 50%   0/1px 100% no-repeat,
+    linear-gradient(var(--line),var(--line)) 83.3% 0/1px 100% no-repeat;}
+.step{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;min-height:40px}
+.msg{position:relative;height:38px;display:flex;align-items:center;justify-content:center}
+.msg .lb{background:var(--surface);border:1px solid var(--line);border-radius:5px;
+  padding:2px 9px;font-size:11.5px;font-family:var(--mono);z-index:1;text-align:center;line-height:1.4}
+.msg::before{content:"";position:absolute;left:10%;right:10%;top:50%;height:1px;background:var(--ink-3)}
+.msg.r::after{content:"";position:absolute;right:10%;top:50%;transform:translateY(-50%);
+  border:5px solid transparent;border-left-color:var(--ink-3)}
+.msg.l::after{content:"";position:absolute;left:10%;top:50%;transform:translateY(-50%);
+  border:5px solid transparent;border-right-color:var(--ink-3)}
+.msg.dashed::before{background:repeating-linear-gradient(90deg,var(--ink-3) 0 5px,transparent 5px 10px)}
+.c12{grid-column:1/3}.c23{grid-column:2/4}.c13{grid-column:1/4}.c2{grid-column:2/3}
+.selfbox{margin:2px 0;padding:8px 11px;border-radius:7px;background:var(--ctrl-bg);
+  border:1px solid color-mix(in srgb,var(--ctrl) 40%,transparent);font-size:11.5px;text-align:left}
+.selfbox b{display:block;font-size:12px;margin-bottom:2px}
+.branch{margin:2px 0;padding:8px 11px;border-radius:7px;background:var(--ui-bg);
+  border:1px dashed color-mix(in srgb,var(--ui) 45%,transparent);font-size:11.5px;text-align:left}
+.branch b{display:block;font-size:12px;margin-bottom:3px}
+.stepno{position:absolute;left:-2px;top:9px;font-family:var(--mono);font-size:10.5px;color:var(--ink-3)}
+/* 迴圈框:標出「這幾步是重複執行的」,避免被讀成一次性流程 */
+.loop{position:relative;border:1.5px dashed var(--ctrl);border-radius:9px;
+  padding:26px 8px 10px;margin:12px 0}
+.loop-lb{position:absolute;top:-1px;left:-1px;background:var(--ctrl);color:var(--bg);
+  font-family:var(--mono);font-size:10.5px;font-weight:700;padding:3px 11px;border-radius:8px 0 9px 0}
+.once{position:relative;border:1px solid var(--line);border-radius:9px;
+  padding:26px 8px 10px;margin:12px 0;background:color-mix(in srgb,var(--surface) 60%,transparent)}
+.once-lb{position:absolute;top:-1px;left:-1px;background:var(--ink-3);color:var(--bg);
+  font-family:var(--mono);font-size:10.5px;font-weight:700;padding:3px 11px;border-radius:8px 0 9px 0}
+.subhd{font-size:14.5px;font-weight:700;margin:34px 0 4px;display:flex;align-items:baseline;gap:8px}
+.subhd .bn{font-family:var(--mono);font-size:11.5px;color:var(--ctrl);
+  border:1px solid var(--ctrl);border-radius:4px;padding:1px 6px;flex:none}
+.subhd+.lead{margin-bottom:12px}
+
+/* ══════════ C. 架構 ══════════ */
+.band{border-radius:10px;padding:14px 16px 16px;border:1px solid var(--line);background:var(--surface)}
+.band-hd{display:flex;align-items:center;gap:10px;margin-bottom:11px;flex-wrap:wrap}
+.chip{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:20px;font-family:var(--mono);flex:none}
+.band-note{font-size:11.5px;color:var(--ink-3)}
+.row{display:flex;gap:9px;flex-wrap:wrap}
+.row>.box{flex:1 1 168px;min-width:158px}
+.box{background:var(--surface);border:1px solid var(--line);border-radius:7px;
+  padding:9px 11px;font-size:12.5px;line-height:1.45}
+.box b{display:block;font-size:13px;margin-bottom:2px}
+.box small{display:block;color:var(--ink-3);font-size:11px;font-family:var(--mono);margin-top:3px}
+.box .trig{display:block;margin-top:5px;padding-top:5px;border-top:1px dashed var(--line);
+  font-size:10.5px;color:var(--ctrl);font-family:var(--mono)}
+.band.ui{background:var(--ui-bg);border-color:color-mix(in srgb,var(--ui) 30%,transparent)}
+.band.ui .chip{background:var(--ui);color:var(--surface)}
+.band.ctrl{background:var(--ctrl-bg);border-color:color-mix(in srgb,var(--ctrl) 40%,transparent);border-width:2px}
+.band.ctrl .chip{background:var(--ctrl);color:var(--bg)}
+.band.base{background:var(--base-bg);border-color:color-mix(in srgb,var(--base) 30%,transparent)}
+.band.base .chip{background:var(--base);color:var(--surface)}
+.arrow{display:flex;align-items:center;justify-content:center;gap:9px;padding:9px 0;
+  color:var(--ink-2);font-size:12px;flex-wrap:wrap}
+.arrow::before,.arrow::after{content:"";height:1px;flex:1;background:var(--line);max-width:170px}
+.arrow code{font-size:11.5px}
+
+.states{display:flex;align-items:stretch;min-width:860px}
+.st{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12px}
+.st b{display:block;font-size:13px;margin-bottom:3px}
+.st ul{margin:5px 0 0;padding-left:16px;color:var(--ink-2);font-size:11.5px}
+.st.hot{border-color:var(--ctrl);border-width:2px;background:var(--ctrl-bg)}
+.st.cold{background:var(--surface-2);color:var(--ink-2)}
+.tr{flex:none;width:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  color:var(--ink-3);font-size:10.5px;text-align:center;font-family:var(--mono);padding:0 4px}
+.tr .ar{font-size:17px;line-height:1}
+.back{margin-top:10px;padding:9px 12px;border-radius:8px;font-size:12px;
+  background:var(--crit-bg);border:1px solid color-mix(in srgb,var(--crit) 35%,transparent)}
+.back b{color:var(--crit)}
+
+.pipe{display:grid;grid-template-columns:1fr 310px;gap:10px 16px;align-items:start}
+@media (max-width:760px){.pipe{grid-template-columns:1fr}}
+.stage{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--ctrl);
+  border-radius:0 7px 7px 0;padding:9px 12px}
+.stage b{font-size:13px}
+.stage small{display:block;color:var(--ink-3);font-size:11px;font-family:var(--mono);margin-top:2px}
+.reject{background:var(--drop-bg);border:1px dashed color-mix(in srgb,var(--drop) 45%,transparent);
+  border-radius:7px;padding:8px 11px;font-size:11.5px;color:var(--drop)}
+.reject b{display:block;font-size:12px;margin-bottom:2px}
+.reject.none{background:transparent;border-color:var(--line);color:var(--ink-3);border-style:solid}
+.pipe .dn{grid-column:1;justify-self:center;color:var(--ink-3);font-size:15px;line-height:1;margin:-4px 0}
+
+.tl{min-width:800px;padding:26px 0 4px}
+.tl-bar{height:8px;border-radius:4px;display:flex;overflow:hidden;border:1px solid var(--line)}
+.seg.dead{background:repeating-linear-gradient(45deg,var(--crit-bg),var(--crit-bg) 5px,transparent 5px,transparent 10px)}
+.seg.settle{background:var(--drop-bg)}
+.seg.warm{background:color-mix(in srgb,var(--ctrl) 25%,transparent)}
+.seg.run{background:var(--ctrl)}
+.ticks{display:flex;margin-top:9px}
+.tick{position:relative;font-size:11px;color:var(--ink-2);padding-right:8px}
+.tick::before{content:"";position:absolute;top:-13px;left:0;width:1px;height:9px;background:var(--line)}
+.tick b{display:block;font-family:var(--mono);font-size:11.5px;color:var(--ink)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:16px;font-size:11.5px;color:var(--ink-2)}
+.legend i{display:inline-block;width:22px;height:9px;border-radius:3px;margin-right:6px;
+  vertical-align:-1px;border:1px solid var(--line)}
+
+footer{margin-top:46px;padding-top:18px;border-top:1px solid var(--line);font-size:11.5px;color:var(--ink-3)}
+@media print{
+  body{background:#fff;padding:0}.scroll,.seq{overflow:visible}
+  .langbtn,.tabs{display:none}
+  html .view{display:block !important}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="hd-text">
+    <h1><span lang="zh">MAX30102 K2 — 介面說明</span><span lang="en">MAX30102 K2 — Interface Guide</span></h1>
+    <p class="sub">
+      <span lang="zh">軟體端能呼叫什麼、會拿回什麼、呼叫順序長什麼樣</span>
+      <span lang="en">What you can call, what comes back, and in what order</span>
+    </p>
+    <p class="stamp">100 Hz &middot; <span lang="zh">保留 30 秒</span><span lang="en">30 s retention</span></p>
+  </div>
+  <div class="langbtn" role="group" aria-label="Language">
+    <button type="button" data-set="zh">中文</button>
+    <button type="button" data-set="en">EN</button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button type="button" data-go="start"><span class="k">0</span><span lang="zh">快速上手</span><span lang="en">Quick Start</span></button>
+  <button type="button" data-go="api"><span class="k">A</span><span lang="zh">API 樹狀圖</span><span lang="en">API Tree</span></button>
+  <button type="button" data-go="chain"><span class="k">B</span><span lang="zh">呼叫鏈</span><span lang="en">Call Sequence</span></button>
+  <button type="button" data-go="arch"><span class="k">C</span><span lang="zh">架構與時序</span><span lang="en">Architecture</span></button>
+  <button type="button" data-go="proto"><span class="k">D</span><span lang="zh">MCU 通訊協定</span><span lang="en">MCU Protocol</span></button>
+</nav>
+
+<!-- ═══════════════════════ 0. 快速上手 ═══════════════════════ -->
+<div class="view" id="v-start">
+<section>
+  <h2><span class="n">0</span><span lang="zh">快速上手</span><span lang="en">Quick Start</span></h2>
+  <p class="lead">
+    <span lang="zh">看完這一頁就能接起來。細節查 <b>A</b>,順序查 <b>B</b>,協定查 <b>D</b>。</span>
+    <span lang="en">This page is enough to wire it up. Field details in <b>A</b>, ordering in <b>B</b>, protocol in <b>D</b>.</span>
+  </p>
+
+  <!-- 0-1 完整範例(移到最前)-->
+  <div class="subhd"><span class="bn">0-1</span><span lang="zh">完整範例 —— 整個怎麼跑</span><span lang="en">Complete example — the whole flow</span></div>
+  <p class="lead"><span lang="zh"><code>port</code> / <code>wave</code> / <code>waveBase</code> 都是<b>軟體端自己的東西</b>,模組不提供。照這段抄就會用。</span>
+    <span lang="en"><code>port</code> / <code>wave</code> / <code>waveBase</code> are <b>yours</b>, not provided by the module. Copy this and it works.</span></p>
+
+  <div class="code" lang="zh"><span class="cm">// ═══ 只做一次:整個程式共用 ═══════════════════════════════</span>
+<span class="kw">final</span> core   = <span class="hi">Max30102K2</span>();        <span class="cm">// 計算模組(實例,要先 new)</span>
+<span class="kw">final</span> parser = Max30102RxParser();  <span class="cm">// 組框器(實例)</span>
+<span class="kw">final</span> wave   = &lt;<span class="kw">int</span>&gt;[];             <span class="cm">// 軟體自己的波形儲存器(核心不存)</span>
+<span class="kw">int</span>? waveBase;                        <span class="cm">// wave[0] 的絕對位置</span>
+
+<span class="cm">// ═══ 開始量測前:請 MCU 初始化晶片 ═══════════════════════</span>
+port.write(Max30102Protocol.buildReInit());   <span class="cm">// 靜態呼叫,自己送出</span>
+
+<span class="cm">// ═══ 量測中:每 100 ms 跟 MCU 要一次資料 ═════════════════</span>
+Timer.periodic(<span class="kw">const</span> Duration(milliseconds: <span class="hi">100</span>), (_) {
+  port.write(Max30102Protocol.buildQueryFifo());
+});
+
+<span class="cm">// ═══ 串口收到位元組 → 組框器 → 收到完整封包時 ═════════════</span>
+port.onBytes = parser.feed;
+parser.onPacket = (packet) {
+
+  <span class="cm">// 只有 QUERY_FIFO(sub=0x00)進模組;READ_REG 等自己處理(值在 packet[6])</span>
+  <span class="kw">if</span> (packet[<span class="hi">4</span>] != <span class="hi">0x00</span>) { handleChipReply(packet); <span class="kw">return</span>; }
+
+  <span class="kw">final</span> r = core.<span class="hi">feedData</span>(packet);   <span class="cm">// 回傳 K2FeedResult(不會是 null)</span>
+
+  <span class="cm">// ── 波形:自己接住存(核心不存)────────────────────────</span>
+  <span class="kw">if</span> (r.newIr.isNotEmpty) {
+    <span class="kw">if</span> (waveBase == <span class="kw">null</span> || r.firstAbs != waveBase! + wave.length) {
+      wave.clear(); waveBase = r.firstAbs;   <span class="cm">// 位置對不上 → 清空重接</span>
+    }
+    wave.addAll(r.newIr);
+  }
+
+  <span class="cm">// ── 數值:過三道關卡 ──────────────────────────────────</span>
+  <span class="kw">final</span> c = r.<span class="hi">computed</span>;                <span class="cm">// K2Compute?(可能 null)</span>
+  <span class="kw">if</span> (c == <span class="kw">null</span>) <span class="kw">return</span>;              <span class="wr">// ① 這輪還在累積,不是出錯 → 畫面維持原樣</span>
+  <span class="kw">if</span> (!c.fingerPresent) { showNoFinger(); <span class="kw">return</span>; }  <span class="wr">// ② 沒手指</span>
+  <span class="kw">if</span> (c.settling)       { showSettling();  <span class="kw">return</span>; }  <span class="wr">// ③ 算了但 baseline 沒好(值全 null)</span>
+
+  <span class="cm">// ── 到這裡才是乾淨資料 ────────────────────────────────</span>
+  showHr(c.bpm);              <span class="cm">// double?</span>
+  showSpo2(c.spo2);           <span class="cm">// double?</span>
+  showSdnn(c.hrv?.sdnn);      <span class="cm">// hrv 可能 null → 要 ?.</span>
+  showRmssd(c.hrv?.rmssd);
+  showSqi(c.sqiOk);           <span class="cm">// bool,不用符號</span>
+  <span class="kw">for</span> (<span class="kw">final</span> abs <span class="kw">in</span> c.troughAbs) markTrough(abs - waveBase!);
+};
+
+<span class="cm">// ═══ 任何時候要「最新穩定值」(不會因這輪沒算變 null)═════</span>
+<span class="kw">final</span> displayBpm = core.<span class="hi">latest</span>?.bpm;</div>
+
+  <div class="code" lang="en"><span class="cm">// ═══ ONCE: shared by the whole app ════════════════════════</span>
+<span class="kw">final</span> core   = <span class="hi">Max30102K2</span>();        <span class="cm">// compute module (instance — new it first)</span>
+<span class="kw">final</span> parser = Max30102RxParser();  <span class="cm">// framer (instance)</span>
+<span class="kw">final</span> wave   = &lt;<span class="kw">int</span>&gt;[];             <span class="cm">// your own waveform buffer (module does not store it)</span>
+<span class="kw">int</span>? waveBase;                        <span class="cm">// absolute position of wave[0]</span>
+
+<span class="cm">// ═══ Before measuring: ask the MCU to init the chip ═══════</span>
+port.write(Max30102Protocol.buildReInit());   <span class="cm">// static call; you send it</span>
+
+<span class="cm">// ═══ While measuring: poll the MCU every 100 ms ══════════</span>
+Timer.periodic(<span class="kw">const</span> Duration(milliseconds: <span class="hi">100</span>), (_) {
+  port.write(Max30102Protocol.buildQueryFifo());
+});
+
+<span class="cm">// ═══ Bytes arrive → framer → on each complete packet ═════</span>
+port.onBytes = parser.feed;
+parser.onPacket = (packet) {
+
+  <span class="cm">// Only QUERY_FIFO (sub=0x00) goes to the module; handle READ_REG etc. yourself (value at packet[6])</span>
+  <span class="kw">if</span> (packet[<span class="hi">4</span>] != <span class="hi">0x00</span>) { handleChipReply(packet); <span class="kw">return</span>; }
+
+  <span class="kw">final</span> r = core.<span class="hi">feedData</span>(packet);   <span class="cm">// returns K2FeedResult (never null)</span>
+
+  <span class="cm">// ── Waveform: store it yourself (the module does not) ──</span>
+  <span class="kw">if</span> (r.newIr.isNotEmpty) {
+    <span class="kw">if</span> (waveBase == <span class="kw">null</span> || r.firstAbs != waveBase! + wave.length) {
+      wave.clear(); waveBase = r.firstAbs;   <span class="cm">// position mismatch → clear and restart</span>
+    }
+    wave.addAll(r.newIr);
+  }
+
+  <span class="cm">// ── Values: pass three gates ──────────────────────────</span>
+  <span class="kw">final</span> c = r.<span class="hi">computed</span>;                <span class="cm">// K2Compute? (may be null)</span>
+  <span class="kw">if</span> (c == <span class="kw">null</span>) <span class="kw">return</span>;              <span class="wr">// ① still accumulating, not an error → leave the view as-is</span>
+  <span class="kw">if</span> (!c.fingerPresent) { showNoFinger(); <span class="kw">return</span>; }  <span class="wr">// ② no finger</span>
+  <span class="kw">if</span> (c.settling)       { showSettling();  <span class="kw">return</span>; }  <span class="wr">// ③ computed but baseline not formed (all null)</span>
+
+  <span class="cm">// ── Only here are the values clean ────────────────────</span>
+  showHr(c.bpm);              <span class="cm">// double?</span>
+  showSpo2(c.spo2);           <span class="cm">// double?</span>
+  showSdnn(c.hrv?.sdnn);      <span class="cm">// hrv may be null → use ?.</span>
+  showRmssd(c.hrv?.rmssd);
+  showSqi(c.sqiOk);           <span class="cm">// bool, no operator needed</span>
+  <span class="kw">for</span> (<span class="kw">final</span> abs <span class="kw">in</span> c.troughAbs) markTrough(abs - waveBase!);
+};
+
+<span class="cm">// ═══ Anytime: the latest stable value (not nulled by an idle round) ═══</span>
+<span class="kw">final</span> displayBpm = core.<span class="hi">latest</span>?.bpm;</div>
+
+  <!-- 0-2 前置關卡 -->
+  <div class="subhd"><span class="bn">0-2</span><span lang="zh">前置關卡 —— 先做什麼,才能用 <code>.</code> 拿到什麼</span><span lang="en">Prerequisites — what must happen before each value is available</span></div>
+  <table>
+    <thead><tr><th><span lang="zh">想拿</span><span lang="en">To get</span></th>
+      <th><span lang="zh">前置條件</span><span lang="en">Requires</span></th>
+      <th><span lang="zh">寫法</span><span lang="en">Access</span></th></tr></thead>
+    <tbody>
+      <tr><td><span lang="zh">任何東西</span><span lang="en">anything</span></td>
+        <td><code>final core = Max30102K2();</code></td><td>—</td></tr>
+      <tr><td><span lang="zh">波形 / firstAbs</span><span lang="en">waveform / firstAbs</span></td>
+        <td><code>r = core.feedData(packet)</code></td><td><code>r.newIr</code></td></tr>
+      <tr><td><code>c</code>(K2Compute)</td>
+        <td><code>if (r.computed == null) return;</code> <span lang="zh">後</span><span lang="en">then</span> <code>final c = r.computed!</code></td>
+        <td><span lang="zh"><code>c</code> 一定有</span><span lang="en"><code>c</code> guaranteed</span></td></tr>
+      <tr><td><code>c.bpm</code> / <code>c.spo2</code></td>
+        <td><code>c.fingerPresent==true</code> &amp;&amp; <code>c.settling==false</code></td>
+        <td><code>c.bpm</code></td></tr>
+      <tr><td><code>c.hrv?.sdnn</code> <span lang="zh">等</span><span lang="en">etc.</span></td>
+        <td><span lang="zh">上面 + 累積 ≥ 9 拍</span><span lang="en">above + ≥ 9 beats</span></td>
+        <td><code>c.hrv?.sdnn</code></td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <span lang="zh"><b>一句話:</b>建 <code>core</code> → 餵 <code>r</code> → 過三關(<code>computed≠null</code> → <code>fingerPresent</code> → <code>!settling</code>)→ 才拿得到乾淨值。</span>
+    <span lang="en"><b>In short:</b> build <code>core</code> → feed <code>r</code> → pass three gates (<code>computed≠null</code> → <code>fingerPresent</code> → <code>!settling</code>) → then values are clean.</span>
+  </div>
+
+  <!-- 0-3 這次 vs 上次 -->
+  <div class="subhd"><span class="bn">0-3</span><span lang="zh">「這次餵的」<code>r</code> vs「上次存的」<code>core.latest</code></span><span lang="en">"this feed" <code>r</code> vs "last stored" <code>core.latest</code></span></div>
+  <table>
+    <thead><tr><th></th>
+      <th><span lang="zh">這次餵料回傳 <code>r</code></span><span lang="en">this feed's <code>r</code></span></th>
+      <th><span lang="zh">上次存下 <code>core.latest</code></span><span lang="en">last stored <code>core.latest</code></span></th></tr></thead>
+    <tbody>
+      <tr><td><span lang="zh">從哪拿</span><span lang="en">source</span></td>
+        <td><code>core.feedData()</code> <span lang="zh">回傳</span><span lang="en">return</span></td>
+        <td><code>core.latest</code> / <code>core.bpm</code> …</td></tr>
+      <tr><td><span lang="zh">心率</span><span lang="en">HR</span></td>
+        <td><code>r.computed?.bpm</code></td><td><code>core.bpm</code></td></tr>
+      <tr><td><span lang="zh">會不會 null</span><span lang="en">null?</span></td>
+        <td><span lang="zh">這輪沒算就整個 null</span><span lang="en">null when no compute this round</span></td>
+        <td><span lang="zh"><b>保留上次,不會因這輪沒算變 null</b></span><span lang="en"><b>keeps last; not nulled by an idle round</b></span></td></tr>
+      <tr><td><span lang="zh">波形</span><span lang="en">waveform</span></td>
+        <td><span lang="zh">✅ <code>r.newIr</code>(<b>只有這裡有</b>)</span><span lang="en">✅ <code>r.newIr</code> (<b>only here</b>)</span></td>
+        <td><span lang="zh">❌ 核心不存</span><span lang="en">❌ not stored</span></td></tr>
+      <tr><td><span lang="zh">用途</span><span lang="en">use</span></td>
+        <td><span lang="zh">判斷「這次有沒有新結果」</span><span lang="en">detect a new result</span></td>
+        <td><span lang="zh">畫面顯示「目前值」(不閃爍)</span><span lang="en">show the current value (no flicker)</span></td></tr>
+    </tbody>
+  </table>
+
+  <!-- 三個入口 -->
+  <div class="subhd"><span class="bn">0-4</span><span lang="zh">三個入口 —— 一個是實例,兩個是靜態</span><span lang="en">Three entry points — one instance, two static</span></div>
+  <div class="ent">
+    <span class="lhs inst">Max30102K2</span>
+    <span><span lang="zh"><b>要先 new 一個實例</b>,整個程式共用一份。餵資料、取值、控制、設定都經過它。<br>
+      <code>final core = Max30102K2();</code> → <code>core.feedData(...)</code></span>
+      <span lang="en"><b>Must be instantiated</b>; keep one for the whole application. Feeding, reading, control and settings all go through it.<br>
+      <code>final core = Max30102K2();</code> → <code>core.feedData(...)</code></span></span>
+
+    <span class="lhs stat">Max30102Protocol</span>
+    <span><span lang="zh"><b>靜態</b>,直接用類別名叫。只建封包,不送出。<br>
+      <code>Max30102Protocol.buildQueryFifo()</code></span>
+      <span lang="en"><b>Static</b> — call on the class. Builds packets only, never sends them.<br>
+      <code>Max30102Protocol.buildQueryFifo()</code></span></span>
+
+    <span class="lhs stat">Max30102SettingLimits</span>
+    <span><span lang="zh"><b>靜態</b>。檢查設定值是否合理。<br>
+      <code>Max30102SettingLimits.check(core.config)</code></span>
+      <span lang="en"><b>Static</b>. Validates settings.<br>
+      <code>Max30102SettingLimits.check(core.config)</code></span></span>
+
+    <span class="lhs stat">Max30102RxParser</span>
+    <span><span lang="zh"><b>實例</b>(附贈的組框器)。把位元組流切成完整封包。想自己實作可參考 <b>D3</b>。<br>
+      <code>final parser = Max30102RxParser();</code></span>
+      <span lang="en"><b>Instance</b> (bundled framer). Turns the byte stream into whole packets. To roll your own, see <b>D3</b>.<br>
+      <code>final parser = Max30102RxParser();</code></span></span>
+  </div>
+
+  <!-- 型別 -->
+  <div class="subhd"><span class="bn">0-5</span><span lang="zh">回傳的是什麼型別(以及 <code>?</code> / <code>!</code> 怎麼用)</span><span lang="en">Return types (and how <code>?</code> / <code>!</code> work)</span></div>
+  <div class="note">
+    <span lang="zh"><b>三個 null 安全符號</b>(TypeScript 完全相同,軟體端秒懂):
+      <code>型別後的 ?</code> = 這值可能是 null;
+      <code>?.</code> = 是 null 就跳過給 null;
+      <code>!</code> = 我保證現在不是 null(前面已 return 擋掉,所以安全)。<br>
+      <code>final c = r.computed!</code> 拆一次箱子後,<code>c.settling</code>、<code>c.bpm</code> 都不用再加符號;
+      但 <code>c.hrv</code> 本身又可能 null,所以 <code>c.hrv?.sdnn</code> 要 <code>?.</code>。</span>
+    <span lang="en"><b>Three null-safety operators</b> (identical in TypeScript): a trailing <code>?</code> on a type = may be null;
+      <code>?.</code> = null-safe access; <code>!</code> = I guarantee non-null here (safe because we returned on null above).<br>
+      After <code>final c = r.computed!</code>, <code>c.settling</code> / <code>c.bpm</code> need no operator; but <code>c.hrv</code> can be null, so <code>c.hrv?.sdnn</code> needs <code>?.</code>.</span>
+  </div>
+  <table>
+    <thead><tr><th><span lang="zh">型別</span><span lang="en">Type</span></th>
+      <th><span lang="zh">種類</span><span lang="en">Kind</span></th>
+      <th><span lang="zh">怎麼用</span><span lang="en">Usage</span></th></tr></thead>
+    <tbody>
+      <tr><td><code>K2FeedResult</code></td><td>class</td>
+        <td><span lang="zh"><code>feedData</code> / <code>feedSamples</code> 的回傳。<b>不會是 null</b></span>
+          <span lang="en">returned by <code>feedData</code> / <code>feedSamples</code>. <b>Never null</b></span></td></tr>
+      <tr><td><code>K2Compute</code></td><td>class</td>
+        <td><span lang="zh">在 <code>result.computed</code> 裡,<b>是 nullable</b> → 一定要 <code>?.</code></span>
+          <span lang="en">lives in <code>result.computed</code> and <b>is nullable</b> → always use <code>?.</code></span></td></tr>
+      <tr><td><code>Max30102Config</code></td><td>class</td>
+        <td><span lang="zh"><code>core.config</code>,欄位可直接讀寫</span><span lang="en"><code>core.config</code>; fields are read/write</span></td></tr>
+      <tr><td><code>HrvStats</code><br><code>HrvRrPoint</code><br><code>ConfigIssue</code></td>
+        <td><b>Dart record</b></td>
+        <td><span lang="zh">用 <code>.欄位</code> 取值,<b>不能 new、沒有方法</b>。例:<code>c.hrv?.rmssd</code>、<code>p.startAbs</code></span>
+          <span lang="en">access with <code>.field</code>; <b>cannot be constructed, no methods</b>. e.g. <code>c.hrv?.rmssd</code>, <code>p.startAbs</code></span></td></tr>
+      <tr><td><code>ConfigSeverity</code></td><td>enum</td>
+        <td><code>.error</code> / <code>.warn</code> / <code>.info</code></td></tr>
+    </tbody>
+  </table>
+
+  <!-- 三個最容易誤解的 -->
+  <div class="subhd"><span class="bn">0-6</span><span lang="zh">三個最容易誤解的地方</span><span lang="en">Three things that are easy to get wrong</span></div>
+
+  <div class="note crit">
+    <span lang="zh"><b>① <code>computed == null</code> 不代表出錯,也不會自動退回舊值。</b><br>
+      它的意思只是「<b>這一輪還在累積,沒有新結果</b>」——
+      因為模組每收滿 <code>computeEvery</code>(預設 100 筆 ≈ 1 秒)才算一次,而你每 100 ms 就餵一次。<br>
+      所以十次裡有九次是 null,這完全正常。收到 null 時<b>畫面維持原樣</b>,不要清空、不要顯示 0。<br>
+      要「現有數值」請讀 <code>core.latest</code> —— 它保留著上一次的結果,不會因為這輪沒算而變 null。</span>
+    <span lang="en"><b>① <code>computed == null</code> is not an error, and it does not fall back to the previous value.</b><br>
+      It simply means "<b>still accumulating; no new result this round</b>" — the module computes once every
+      <code>computeEvery</code> samples (default 100 ≈ 1 s) while you feed it every 100 ms.<br>
+      Nine calls out of ten return null, which is normal. On null, <b>leave the display as it is</b> — do not clear it, do not show 0.<br>
+      For "the current value", read <code>core.latest</code>: it retains the previous result and does not become null.</span>
+  </div>
+
+  <div class="note">
+    <span lang="zh"><b>② <code>computed</code> 不是 <code>compute</code>,而且不在模組上。</b><br>
+      &nbsp;&nbsp;<span style="color:var(--crit)">✗</span> <code>core.compute.fingerPresent</code> —— 沒有這個東西<br>
+      &nbsp;&nbsp;<span style="color:var(--ctrl)">✓</span> <code>r.computed?.fingerPresent</code> —— 從 <code>feedData</code> 的回傳拿(這一輪的)<br>
+      &nbsp;&nbsp;<span style="color:var(--ctrl)">✓</span> <code>core.latest?.fingerPresent</code> —— 從模組拿(上一次的)</span>
+    <span lang="en"><b>② It is <code>computed</code>, not <code>compute</code>, and it is not a member of the module.</b><br>
+      &nbsp;&nbsp;<span style="color:var(--crit)">✗</span> <code>core.compute.fingerPresent</code> — no such member<br>
+      &nbsp;&nbsp;<span style="color:var(--ctrl)">✓</span> <code>r.computed?.fingerPresent</code> — from the <code>feedData</code> result (this round)<br>
+      &nbsp;&nbsp;<span style="color:var(--ctrl)">✓</span> <code>core.latest?.fingerPresent</code> — from the module (the previous result)</span>
+  </div>
+
+  <div class="note">
+    <span lang="zh"><b>③ 實例 vs 靜態不要混。</b><br>
+      &nbsp;&nbsp;<span style="color:var(--crit)">✗</span> <code>Max30102K2.feedData(packet)</code> —— <code>feedData</code> 是<b>實例</b>方法<br>
+      &nbsp;&nbsp;<span style="color:var(--ctrl)">✓</span> <code>core.feedData(packet)</code><br>
+      &nbsp;&nbsp;<span style="color:var(--ctrl)">✓</span> <code>Max30102Protocol.buildQueryFifo()</code> —— 這個才是<b>靜態</b></span>
+    <span lang="en"><b>③ Do not mix instance and static.</b><br>
+      &nbsp;&nbsp;<span style="color:var(--crit)">✗</span> <code>Max30102K2.feedData(packet)</code> — <code>feedData</code> is an <b>instance</b> method<br>
+      &nbsp;&nbsp;<span style="color:var(--ctrl)">✓</span> <code>core.feedData(packet)</code><br>
+      &nbsp;&nbsp;<span style="color:var(--ctrl)">✓</span> <code>Max30102Protocol.buildQueryFifo()</code> — this one <b>is</b> static</span>
+  </div>
+
+  <div class="note">
+    <span lang="zh"><b>接下來看什麼:</b>
+      欄位細節 → <b>A</b> API 樹狀圖 &nbsp;|&nbsp;
+      呼叫順序與分支 → <b>B</b> 呼叫鏈 &nbsp;|&nbsp;
+      內部怎麼運作 → <b>C</b> 架構與時序 &nbsp;|&nbsp;
+      自己實作串口 → <b>D</b> MCU 通訊協定</span>
+    <span lang="en"><b>Where to go next:</b>
+      field details → <b>A</b> API Tree &nbsp;|&nbsp;
+      ordering and branching → <b>B</b> Call Sequence &nbsp;|&nbsp;
+      how it works inside → <b>C</b> Architecture &nbsp;|&nbsp;
+      writing your own serial layer → <b>D</b> MCU Protocol</span>
+  </div>
+</section>
+</div>
+
+<!-- ═══════════════════════ A. API 樹 ═══════════════════════ -->
+<div class="view" id="v-api">
+<section>
+  <h2><span class="n">A</span><span lang="zh">你能呼叫什麼 · 會拿回什麼</span><span lang="en">What you can call &amp; what you get back</span></h2>
+  <p class="lead">
+    <span lang="zh">依「你想做什麼」分成五叢。每個呼叫都標明回傳型別,回傳物件往下展開到欄位層級。</span>
+    <span lang="en">Grouped by intent. Every call shows its return type, expanded down to field level.</span>
+  </p>
+
+  <!-- ① 送資料 -->
+  <div class="grp">
+    <div class="grp-hd">
+      <span class="ic">1</span>
+      <span class="t"><span lang="zh">送資料進去</span><span lang="en">Feed data in</span></span>
+      <span class="d"><span lang="zh">主要路徑 — 每收到 MCU 回應就叫一次</span><span lang="en">the main path — call on every MCU response</span></span>
+    </div>
+    <div class="grp-body">
+      <div class="tree"><ul>
+        <li><span class="node">
+          <span class="sig">feedData(List&lt;int&gt; packet)</span><span class="ret">K2FeedResult</span>
+          <span class="desc"><span lang="zh">MCU 回應<b>原封</b>丟進來 — 驗 checksum、拆 RED/IR 都由模組做</span><span lang="en">Pass the MCU response <b>verbatim</b> — checksum and RED/IR unpacking are handled inside</span></span>
+        </span></li>
+        <li><span class="node">
+          <span class="sig">feedSamples(List&lt;int&gt; red, List&lt;int&gt; ir)</span><span class="ret">K2FeedResult</span>
+          <span class="desc"><span lang="zh">已自行解析好樣本時用;離線重放也走這條</span><span lang="en">Use when you parse the protocol yourself; also the offline-replay entry</span></span>
+        </span>
+          <ul>
+            <li><span class="node field"><span class="sig">.firstAbs</span><span class="ret">int</span>
+              <span class="desc"><span lang="zh">這批第一筆的絕對位置。第 i 筆 = firstAbs + i</span><span lang="en">absolute position of the first sample; sample i = firstAbs + i</span></span></span></li>
+            <li><span class="node field"><span class="sig">.newIr / .newRed</span><span class="ret">List&lt;int&gt;</span>
+              <span class="desc"><span lang="zh">這批原始樣本 — 要畫波形接這個</span><span lang="en">raw samples for this batch — use these for the waveform</span></span></span></li>
+            <li><span class="node field"><span class="sig">.newIrTrim / .newRedTrim</span><span class="ret">List&lt;double&gt;</span>
+              <span class="desc"><span lang="zh">同一批的去突波版本 — 要畫乾淨線用這個</span><span lang="en">de-spiked version of the same batch — for a clean trace</span></span></span></li>
+            <li><span class="node field warnrow"><span class="sig">.didReset</span><span class="ret">bool</span>
+              <span class="desc"><span lang="zh">模組已自行清空(絕對索引到頂)→ 你也要丟掉自己存的波形與 base</span><span lang="en">the module reset itself (index ceiling) → drop your own buffer and base too</span></span></span></li>
+            <li><span class="node field"><span class="sig">.computed</span><span class="ret">K2Compute?</span>
+              <span class="tag null">null = <span lang="zh">還在累積</span><span lang="en">accumulating</span></span>
+              <span class="desc"><span lang="zh">湊滿 computeEvery(預設 100 筆 ≈ 1 秒)才非 null</span><span lang="en">non-null only once computeEvery samples have accumulated (default 100 ≈ 1 s)</span></span></span>
+              <ul>
+                <li><span class="node field"><span class="sig">.fingerPresent</span><span class="ret">bool</span></span></li>
+                <li><span class="node field"><span class="sig">.settling</span><span class="ret">bool</span>
+                  <span class="desc"><span lang="zh">手指已上但 baseline 未成形 → 所有數值為 null,請顯示「沉澱中」而非 0</span><span lang="en">finger on but baseline not formed → all values null; show "settling", not 0</span></span></span></li>
+                <li><span class="node field"><span class="sig">.sqiOk</span><span class="ret">bool</span>
+                  <span class="desc"><span lang="zh">這一輪品質過關(cv + spike)</span><span lang="en">this round passed the cv + spike quality gate</span></span></span></li>
+                <li><span class="node field"><span class="sig">.bpm / .spo2</span><span class="ret">double?</span>
+                  <span class="desc"><span lang="zh"><b>原始值,未平滑</b> — 平滑處理由軟體端負責</span><span lang="en"><b>raw, unsmoothed</b> — smoothing is handled on the application side</span></span></span></li>
+                <li><span class="node field"><span class="sig">.hrv</span><span class="ret">HrvStats?</span>
+                  <span class="tag null">&lt; 9 <span lang="zh">拍為 null</span><span lang="en">beats → null</span></span></span>
+                  <ul><li><span class="node field"><span class="sig">sdnn · rmssd · sd1 · sd2 · pnn50 · meanRr · meanHr · hrvScore · beats · pairs · totalPairs</span>
+                    <span class="desc"><span lang="zh">pairs 與 totalPairs 的差 = 跨「洞」被跳過的配對數</span><span lang="en">totalPairs − pairs = pairs skipped because they span a gap</span></span></span></li></ul>
+                </li>
+                <li><span class="node field"><span class="sig">.rr</span><span class="ret">List&lt;double&gt;</span>
+                  <span class="desc"><span lang="zh">只有數值,沒有時間位置</span><span lang="en">values only, no timing</span></span></span></li>
+                <li><span class="node field"><span class="sig">.rrPoints</span><span class="ret">List&lt;(rr, startAbs, endAbs)&gt;</span>
+                  <span class="tag key"><span lang="zh">關鍵</span><span lang="en">key</span></span>
+                  <span class="desc"><span lang="zh">帶時間位置的 RR。切時間窗、判連續性都要用它 — <b>不要用 RR 累加去推時間</b></span><span lang="en">RR with timing. Use it for windowing and adjacency — <b>never infer time by summing RR</b></span></span></span></li>
+                <li><span class="node field"><span class="sig">.troughAbs</span><span class="ret">List&lt;int&gt;</span>
+                  <span class="desc"><span lang="zh">真正算進 HRV 的谷位置。要在波形上標點直接用它,<b>不要自己再偵測一次</b></span><span lang="en">the troughs actually used for HRV. Mark these on the waveform; <b>do not re-detect</b></span></span></span></li>
+                <li><span class="node field"><span class="sig">.spikeMax</span><span class="ret">double</span>
+                  <span class="desc"><span lang="zh">振幅突波比,越大越可能在體動</span><span lang="en">amplitude spike ratio — higher means more likely motion</span></span></span></li>
+              </ul>
+            </li>
+          </ul>
+        </li>
+      </ul></div>
+      <div class="note crit">
+        <span lang="zh"><b>索引會有斷層。</b>模組在「沒手指 / 空轉期 / 沉澱期」會丟棄樣本,所以
+          <code>firstAbs</code> 不一定等於「上一批結尾 + 1」。接波形時請檢查,對不上就清空重接。</span>
+        <span lang="en"><b>Expect index gaps.</b> The module discards samples while there is no finger and during dead/settle time,
+          so <code>firstAbs</code> is not always "previous end + 1". Check it when appending; on a mismatch, clear and restart.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ② 取值 -->
+  <div class="grp">
+    <div class="grp-hd">
+      <span class="ic">2</span>
+      <span class="t"><span lang="zh">隨時取值</span><span lang="en">Read anytime</span></span>
+      <span class="d"><span lang="zh">不用等 feed 的回傳,任何時候都能讀</span><span lang="en">no need to wait for a feed result</span></span>
+    </div>
+    <div class="grp-body">
+      <div class="tree"><ul>
+        <li><span class="node"><span class="sig">latest</span><span class="ret">K2Compute?</span>
+          <span class="desc"><span lang="zh">最近一次完整結果(同上面的展開)</span><span lang="en">most recent full result (same shape as above)</span></span></span></li>
+        <li><span class="node"><span class="sig">bpm / spo2 / hrv</span><span class="ret">double? / HrvStats?</span>
+          <span class="desc"><span lang="zh">捷徑,等同 latest?.xxx</span><span lang="en">shortcuts, equivalent to latest?.xxx</span></span></span></li>
+        <li><span class="node"><span class="sig">rrLatest</span><span class="ret">List&lt;double&gt;</span>
+          <span class="desc"><span lang="zh">完整乾淨 NN 序列</span><span lang="en">the full clean NN series</span></span></span></li>
+        <li><span class="node"><span class="sig">beatCount</span><span class="ret">int</span>
+          <span class="desc"><span lang="zh">目前累積拍數(HRV 暖機需 ≥ 9)</span><span lang="en">beats accumulated (HRV needs ≥ 9)</span></span></span></li>
+        <li><span class="node"><span class="sig">totalSamples</span><span class="ret">int</span>
+          <span class="tag key"><span lang="zh">座標基準</span><span lang="en">origin</span></span>
+          <span class="desc"><span lang="zh">所有絕對位置的原點。<code>陣列索引 = abs − (totalSamples − 陣列長度)</code></span><span lang="en">origin for every absolute position. <code>arrayIndex = abs − (totalSamples − arrayLength)</code></span></span></span></li>
+      </ul></div>
+    </div>
+  </div>
+
+  <!-- ③ 控制 -->
+  <div class="grp">
+    <div class="grp-hd">
+      <span class="ic">3</span>
+      <span class="t"><span lang="zh">控制</span><span lang="en">Control</span></span>
+      <span class="d"><span lang="zh">只有兩個 — 差別很大,不要用錯</span><span lang="en">only two — and they differ a lot</span></span>
+    </div>
+    <div class="grp-body">
+      <div class="tree"><ul>
+        <li><span class="node"><span class="sig">reset()</span><span class="ret">void</span>
+          <span class="desc"><span lang="zh"><b>全清重來</b> — 緩衝、RR 池、計數、絕對索引全部歸零。開始一段新量測前用</span><span lang="en"><b>full reset</b> — buffer, RR pool, counters and the absolute index all return to zero</span></span></span></li>
+        <li><span class="node"><span class="sig">markDiscontinuity()</span><span class="ret">void</span>
+          <span class="desc"><span lang="zh"><b>只斷 RR 連續性,不清歷史</b> — 訊號中斷時用,避免下一筆 RR 跨過斷層</span><span lang="en"><b>breaks RR continuity only, keeps history</b> — use on a signal interruption so the next RR does not span the gap</span></span></span></li>
+      </ul></div>
+      <div class="note">
+        <span lang="zh"><b>手指離開由模組自行處理。</b>模組會偵測(連續 3 批低於門檻),自動清緩衝與 RR 池、斷連續性。</span>
+        <span lang="en"><b>Finger removal is handled by the module.</b> It detects the condition (3 consecutive batches below threshold) and clears its own state.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ④ 設定 -->
+  <div class="grp">
+    <div class="grp-hd">
+      <span class="ic">4</span>
+      <span class="t"><span lang="zh">設定</span><span lang="en">Settings</span></span>
+      <span class="d"><span lang="zh">不給就用出廠值;給了就用你的。運行中改即時生效</span><span lang="en">defaults unless you supply values; changes take effect immediately</span></span>
+    </div>
+    <div class="grp-body">
+      <div class="tree"><ul>
+        <li><span class="node"><span class="sig">Max30102K2({config})</span>
+          <span class="desc"><span lang="zh">建構時給一份;只覆寫想改的,其餘照出廠值</span><span lang="en">supply one at construction; override only what you need</span></span></span></li>
+        <li><span class="node"><span class="sig">core.config.&lt;field&gt;</span><span class="tag rw">read / write</span>
+          <span class="desc"><span lang="zh">運行中隨時讀寫</span><span lang="en">readable and writable at runtime</span></span></span>
+          <ul>
+            <li><span class="node field"><span class="sig">fingerThreshold · hrMin · hrMax · promRatio</span>
+              <span class="desc"><span lang="zh">偵測與濾波。<b>hrMin 同時決定 baseline 視窗寬與沉澱期長度</b></span><span lang="en">detection and filtering. <b>hrMin also sets the baseline window and settle length</b></span></span></span></li>
+            <li><span class="node field"><span class="sig">computeEvery · fingerDeadMs · dataHistoryMs · fingerOffBatches</span>
+              <span class="desc"><span lang="zh">時序與保留長度</span><span lang="en">timing and retention</span></span></span></li>
+            <li><span class="node field warnrow"><span class="sig">ledCurrentRed · ledCurrentIr = 0x24</span>
+              <span class="desc"><span lang="zh"><b>目前硬體使用的 LED 驅動電流</b>。是「紀錄」不是「開關」—— 模組不會自動套用,
+                要改晶片得送 <code>buildWriteReg(0x0C / 0x0D, value)</code>。
+                放在這裡是讓上層知道「現在跑在多大電流下」,因為校正綁在這個前提上</span>
+                <span lang="en"><b>The LED drive current currently in use.</b> A record, not a switch — the module never applies it;
+                changing the chip requires <code>buildWriteReg(0x0C / 0x0D, value)</code>.
+                It is here so the layer above knows the drive level the calibration assumes</span></span></span></li>
+            <li><span class="node field"><span class="sig">searchBackEnabled · cleanEnabled</span>
+              <span class="desc"><span lang="zh">過濾器開關</span><span lang="en">filter switches</span></span></span></li>
+            <li><span class="node field warnrow"><span class="sig">spo2SmoothFactor = 0.7 · hrSmoothFactor = 0.8</span>
+              <span class="desc"><span lang="zh"><b>模組不使用</b> — 這是先前實作採用的 EMA 建議值,附在這裡供參考:<br>
+                <code>顯示值ₙ = k × 顯示值ₙ₋₁ + (1 − k) × 原始值ₙ</code></span>
+                <span lang="en"><b>Unused by the module</b> — suggested EMA coefficients from an earlier implementation, provided for reference:<br>
+                <code>displayₙ = k × displayₙ₋₁ + (1 − k) × rawₙ</code></span></span></span></li>
+          </ul>
+        </li>
+        <li><span class="node"><span class="sig">Max30102SettingLimits.check(config)</span><span class="ret">List&lt;ConfigIssue&gt;</span>
+          <span class="desc"><span lang="zh"><b>不改值</b>,只回報問題 — 給你的設定畫面顯示用</span><span lang="en"><b>does not modify</b>, only reports — for your settings screen</span></span></span>
+          <ul><li><span class="node field"><span class="sig">field · severity(error/warn/info) · message · applied</span>
+            <span class="desc"><span lang="zh">message 講的是「後果」而不是「超出範圍」</span><span lang="en">message states the consequence, not merely "out of range"</span></span></span></li></ul>
+        </li>
+        <li><span class="node"><span class="sig">Max30102SettingLimits.enforce(config)</span><span class="ret">List&lt;ConfigIssue&gt;</span>
+          <span class="desc"><span lang="zh"><b>會改值</b>,夾回合法區間。模組每次 feed 都會自動叫,你不必記得</span><span lang="en"><b>modifies</b>, clamping into range. Called automatically on every feed — you need not call it</span></span></span></li>
+      </ul></div>
+    </div>
+  </div>
+
+  <!-- ⑤ 晶片命令 -->
+  <div class="grp">
+    <div class="grp-hd">
+      <span class="ic">5</span>
+      <span class="t"><span lang="zh">晶片命令</span><span lang="en">Chip commands</span></span>
+      <span class="d"><span lang="zh">只建封包 — 封包的<b>送出由軟體端負責</b>,模組不碰串口</span><span lang="en">packet builders only — <b>sending is handled by the application</b>; the module never touches the port</span></span>
+    </div>
+    <div class="grp-body">
+      <div class="tree"><ul>
+        <li><span class="node"><span class="sig">Max30102Protocol.buildQueryFifo()</span><span class="ret">Uint8List</span>
+          <span class="desc"><span lang="zh"><code>0x09 0x00</code> 跟 MCU 要它累積的原始 RED/IR,<b>取完即清空</b>。主機主動要,MCU 不會自己推</span><span lang="en"><code>0x09 0x00</code> ask the MCU for the RED/IR it has buffered, <b>cleared on read</b>. Pull model — the MCU never pushes</span></span></span></li>
+        <li><span class="node"><span class="sig">buildReInit()</span><span class="ret">Uint8List</span>
+          <span class="desc"><span lang="zh"><code>0x09 0x04</code> 通知 MCU 去把 MAX30102 初始化成可用狀態。<b>開始量測前必送</b>;拔插模組、送過 RESET 之後也要再送</span><span lang="en"><code>0x09 0x04</code> tell the MCU to bring the MAX30102 into a usable state. <b>Required before measuring</b>, and again after re-plugging or a RESET</span></span></span></li>
+        <li><span class="node warnrow"><span class="sig">buildReset()</span><span class="ret">Uint8List</span>
+          <span class="desc"><span lang="zh"><code>0x09 0x03</code> 軟體復位 → <b>晶片進入休眠,之後不可用</b>,必須再送 ReInit 才會活</span><span lang="en"><code>0x09 0x03</code> software reset → <b>the chip goes to sleep and is unusable</b> until ReInit is sent</span></span></span></li>
+        <li><span class="node"><span class="sig">buildReadReg(int reg)</span><span class="ret">Uint8List</span>
+          <span class="desc"><span lang="zh"><code>0x09 0x02</code> 讀一顆暫存器(datasheet 級)</span><span lang="en"><code>0x09 0x02</code> read one register (datasheet level)</span></span></span></li>
+        <li><span class="node"><span class="sig">buildWriteReg(int reg, int value)</span><span class="ret">Uint8List</span>
+          <span class="desc"><span lang="zh"><code>0x09 0x01</code> 寫一顆暫存器。LED 電流走這條(0x0C 紅 / 0x0D 紅外)</span><span lang="en"><code>0x09 0x01</code> write one register. LED current goes through this (0x0C red / 0x0D IR)</span></span></span></li>
+      </ul></div>
+
+      <div class="note crit">
+        <span lang="zh"><b>調 LED 電流比較接近「重新校正硬體」,不是「調一個參數」。</b><br>
+          <b>不受影響</b>(全是比值,分子分母同時縮放會抵銷):谷顯著度門檻、SQI 的 cv 與 spike、
+          以及<b>找谷 → RR → HRV 整條線</b> —— 它走的是去趨勢後的相對形狀,不看絕對位準。
+          換句話說 <b>心率與 HRV 對 LED 電流是穩健的</b>。<br>
+          <b>會受影響:</b><br>
+          &middot; <code>fingerThreshold</code> —— 直接與 IR DC 比,同單位。電流拉高 DC 跟著漲,門檻變得太好過;調低則可能永遠達不到。<b>必須跟著重調。</b><br>
+          &middot; <b>SpO2</b> —— 血氧多項式的係數是針對特定光學條件校出來的。改變<b>紅光/紅外的電流比例</b>會讓 R 系統性偏移,而公式照舊算 →
+            血氧穩定地偏掉幾個百分點,<b>看起來完全正常、沒有任何異常徵兆</b>。<br>
+          &middot; <b>ADC 飽和</b> —— IR 是 18-bit(上限 262143)。電流過大會削平波峰、破壞 AC 幅度,SpO2 直接失效(波形上看得出頂部被切平)。</span>
+        <span lang="en"><b>Changing LED current is closer to re-calibrating the hardware than tuning a parameter.</b><br>
+          <b>Unaffected</b> (all ratios — numerator and denominator scale together): the prominence threshold, SQI cv and spike, and the whole
+          <b>trough → RR → HRV</b> chain, which works on detrended <em>shape</em> rather than absolute level.
+          In short, <b>HR and HRV are robust to LED current</b>.<br>
+          <b>Affected:</b><br>
+          &middot; <code>fingerThreshold</code> — compared directly against IR DC, same units. More current raises DC and the threshold becomes too easy;
+            less current may make it unreachable. <b>Must be re-tuned.</b><br>
+          &middot; <b>SpO2</b> — the polynomial coefficients are calibrated for a specific optical condition. Changing the <b>red/IR current ratio</b>
+            shifts R systematically while the formula stays the same → SpO2 drifts by a few percent, <b>looking entirely normal with no visible symptom</b>.<br>
+          &middot; <b>ADC saturation</b> — IR is 18-bit (max 262143). Too much current clips the peaks and destroys the AC amplitude,
+            breaking SpO2 outright (visible as a flat-topped waveform).</span>
+      </div>
+      <div class="note crit">
+        <span lang="zh"><b>輪詢間隔不得超過 240 ms。</b>MCU 端一次最多交出 <b>24 組</b>樣本
+          (封包上限 151 = 7 + 24×6),100 Hz 下就是 240 ms 的量。超過這個間隔,較舊的樣本會被覆蓋掉。<br>
+          <b>掉樣本不會報錯</b> —— 波形看起來仍然連續(丟的是中間那段),但 RR 會偏長、心率偏低。
+          模組也偵測不到:它只看到「這批 10 筆」,不知道 MCU 那邊有幾筆被蓋掉了。
+          預設 100 ms 有 2.4 倍餘裕。</span>
+        <span lang="en"><b>Do not poll slower than 240 ms.</b> The MCU returns at most <b>24 samples</b> per response
+          (packet cap 151 = 7 + 24×6), which is 240 ms at 100 Hz. Poll any slower and older samples are overwritten.<br>
+          <b>Lost samples raise no error</b> — the waveform still looks continuous (the missing span is in the middle),
+          but RR drifts long and HR reads low. The module cannot detect it either: it only sees the 10 samples handed to it.
+          The 100 ms default leaves 2.4× headroom.</span>
+      </div>
+
+      <table>
+        <thead><tr>
+          <th><span lang="zh">暫存器</span><span lang="en">Register</span></th><th>Addr</th>
+          <th><span lang="zh">ReInit 後</span><span lang="en">After ReInit</span></th>
+          <th><span lang="zh">用途</span><span lang="en">Purpose</span></th></tr></thead>
+        <tbody>
+          <tr><td>FIFO_CONFIG</td><td><code>0x08</code></td><td><code>0x1F</code></td><td><span lang="zh">FIFO 設定</span><span lang="en">FIFO settings</span></td></tr>
+          <tr><td>MODE_CONFIG</td><td><code>0x09</code></td><td><code>0x03</code></td><td><span lang="zh">工作模式(SpO2)</span><span lang="en">mode (SpO2)</span></td></tr>
+          <tr><td>SPO2_CONFIG</td><td><code>0x0A</code></td><td><code>0x27</code></td><td><span lang="zh">取樣率 / 解析度</span><span lang="en">sample rate / resolution</span></td></tr>
+          <tr><td>LED1_PA</td><td><code>0x0C</code></td><td><code>0x24</code></td><td><span lang="zh">紅光電流</span><span lang="en">red LED current</span></td></tr>
+          <tr><td>LED2_PA</td><td><code>0x0D</code></td><td><code>0x24</code></td><td><span lang="zh">紅外電流</span><span lang="en">IR LED current</span></td></tr>
+          <tr><td>PART_ID</td><td><code>0xFF</code></td><td><code>0x15</code></td>
+            <td><span lang="zh">驗晶片在線 — 這欄是<b>晶片硬編碼</b>,與韌體無關</span><span lang="en">presence check — this one is <b>hard-wired in the chip</b></span></td></tr>
+        </tbody>
+      </table>
+      <div class="note">
+        <span lang="zh"><b>「ReInit 後」欄不是晶片的出廠值。</b>MAX30102 上電(POR)時這些暫存器幾乎全是 <code>0x00</code> ——
+          模式=關機、LED 電流=0,<b>不會吐任何資料</b>。表中的值是<b>韌體在 ReInit 時寫進去的工作組態</b>。<br>
+          這也是為什麼送過 <code>RESET</code> 之後一定要再送 <code>ReInit</code>:RESET 把晶片打回 POR 全 0,
+          沒有 ReInit 就沒人把這組組態寫回去,晶片會一直安靜著。</span>
+        <span lang="en"><b>"After ReInit" is not the chip's factory state.</b> At power-on (POR) these registers are essentially all
+          <code>0x00</code> — mode off, LED current zero, <b>no data at all</b>. The values above are the working configuration
+          <b>written by the firmware during ReInit</b>.<br>
+          That is why a <code>RESET</code> must always be followed by <code>ReInit</code>: RESET returns the chip to POR zeros,
+          and without ReInit nothing writes this configuration back — the chip simply stays silent.</span>
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- ═══════════════════════ B. 呼叫鏈 ═══════════════════════ -->
+<div class="view" id="v-chain">
+<section>
+  <h2><span class="n">B</span><span lang="zh">三條呼叫鏈</span><span lang="en">Three call sequences</span></h2>
+  <p class="lead">
+    <span lang="zh">泳道一律是:軟體端 / 模組 / MCU。<b>B1 量測</b>是主線,<b>B2 晶片設定</b>與 <b>B3 核心參數</b>是兩條獨立的側線。</span>
+    <span lang="en">Lanes are always: application / module / MCU. <b>B1 measurement</b> is the main path;
+      <b>B2 chip settings</b> and <b>B3 module parameters</b> are two independent side paths.</span>
+  </p>
+
+  <div class="subhd"><span class="bn">B1</span><span lang="zh">量測 —— 啟動與資料迴圈</span><span lang="en">Measurement — startup and the data loop</span></div>
+  <p class="lead">
+    <span lang="zh">從「想要資料」到「畫面上有數字」。注意 ④~⑩ 是<b>迴圈</b>,不是一次性流程。</span>
+    <span lang="en">From "I want data" to "numbers on screen". Note that ④–⑩ form a <b>loop</b>, not a one-shot flow.</span>
+  </p>
+
+  <div class="scroll"><div class="seq">
+    <div class="lanes">
+      <div class="lane app"><span lang="zh">你的軟體</span><span lang="en">Your app</span><small>UI + serial</small></div>
+      <div class="lane mod">Max30102K2<small><span lang="zh">交付的模組</span><span lang="en">the module</span></small></div>
+      <div class="lane mcu">MCU<small><span lang="zh">+ MAX30102 晶片</span><span lang="en">+ MAX30102 chip</span></small></div>
+    </div>
+
+    <div class="flow">
+      <div class="once">
+        <div class="once-lb"><span lang="zh">只做一次 · 量測開始前</span><span lang="en">ONCE &middot; before measuring</span></div>
+        <div class="step"><div class="msg r c12"><span class="lb">① buildReInit()</span></div></div>
+        <div class="step"><div class="msg l c12 dashed"><span class="lb">Uint8List</span></div></div>
+        <div class="step"><div class="msg r c13"><span class="lb">
+          <span lang="zh">② 由軟體端送出串口 &middot; MCU 收到後去初始化晶片</span>
+          <span lang="en">② the application writes it to the port &middot; the MCU then initialises the chip</span></span></div></div>
+        <div class="step"><div class="msg l c13 dashed"><span class="lb">
+          <span lang="zh">③ 回應 &nbsp;<code>40 71 30 09 04 <b>01</b> 00 00 11</code> 成功<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<code>40 71 30 09 04 <b>00</b> 00 00 12</code> 失敗</span>
+          <span lang="en">③ reply &nbsp;<code>40 71 30 09 04 <b>01</b> 00 00 11</code> ok<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<code>40 71 30 09 04 <b>00</b> 00 00 12</code> failed</span></span></div></div>
+      </div>
+
+      <div class="loop">
+        <div class="loop-lb">
+          <span lang="zh">↻ 量測期間持續重複 · 每 100 ms 一輪</span>
+          <span lang="en">&#8635; REPEAT WHILE MEASURING &middot; one round every 100 ms</span>
+        </div>
+        <div class="step"><div class="msg r c12"><span class="lb">④ buildQueryFifo()</span></div></div>
+        <div class="step"><div class="msg r c13"><span class="lb">
+          <span lang="zh">⑤ 送出 —— <b>這就是那個 100 ms</b>:持續跟 MCU 要資料的節奏</span>
+          <span lang="en">⑤ send it — <b>this is the 100 ms</b>: the rate at which you keep asking the MCU for data</span></span></div></div>
+        <div class="step"><div class="msg l c13 dashed"><span class="lb">
+          <span lang="zh">⑥ 回應封包(約 10 組 RED/IR)</span><span lang="en">⑥ response packet (~10 RED/IR pairs)</span></span></div></div>
+
+        <div class="step"><div class="msg r c12"><span class="lb">⑦ feedData(packet)</span></div></div>
+        <div class="step"><div class="c2 selfbox">
+          <b><span lang="zh">⑧ 模組內部處理</span><span lang="en">⑧ handled inside the module</span></b>
+          <span lang="zh">
+            <b>協定</b>&nbsp;驗 checksum → 拆 RED/IR<br>
+            <b>閘門</b>&nbsp;手指偵測 → 空轉/沉澱 → 進滾動緩衝 → 湊滿 computeEvery?<br>
+            <b>演算</b>&nbsp;找谷 → 過濾器管線 → NN 序列 → HRV<br>
+            <span style="color:var(--ink-3)">(另有一道與訊號無關的前置:<b>設定監督</b> —— 每次進料先把不合法的參數夾回範圍,
+            純防呆,不參與計算)</span></span>
+          <span lang="en">
+            <b>Protocol</b>&nbsp;verify checksum → unpack RED/IR<br>
+            <b>Gating</b>&nbsp;finger detection → dead/settle → rolling buffer → enough samples?<br>
+            <b>Algorithm</b>&nbsp;find troughs → filter pipeline → NN series → HRV<br>
+            <span style="color:var(--ink-3)">(plus one preliminary step unrelated to the signal: the <b>setting guard</b> clamps
+            out-of-range parameters on every feed — purely defensive, not part of the computation)</span></span>
+        </div></div>
+        <div class="step"><div class="msg l c12 dashed"><span class="lb">⑨ K2FeedResult</span></div></div>
+
+        <div class="step"><div class="c12 branch">
+          <b><span lang="zh">⑩ 軟體端依回傳值分支</span><span lang="en">⑩ the application branches on the result</span></b>
+          <span lang="zh">
+            &middot; <code>newIr</code> 非空 → 檢查 <code>firstAbs</code> 是否接得上,接進波形緩衝<br>
+            &middot; <code>computed == null</code> → <b>只是還在累積</b>,不要清畫面、不要顯示 0<br>
+            &middot; <code>computed != null</code> → 更新數值;<code>settling</code> 為 true 時顯示「沉澱中」<br>
+            &middot; <code>didReset</code> 為 true → 丟掉軟體端自存的波形與 base
+          </span>
+          <span lang="en">
+            &middot; <code>newIr</code> non-empty → check <code>firstAbs</code> continuity, then append to the waveform buffer<br>
+            &middot; <code>computed == null</code> → <b>still accumulating</b>; do not clear the view or show 0<br>
+            &middot; <code>computed != null</code> → update values; if <code>settling</code>, show "settling"<br>
+            &middot; <code>didReset</code> true → drop the application-side buffer and base
+          </span>
+        </div></div>
+      </div>
+    </div>
+  </div></div>
+
+  <div class="note">
+    <span lang="zh"><b>迴圈裡的兩個節奏不一樣。</b>④~⑥ 每 <b>100 ms</b> 跑一次,每次都會拿到 <code>newIr</code>(約 10 組);
+      但 ⑨ 的 <code>computed</code> 大約<b>每秒</b>才非 null 一次。所以波形以 10 Hz 更新、數值以 1 Hz 更新,這是正常的。<br>
+      <b>間隔上限 240 ms</b> —— MCU 一次最多交出 24 組,再慢就會靜默掉樣本(詳見 A 的第 5 叢)。</span>
+    <span lang="en"><b>Two rates inside the loop.</b> Steps ④–⑥ run every <b>100 ms</b> and always return <code>newIr</code> (~10 pairs),
+      but <code>computed</code> in step ⑨ is non-null only about <b>once per second</b>.
+      Waveform at 10 Hz, values at 1 Hz — that is expected.<br>
+      <b>Ceiling: 240 ms</b> — the MCU returns at most 24 samples per response; poll slower and samples are silently lost (see A &sect;5).</span>
+  </div>
+
+  <div class="note">
+    <span lang="zh"><b>要在波形上標點。</b>用 <code>computed.troughAbs</code>,換算成軟體端陣列的索引:<br>
+      <code>index = abs − waveBase</code>(<code>waveBase</code> 由 <code>firstAbs</code> 維護,裁掉幾筆就往前推幾筆)<br>
+      <b>不要自行重新偵測谷</b> —— 那會是另一批結果,與數值對不起來。</span>
+    <span lang="en"><b>Marking beats on the waveform.</b> Use <code>computed.troughAbs</code> and convert to your array index:<br>
+      <code>index = abs − waveBase</code> (maintain <code>waveBase</code> from <code>firstAbs</code>; advance it by however many you trim)<br>
+      <b>Do not re-detect troughs</b> — that produces a different set that disagrees with the numbers.</span>
+  </div>
+
+  <div class="note">
+    <span lang="zh"><b>頻率不一樣,別搞混。</b>你每 100 ms 送一次 QUERY、每次都會拿到 <code>newIr</code>(約 10 筆);
+      但 <code>computed</code> 大約<b>每秒</b>才非 null 一次。所以波形以 10 Hz 更新、數值以 1 Hz 更新,這是正常的。<br>
+      <b>間隔上限 240 ms</b> —— MCU 一次最多交出 24 組,再慢就會靜默掉樣本(詳見 A 的第 5 叢)。</span>
+    <span lang="en"><b>Two different rates.</b> You poll every 100 ms and get <code>newIr</code> (~10 samples) each time,
+      but <code>computed</code> is non-null only about <b>once per second</b>. Waveform at 10 Hz, values at 1 Hz — that is expected.<br>
+      <b>Ceiling: 240 ms</b> — the MCU returns at most 24 samples per response; poll slower and samples are silently lost (see A &sect;5).</span>
+  </div>
+
+  <!-- ── B2 晶片設定 ── -->
+  <div class="subhd"><span class="bn">B2</span><span lang="zh">晶片設定 —— 簡易命令與 REG 級讀寫</span><span lang="en">Chip settings — simple commands and register access</span></div>
+  <p class="lead">
+    <span lang="zh">與 B1 各走各的:這幾條命令<b>不經過模組</b>,模組也不會回覆它們。</span>
+    <span lang="en">Independent of B1: these commands <b>do not go through the module</b>, and the module does not answer them.</span>
+  </p>
+
+  <div class="scroll"><div class="seq">
+    <div class="lanes">
+      <div class="lane app"><span lang="zh">軟體端</span><span lang="en">Application</span><small>UI + serial</small></div>
+      <div class="lane mod">Max30102Protocol<small><span lang="zh">只建封包</span><span lang="en">packet builder only</span></small></div>
+      <div class="lane mcu">MCU<small><span lang="zh">+ MAX30102 晶片</span><span lang="en">+ MAX30102 chip</span></small></div>
+    </div>
+    <div class="flow">
+      <div class="step"><div class="msg r c12"><span class="lb">
+        <span lang="zh">① buildWriteReg(0x0C, 0x30)<br>或 buildReadReg / buildReset / buildReInit</span>
+        <span lang="en">① buildWriteReg(0x0C, 0x30)<br>or buildReadReg / buildReset / buildReInit</span></span></div></div>
+      <div class="step"><div class="msg l c12 dashed"><span class="lb">
+        <span lang="zh">Uint8List(9 bytes)</span><span lang="en">Uint8List (9 bytes)</span></span></div></div>
+      <div class="step"><div class="msg r c13"><span class="lb">
+        <span lang="zh">② 由軟體端送出串口</span><span lang="en">② the application writes it to the port</span></span></div></div>
+      <div class="step"><div class="msg l c13 dashed"><span class="lb">
+        <span lang="zh">③ 回應(固定 9 bytes)</span><span lang="en">③ reply (fixed 9 bytes)</span></span></div></div>
+
+      <div class="step"><div class="c13 branch">
+        <b><span lang="zh">④ 軟體端依 <code>packet[4]</code>(sub-command)分流</span>
+          <span lang="en">④ the application dispatches on <code>packet[4]</code> (sub-command)</span></b>
+        <span lang="zh">
+          &middot; <code>0x00</code> QUERY_FIFO → <b>這種才丟給 <code>core.feedData()</code></b><br>
+          &middot; <code>0x01</code> WRITE_REG &nbsp;/&nbsp; <code>0x02</code> READ_REG &nbsp;/&nbsp;
+            <code>0x03</code> RESET &nbsp;/&nbsp; <code>0x04</code> ReInit → <b>模組不處理,軟體端自行解讀</b>
+        </span>
+        <span lang="en">
+          &middot; <code>0x00</code> QUERY_FIFO → <b>only this one goes to <code>core.feedData()</code></b><br>
+          &middot; <code>0x01</code> WRITE_REG &nbsp;/&nbsp; <code>0x02</code> READ_REG &nbsp;/&nbsp;
+            <code>0x03</code> RESET &nbsp;/&nbsp; <code>0x04</code> ReInit → <b>not handled by the module; parse them yourself</b>
+        </span>
+      </div></div>
+    </div>
+  </div></div>
+
+  <table>
+    <thead><tr>
+      <th><span lang="zh">命令</span><span lang="en">Command</span></th>
+      <th><span lang="zh">實際位元組(含 checksum)</span><span lang="en">Actual bytes (checksum included)</span></th>
+      <th><span lang="zh">怎麼讀</span><span lang="en">How to read it</span></th></tr></thead>
+    <tbody>
+      <tr><td>QUERY_FIFO<br><span style="color:var(--ink-3);font-size:11px">TX</span></td>
+        <td><code>40 71 30 09 00 00 00 00 16</code></td>
+        <td><span lang="zh">固定 9 bytes</span><span lang="en">fixed 9 bytes</span></td></tr>
+      <tr><td>QUERY_FIFO<br><span style="color:var(--ink-3);font-size:11px">RX</span></td>
+        <td><code>40 71 30 09 00 <b>[N&times;6]</b> [<i>N 組樣本</i>] [cs]</code><br>
+          <span style="color:var(--ink-3);font-size:11px"><span lang="zh">例:2 組樣本(RED=100000, IR=90000)</span><span lang="en">e.g. 2 samples (RED=100000, IR=90000)</span></span><br>
+          <code>40 71 30 09 00 <b>0C</b> A0 86 01 90 5F 01 A0 86 01 90 5F 01 DC</code></td>
+        <td><span lang="zh"><code>packet[5]</code> = N&times;6,之後每 6 bytes 一組:<br>
+          RED 3 bytes + IR 3 bytes,各為 <b>18-bit little-endian</b>(高位遮罩 <code>&amp; 0x3FFFF</code>)<br>
+          <b>這種才丟給 <code>core.feedData()</code></b></span>
+          <span lang="en"><code>packet[5]</code> = N&times;6, then 6 bytes per sample:<br>
+          RED 3 bytes + IR 3 bytes, each <b>18-bit little-endian</b> (mask <code>&amp; 0x3FFFF</code>)<br>
+          <b>only this one goes to <code>core.feedData()</code></b></span></td></tr>
+
+      <tr><td>READ_REG<br><span style="color:var(--ink-3);font-size:11px">TX</span></td>
+        <td><code>40 71 30 09 02 [reg] 00 00 [cs]</code><br>
+          <span style="color:var(--ink-3);font-size:11px"><span lang="zh">例:讀 PART_ID(0xFF)</span><span lang="en">e.g. read PART_ID (0xFF)</span></span><br>
+          <code>40 71 30 09 02 FF 00 00 15</code></td>
+        <td>—</td></tr>
+      <tr><td>READ_REG<br><span style="color:var(--ink-3);font-size:11px">RX</span></td>
+        <td><code>40 71 30 09 02 [reg] <b>[值]</b> 00 [cs]</code><br>
+          <span style="color:var(--ink-3);font-size:11px"><span lang="zh">例:PART_ID 讀回 0x15(晶片在線)</span><span lang="en">e.g. PART_ID reads back 0x15 (chip present)</span></span><br>
+          <code>40 71 30 09 02 FF <b>15</b> 00 00</code></td>
+        <td><span lang="zh"><code>packet[6]</code> = 讀回的暫存器值<br>
+          <b>模組不會吐這個值</b>,必須軟體端自己取</span>
+          <span lang="en"><code>packet[6]</code> = the register value<br>
+          <b>the module never surfaces it</b> — read it yourself</span></td></tr>
+
+      <tr><td>WRITE_REG<br><span style="color:var(--ink-3);font-size:11px">TX</span></td>
+        <td><code>40 71 30 09 01 [reg] [value] 00 [cs]</code><br>
+          <span style="color:var(--ink-3);font-size:11px"><span lang="zh">例:LED1_PA(0x0C)寫 0x24</span><span lang="en">e.g. write 0x24 to LED1_PA (0x0C)</span></span><br>
+          <code>40 71 30 09 01 0C 24 00 E5</code></td>
+        <td><span lang="zh">回應為固定 9 bytes 確認,<b>內容格式未在協定模組內定義</b> —— 請對韌體確認</span>
+          <span lang="en">reply is a fixed 9-byte ack; <b>its payload is not defined in the protocol module</b> — confirm with the firmware</span></td></tr>
+
+      <tr><td>RESET<br><span style="color:var(--ink-3);font-size:11px">TX</span></td>
+        <td><code>40 71 30 09 03 00 00 00 13</code></td>
+        <td><span lang="zh">送完晶片進入休眠,<b>必須再送 ReInit</b></span>
+          <span lang="en">the chip sleeps afterwards — <b>ReInit is mandatory</b></span></td></tr>
+
+      <tr><td>ReInit<br><span style="color:var(--ink-3);font-size:11px">TX</span></td>
+        <td><code>40 71 30 09 04 00 00 00 12</code></td>
+        <td>—</td></tr>
+      <tr><td>ReInit<br><span style="color:var(--ink-3);font-size:11px">RX</span></td>
+        <td><code>40 71 30 09 04 <b>01</b> 00 00 11</code><span lang="zh"> 成功</span><span lang="en"> ok</span><br>
+          <code>40 71 30 09 04 <b>00</b> 00 00 12</code><span lang="zh"> 失敗</span><span lang="en"> failed</span></td>
+        <td><span lang="zh"><code>packet[5]</code> = <b>1 成功 / 0 失敗</b>。初始化會驗 PART_ID,失敗代表晶片沒接好<br>
+          ⚠ <b>失敗的回應與 TX 完全相同</b> —— 若串口有回音(echo)要小心分辨</span>
+          <span lang="en"><code>packet[5]</code> = <b>1 ok / 0 failed</b>. Init verifies PART_ID; a failure means the chip is not responding<br>
+          ⚠ <b>the failure reply is byte-identical to the request</b> — watch out if the port echoes</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <span lang="zh"><b>Checksum 算法。</b>表頭前兩 byte 固定 <code>40 71</code>、第 3 byte 是站號(<code>30</code>/<code>31</code>)、命令固定 <code>09</code>,最後一個 byte 是 CS:<br>
+      <code>CS = (0x100 − (前面所有 byte 相加 &amp; 0xFF)) &amp; 0xFF</code><br>
+      驗證時更簡單:<b>整包(含 CS)相加 <code>&amp; 0xFF</code> 應為 <code>0</code></b>。上表每一組位元組都已依此算出(站號詳見 D 頁)。</span>
+    <span lang="en"><b>Checksum.</b> First two header bytes are <code>40 71</code>, the third is the station (<code>30</code>/<code>31</code>), command is <code>09</code>, and the last byte is the CS:<br>
+      <code>CS = (0x100 − (sum of all preceding bytes &amp; 0xFF)) &amp; 0xFF</code><br>
+      Verification is simpler: <b>the whole packet including CS must sum to <code>0</code> under <code>&amp; 0xFF</code></b>.
+      Every byte string above was computed this way.</span>
+  </div>
+
+  <div class="note">
+    <span lang="zh"><b>丟錯地方不會壞,但值會拿不到。</b>非 FIFO 的回應就算丟進 <code>feedData()</code> 也只會回
+      <code>K2FeedResult.empty</code>(拆不出樣本)—— 不會出錯,但 <b>READ_REG 讀回的值就永遠拿不到了</b>,
+      因為模組不吐它。要讀暫存器,一定要在軟體端自己解 <code>packet[6]</code>。</span>
+    <span lang="en"><b>Misrouting is harmless but loses the value.</b> A non-FIFO reply passed to <code>feedData()</code> simply returns
+      <code>K2FeedResult.empty</code> — no error, but <b>the READ_REG value is gone</b>, because the module never surfaces it.
+      To read a register you must parse <code>packet[6]</code> on the application side.</span>
+  </div>
+
+  <div class="note crit">
+    <span lang="zh"><b>RESET 之後晶片是睡著的。</b><code>buildReset()</code> 會讓晶片進入 POR 休眠,不再吐資料。
+      必須再送一次 <code>buildReInit()</code> 才會恢復 —— 否則看起來會像模組壞掉。<br>
+      另外 ReInit 會把所有暫存器寫回工作組態(含 LED 電流回到 <code>0x24</code>),
+      <b>先前用 WRITE_REG 做的自訂會被覆蓋</b>,需要的話要重送一次。</span>
+    <span lang="en"><b>After RESET the chip is asleep.</b> <code>buildReset()</code> puts it into POR sleep and it stops producing data.
+      Send <code>buildReInit()</code> again to recover — otherwise it looks like a hardware failure.<br>
+      Note also that ReInit rewrites every register to the working configuration (LED current back to <code>0x24</code>), so
+      <b>any customisation made with WRITE_REG is overwritten</b> and must be re-sent if still wanted.</span>
+  </div>
+
+  <!-- ── B3 核心參數 ── -->
+  <div class="subhd"><span class="bn">B3</span><span lang="zh">模組參數 —— 改設定的呼叫鏈</span><span lang="en">Module parameters — changing settings</span></div>
+  <p class="lead">
+    <span lang="zh">這條完全不碰串口。要先知道一件事:<b>寫入設定不會有任何回饋</b> ——
+      它就是一個欄位賦值,不回傳、也不當場檢查。想知道「設得對不對」必須<b>另外問</b>。</span>
+    <span lang="en">This path never touches the serial port. One thing to know first: <b>writing a setting gives no feedback</b> —
+      it is a plain field assignment that returns nothing and validates nothing. To learn whether a value is sound, you must <b>ask separately</b>.</span>
+  </p>
+
+  <div class="scroll"><div class="seq">
+    <div class="lanes">
+      <div class="lane app"><span lang="zh">軟體端</span><span lang="en">Application</span><small><span lang="zh">設定畫面</span><span lang="en">settings screen</span></small></div>
+      <div class="lane mod">Max30102K2<small>config</small></div>
+      <div class="lane mcu">Max30102SettingLimits<small><span lang="zh">監督</span><span lang="en">guard</span></small></div>
+    </div>
+    <div class="flow">
+      <div class="once">
+        <div class="once-lb"><span lang="zh">寫入 · 沒有回饋</span><span lang="en">WRITE &middot; no feedback</span></div>
+        <div class="step"><div class="msg r c12"><span class="lb">
+          <span lang="zh">① core.config.hrMin = 45</span><span lang="en">① core.config.hrMin = 45</span></span></div></div>
+        <div class="step"><div class="c12 branch">
+          <b><span lang="zh">② 到這裡就結束了 —— 沒有套用步驟、也沒有回傳</span>
+            <span lang="en">② that is the whole write — no apply step, and nothing is returned</span></b>
+          <span lang="zh">不用重建模組、不用重啟量測,<b>下一次 <code>feedData()</code> 就會用新值</b>。<br>
+            但也因為是單純的欄位賦值,<b>填錯不會有任何提示</b>。</span>
+          <span lang="en">No rebuild, no restart — <b>the next <code>feedData()</code> already uses the new value</b>.<br>
+            But because it is a plain assignment, <b>a bad value produces no warning at all</b>.</span>
+        </div></div>
+      </div>
+
+      <div class="once">
+        <div class="once-lb"><span lang="zh">查詢 · 這裡才會回「正常 / 異常」</span><span lang="en">QUERY &middot; this is where "ok / problem" comes back</span></div>
+        <div class="step"><div class="msg r c13"><span class="lb">
+          <span lang="zh">③ 主動問:check(config)</span><span lang="en">③ ask: check(config)</span></span></div></div>
+        <div class="step"><div class="msg l c13 dashed"><span class="lb">List&lt;ConfigIssue&gt;
+          <span style="font-family:var(--cjk);font-size:11px;color:var(--ink-3)">
+            <span lang="zh">空陣列 = 全部合法</span><span lang="en">empty = all valid</span></span></span></div></div>
+        <div class="step"><div class="c13 branch">
+          <b><span lang="zh">④ 顯示在設定畫面 —— <code>check</code> <b>只讀不寫</b>,一個值都不會改</span>
+            <span lang="en">④ show it on the settings screen — <code>check</code> is <b>read-only</b> and changes nothing</span></b>
+          <span lang="zh">每則含 <code>field</code> / <code>severity</code>(error·warn·info)/ <code>message</code> / <code>applied</code>。
+            <code>message</code> 講的是<b>後果</b>而不是「超出範圍」。</span>
+          <span lang="en">Each carries <code>field</code> / <code>severity</code> (error &middot; warn &middot; info) / <code>message</code> / <code>applied</code>.
+            The message states the <b>consequence</b>, not merely "out of range".</span>
+        </div></div>
+      </div>
+
+      <div class="loop">
+        <div class="loop-lb"><span lang="zh">↻ 保護 · 每次進料自動執行</span><span lang="en">&#8635; PROTECT &middot; automatic on every feed</span></div>
+        <div class="step"><div class="msg r c12"><span class="lb">
+          <span lang="zh">⑤ 下一次 feedData()</span><span lang="en">⑤ next feedData()</span></span></div></div>
+        <div class="step"><div class="msg r c23"><span class="lb">
+          <span lang="zh">⑥ 模組自動 enforce()</span><span lang="en">⑥ module calls enforce() automatically</span></span></div></div>
+        <div class="step"><div class="c23 selfbox">
+          <b><span lang="zh">⑦ 超出範圍的值<b>就地夾回</b>合法區間</span><span lang="en">⑦ out-of-range values are <b>clamped in place</b></span></b>
+          <span lang="zh">這一步是<b>保護模組</b>,不是通知使用者 —— 夾了也不會有訊息傳回畫面。</span>
+          <span lang="en">This step <b>protects the module</b>; it does not notify anyone — clamping produces no message on screen.</span>
+        </div></div>
+      </div>
+    </div>
+  </div></div>
+
+  <table>
+    <thead><tr><th></th>
+      <th><code>check()</code></th>
+      <th><code>enforce()</code></th></tr></thead>
+    <tbody>
+      <tr><td><span lang="zh">目的</span><span lang="en">Purpose</span></td>
+        <td><span lang="zh"><b>告訴使用者</b>設得對不對</span><span lang="en"><b>tell the user</b> whether the values are sound</span></td>
+        <td><span lang="zh"><b>保護模組</b>不被改壞</span><span lang="en"><b>protect the module</b> from bad values</span></td></tr>
+      <tr><td><span lang="zh">會改值嗎</span><span lang="en">Modifies?</span></td>
+        <td><span lang="zh">❌ 只讀</span><span lang="en">❌ read-only</span></td>
+        <td><span lang="zh">✅ 就地夾回</span><span lang="en">✅ clamps in place</span></td></tr>
+      <tr><td><span lang="zh">誰呼叫</span><span lang="en">Who calls it</span></td>
+        <td><span lang="zh">軟體端<b>主動</b>叫</span><span lang="en">the application, <b>explicitly</b></span></td>
+        <td><span lang="zh">模組<b>每次進料自動</b>叫</span><span lang="en">the module, <b>automatically on every feed</b></span></td></tr>
+      <tr><td><span lang="zh">跳過會怎樣</span><span lang="en">If skipped</span></td>
+        <td><span lang="zh">模組<b>仍然安全</b>,但使用者<b>不會知道自己填錯了</b> ——
+          填 <code>hrMax=30</code> 會被默默夾成 40,畫面上什麼都不說</span>
+          <span lang="en">the module stays <b>safe</b>, but the user <b>never learns the value was wrong</b> —
+          <code>hrMax=30</code> is silently clamped to 40 with nothing shown</span></td>
+        <td><span lang="zh">不能跳過(模組內部呼叫)</span><span lang="en">cannot be skipped — called internally</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <span lang="zh"><b>想要「設了就馬上知道」?</b>在軟體端包一層即可,不需要改模組:</span>
+    <span lang="en"><b>Want "set and be told immediately"?</b> Wrap it on the application side — no module change needed:</span>
+    <div style="font-family:var(--mono);font-size:11.5px;background:var(--surface-2);
+      border:1px solid var(--line);border-radius:6px;padding:9px 12px;margin-top:8px;white-space:pre;overflow-x:auto">void setHrMin(int v) {
+  core.config.hrMin = v;
+  showIssues(Max30102SettingLimits.check(core.config));
+}</div>
+  </div>
+
+  <div class="note">
+    <span lang="zh"><b>幾個改了會連動的參數。</b>
+      <br>&middot; <code>hrMin</code> —— 同時決定生理閘門 RR 上限、<b>baseline 移動平均視窗寬</b>與<b>沉澱期長度</b>。調高會讓後兩者一起變短。
+      <br>&middot; <code>dataHistoryMs</code> —— 樣本緩衝與 RR 池共用。調小會<b>立刻裁掉</b>超出範圍的舊拍。
+      <br>&middot; <code>ledCurrentRed/Ir</code> —— <b>模組不會送出去</b>,它只是「目前硬體跑在多大電流」的紀錄。要改晶片請走 B2。</span>
+    <span lang="en"><b>Parameters with side effects.</b>
+      <br>&middot; <code>hrMin</code> — also sets the RR upper bound, the <b>baseline moving-average window</b> and the <b>settle length</b>.
+        Raising it shortens the latter two.
+      <br>&middot; <code>dataHistoryMs</code> — shared by the sample buffer and the RR pool. Lowering it <b>immediately trims</b> older beats.
+      <br>&middot; <code>ledCurrentRed/Ir</code> — <b>never sent by the module</b>; it only records the drive level the hardware is running at.
+        To change the chip, use B2.</span>
+  </div>
+</section>
+</div>
+
+<!-- ═══════════════════════ C. 架構 ═══════════════════════ -->
+<div class="view" id="v-arch">
+
+<section>
+  <h2><span class="n">C1</span><span lang="zh">分層與觸發來源</span><span lang="en">Layers &amp; what triggers each part</span></h2>
+  <p class="lead">
+    <span lang="zh">每個方塊下方標出「由哪個呼叫觸發」。中間那層就是交付的模組。</span>
+    <span lang="en">Each box notes which call triggers it. The middle layer is the delivered module.</span>
+  </p>
+
+  <div class="band ui">
+    <div class="band-hd"><span class="chip"><span lang="zh">你的軟體</span><span lang="en">YOUR APP</span></span>
+      <span class="band-note"><span lang="zh">附參考實作可照抄</span><span lang="en">a reference implementation is included</span></span></div>
+    <div class="row">
+      <div class="box"><b><span lang="zh">輪詢計時器</span><span lang="en">Poll timer</span></b>
+        <span lang="zh">每 100 ms 送 QUERY_FIFO</span><span lang="en">QUERY_FIFO every 100 ms</span>
+        <span class="trig"><span lang="zh">軟體端自行開 Timer</span><span lang="en">application-side timer</span></span></div>
+      <div class="box"><b><span lang="zh">串口收送</span><span lang="en">Serial I/O</span></b>
+        <span lang="zh">開埠、收位元組</span><span lang="en">open port, receive bytes</span>
+        <span class="trig"><span lang="zh">模組完全不碰</span><span lang="en">module never touches it</span></span></div>
+      <div class="box"><b><span lang="zh">歷史儲存</span><span lang="en">History</span></b>
+        <span lang="zh">波形 · 長期 RR · log</span><span lang="en">waveform &middot; long-term RR &middot; log</span>
+        <span class="trig">← newIr / rrPoints</span></div>
+      <div class="box"><b><span lang="zh">顯示前處理</span><span lang="en">Presentation</span></b>
+        <span lang="zh">切時間窗 · 保留上次值 · 平滑</span><span lang="en">windowing &middot; hold-last &middot; smoothing</span>
+        <span class="trig">← latest / rrPoints</span></div>
+    </div>
+  </div>
+
+  <div class="arrow"><code>feedData(packet)</code> / <code>feedSamples(red, ir)</code></div>
+
+  <div class="band ctrl">
+    <div class="band-hd"><span class="chip">Max30102K2 &starf;</span>
+      <span class="band-note"><span lang="zh">決定「誰准進來、什麼時候算、什麼時候吐」</span><span lang="en">decides what enters, when to compute, when to emit</span></span></div>
+    <div class="row">
+      <div class="box"><b><span lang="zh">設定監督</span><span lang="en">Setting guard</span></b>
+        <span lang="zh">超出範圍就夾回合法區間</span><span lang="en">clamps out-of-range values</span>
+        <span class="trig"><span lang="zh">每次 feed 自動</span><span lang="en">auto on every feed</span></span></div>
+      <div class="box"><b><span lang="zh">手指偵測</span><span lang="en">Finger detection</span></b>
+        <span lang="zh">批平均 IR ≥ 門檻 + 去彈跳</span><span lang="en">batch mean IR ≥ threshold + debounce</span>
+        <span class="trig"><span lang="zh">每次 feed 自動</span><span lang="en">auto on every feed</span></span></div>
+      <div class="box"><b><span lang="zh">進料閘門</span><span lang="en">Ingest gate</span></b>
+        <span lang="zh">空轉 → 沉澱 → 輸出</span><span lang="en">dead → settle → emit</span>
+        <span class="trig">→ computed.settling</span></div>
+      <div class="box"><b><span lang="zh">滾動緩衝</span><span lang="en">Rolling buffer</span></b>
+        <span lang="zh">樣本與 RR 池共用 30 秒</span><span lang="en">samples and RR share 30 s</span>
+        <span class="trig">config.dataHistoryMs</span></div>
+      <div class="box"><b><span lang="zh">餵拍</span><span lang="en">Beat feeding</span></b>
+        <span lang="zh">左緣 context · 右緣延遲 · 去重</span><span lang="en">left context &middot; right delay &middot; dedup</span>
+        <span class="trig">→ computed.troughAbs</span></div>
+      <div class="box"><b><span lang="zh">絕對索引</span><span lang="en">Absolute index</span></b>
+        <span lang="zh">totalSamples 當原點</span><span lang="en">totalSamples is the origin</span>
+        <span class="trig">→ firstAbs / startAbs / endAbs</span></div>
+    </div>
+  </div>
+
+  <div class="arrow"><span lang="zh"><code>純函式呼叫</code>(無狀態)</span><span lang="en"><code>pure calls</code> (stateless)</span></div>
+
+  <div class="band base">
+    <div class="band-hd"><span class="chip"><span lang="zh">演算層</span><span lang="en">ALGORITHM</span></span>
+      <span class="band-note"><span lang="zh">純函式、無狀態 — 同樣的輸入永遠得到同樣的輸出</span><span lang="en">pure and stateless — same input, same output</span></span></div>
+    <div class="row">
+      <div class="box"><b>k2_signal</b><span lang="zh">截尾 · 去趨勢 · 找峰</span><span lang="en">trimmed mean &middot; detrend &middot; peaks</span></div>
+      <div class="box"><b>k2_algorithm</b><span lang="zh">找谷 + 逐拍 R + SpO2</span><span lang="en">troughs + per-beat R + SpO2</span></div>
+      <div class="box"><b>k2_sqi</b><span lang="zh">cv + spike 品質閘門</span><span lang="en">cv + spike quality gate</span></div>
+      <div class="box"><b>k2_beatseries</b><span lang="zh">生理閘門 · ±40 % · 量尺規則</span><span lang="en">physiological gate &middot; ±40 % &middot; ruler rules</span></div>
+      <div class="box"><b>k2_hrv_calculator</b><span lang="zh">離群濾 · SDNN · RMSSD · 異位拍</span><span lang="en">outlier filter &middot; SDNN &middot; RMSSD &middot; ectopics</span></div>
+    </div>
+  </div>
+
+  <div class="arrow"><code>K2Compute</code></div>
+</section>
+
+<section>
+  <h2><span class="n">C2</span><span lang="zh">進料時序狀態機</span><span lang="en">Ingest state machine</span></h2>
+  <p class="lead">
+    <span lang="zh">手指壓下去那段 DC 爬升的幅度是脈搏的數十倍。它若進了緩衝,去趨勢會炸出假暫態、找谷門檻被墊高,
+      生出的假 RR 還會污染誤拍閘門的中位,讓真拍反被判「太短」剔除 —— 序列就鎖死在半速。</span>
+    <span lang="en">The DC ramp as the finger presses down is tens of times larger than the pulse. If it enters the buffer,
+      detrending produces a huge artefact, the trough threshold inflates, and the bogus RR values poison the outlier gate's
+      median — real beats are then rejected as "too short" and the series locks onto half the true rate.</span>
+  </p>
+
+  <div class="scroll"><div class="states">
+    <div class="st cold"><b><span lang="zh">無手指</span><span lang="en">No finger</span></b>
+      <ul><li lang="zh">緩衝、RR 池全清</li><li lang="en">buffer and RR pool cleared</li>
+        <li lang="zh">不輸出任何樣本</li><li lang="en">no samples emitted</li>
+        <li lang="zh">斷 RR 連續性</li><li lang="en">RR continuity broken</li></ul></div>
+    <div class="tr"><div class="ar">&rarr;</div><span lang="zh">批平均 IR<br>≥ 門檻</span><span lang="en">batch IR<br>≥ threshold</span></div>
+    <div class="st"><b><span lang="zh">空轉期 1.5 s</span><span lang="en">Dead time 1.5 s</span></b>
+      <ul><li lang="zh">樣本<b>直接丟棄</b></li><li lang="en">samples <b>discarded</b></li>
+        <li lang="zh">不進緩衝、不計算</li><li lang="en">not buffered, not computed</li>
+        <li lang="zh">擋掉壓下去的斜坡</li><li lang="en">blocks the press-down ramp</li></ul></div>
+    <div class="tr"><div class="ar">&rarr;</div><span lang="zh">150 筆</span><span lang="en">150 samples</span></div>
+    <div class="st"><b><span lang="zh">沉澱期 2 s</span><span lang="en">Settle 2 s</span></b>
+      <ul><li lang="zh">樣本<b>有進緩衝</b></li><li lang="en">samples <b>are buffered</b></li>
+        <li lang="zh">但先扣著不輸出</li><li lang="en">but withheld from output</li>
+        <li lang="zh">等 baseline 成形</li><li lang="en">waiting for the baseline</li></ul></div>
+    <div class="tr"><div class="ar">&rarr;</div><span lang="zh">緩衝滿 200 筆</span><span lang="en">buffer hits 200</span></div>
+    <div class="st hot"><b><span lang="zh">輸出中</span><span lang="en">Emitting</span></b>
+      <ul><li lang="zh">一次吐出那 200 筆</li><li lang="en">emits all 200 at once</li>
+        <li lang="zh">之後每批 10 筆</li><li lang="en">then 10 per batch</li>
+        <li lang="zh">每 100 筆算一次</li><li lang="en">computes every 100 samples</li></ul></div>
+  </div></div>
+
+  <div class="back">
+    <b><span lang="zh">&larr; 手指離開(連續 3 批低於門檻)</span><span lang="en">&larr; Finger removed (3 consecutive batches below threshold)</span></b>
+    <span lang="zh">緩衝、RR 池與所有計數歸零,回到「無手指」。<b>絕對索引不歸零</b> —— 時間軸必須連續。</span>
+    <span lang="en">Buffer, RR pool and all counters reset. <b>The absolute index does not</b> — the timeline must stay continuous.</span>
+  </div>
+</section>
+
+<section>
+  <h2><span class="n">C3</span><span lang="zh">過濾器管線</span><span lang="en">Filter pipeline</span></h2>
+  <p class="lead"><span lang="zh">左欄是處理階段,右欄是該關會拿掉的東西。</span>
+    <span lang="en">Left: the stage. Right: what it removes.</span></p>
+
+  <div class="pipe">
+    <div class="stage"><b><span lang="zh">① 去趨勢 + 找谷</span><span lang="en">① Detrend + trough finding</span></b>
+      <small><span lang="zh">500 筆演算視窗</span><span lang="en">500-sample window</span></small></div>
+    <div class="reject none"><b><span lang="zh">邊緣不可信</span><span lang="en">Edges unreliable</span></b>
+      <span lang="zh">置中移動平均在陣列前後各半個視窗只能單邊平均 → 那段的谷不採用</span>
+      <span lang="en">a centred moving average can only average one side near each end — troughs there are not used</span></div>
+    <div class="dn">&darr;</div>
+
+    <div class="stage"><b><span lang="zh">② 左緣 context / 右緣延遲</span><span lang="en">② Left context / right delay</span></b>
+      <small><span lang="zh">餵拍前</span><span lang="en">before feeding beats</span></small></div>
+    <div class="reject"><b><span lang="zh">丟最右一顆谷</span><span lang="en">Drop the newest trough</span></b>
+      <span lang="zh">視窗邊緣突出度未穩,延遲一拍再收</span><span lang="en">prominence at the edge is unstable — accept it one beat later</span></div>
+    <div class="dn">&darr;</div>
+
+    <div class="stage"><b><span lang="zh">③ 生理閘門</span><span lang="en">③ Physiological gate</span></b>
+      <small>RR &notin; [60000/hrMax, 60000/hrMin]</small></div>
+    <div class="reject"><b><span lang="zh">過短</span><span lang="en">Too short</span></b>
+      <span lang="zh">偽谷 → 量尺<b>不推進</b></span><span lang="en">false trough → ruler does <b>not</b> advance</span><br>
+      <b><span lang="zh">過長</span><span lang="en">Too long</span></b>
+      <span lang="zh">疑似漏拍 → 量尺推進 resync</span><span lang="en">likely a missed beat → ruler advances to resync</span></div>
+    <div class="dn">&darr;</div>
+
+    <div class="stage"><b><span lang="zh">④ 誤拍過濾 ±40 %</span><span lang="en">④ Outlier gate ±40 %</span></b>
+      <small><span lang="zh">與最近 9 拍中位比較</span><span lang="en">vs median of last 9 beats</span></small></div>
+    <div class="reject"><b><span lang="zh">短側剔</span><span lang="en">Short side</span></b>
+      <span lang="zh">量尺不推進 → 下一顆真谷仍從舊基準起量,得到真間期</span>
+      <span lang="en">ruler holds, so the next real trough measured from the old anchor yields the true interval</span></div>
+    <div class="dn">&darr;</div>
+
+    <div class="stage"><b><span lang="zh">⑤ SQI 閘門</span><span lang="en">⑤ SQI gate</span></b>
+      <small>cv &lt; 0.35 &amp;&amp; spike &lt; 5.0</small></div>
+    <div class="reject"><b><span lang="zh">整輪剔除</span><span lang="en">Whole round rejected</span></b>
+      <span lang="zh">該輪的谷消化不記,量尺照樣推進</span>
+      <span lang="en">troughs are consumed but not recorded; the ruler still advances</span></div>
+    <div class="dn">&darr;</div>
+
+    <div class="stage"><b><span lang="zh">⑥ 全域離群濾</span><span lang="en">⑥ Global outlier filter</span></b>
+      <small><span lang="zh">MAD · 可關閉</span><span lang="en">MAD &middot; can be disabled</span></small></div>
+    <div class="reject"><b><span lang="zh">離群拍剔除</span><span lang="en">Outlier beats removed</span></b>
+      <span lang="zh">剔掉後兩側不再時間相鄰 → 該配對不進 RMSSD</span>
+      <span lang="en">neighbours are no longer time-adjacent, so that pair is excluded from RMSSD</span></div>
+    <div class="dn">&darr;</div>
+
+    <div class="stage"><b><span lang="zh">⑦ 異位拍標記</span><span lang="en">⑦ Ectopic marking</span></b>
+      <small><span lang="zh">純標記</span><span lang="en">marks only</span></small></div>
+    <div class="reject none"><b><span lang="zh">不剔除任何東西</span><span lang="en">Removes nothing</span></b>
+      <span lang="zh">只供觀察,HRV 數字不受影響</span><span lang="en">observation only; HRV figures untouched</span></div>
+  </div>
+
+  <div class="note">
+    <span lang="zh"><b>「洞」對下游的影響。</b>每筆 RR 都帶 <code>startAbs</code> / <code>endAbs</code>,所以剔除位置是被記錄下來的:
+      <br>&middot; <b>SDNN / 平均 RR / HR</b> — 照算,只是少一筆
+      <br>&middot; <b>RMSSD / pNN50 / SD1 / SD2</b> — 跨洞那一對<b>直接跳過</b>
+      <br>RMSSD 量的是「這拍跟上拍的差」,中間隔了洞就不是相鄰拍。<code>pairs</code> 與 <code>totalPairs</code> 的差就是跳掉幾個洞。</span>
+    <span lang="en"><b>How gaps propagate.</b> Every RR carries <code>startAbs</code> / <code>endAbs</code>, so removals are recorded:
+      <br>&middot; <b>SDNN / mean RR / HR</b> — computed as usual, one sample fewer
+      <br>&middot; <b>RMSSD / pNN50 / SD1 / SD2</b> — the pair spanning a gap is <b>skipped</b>
+      <br>RMSSD measures consecutive beats; across a gap they are not consecutive.
+      <code>totalPairs − pairs</code> is the number of gaps skipped.</span>
+  </div>
+</section>
+
+<section>
+  <h2><span class="n">C4</span><span lang="zh">暖機時間軸</span><span lang="en">Warm-up timeline</span></h2>
+  <p class="lead"><span lang="zh">以 75 bpm、預設參數估算。</span><span lang="en">At 75 bpm with default parameters.</span></p>
+
+  <div class="scroll"><div class="tl">
+    <div class="tl-bar">
+      <div class="seg dead" style="flex:1.5"></div>
+      <div class="seg settle" style="flex:2"></div>
+      <div class="seg warm" style="flex:1"></div>
+      <div class="seg run" style="flex:6.5"></div>
+    </div>
+    <div class="ticks">
+      <div class="tick" style="flex:1.5"><b>0 s</b><span lang="zh">偵測到手指</span><span lang="en">finger detected</span></div>
+      <div class="tick" style="flex:2"><b>1.5 s</b><span lang="zh">開始收進緩衝</span><span lang="en">buffering starts</span></div>
+      <div class="tick" style="flex:1"><b>3.5 s</b><span lang="zh">首次計算 · 吐 200 筆</span><span lang="en">first compute &middot; 200 samples</span></div>
+      <div class="tick" style="flex:1.5"><b>4.5 s</b><span lang="zh">開始穩定餵拍</span><span lang="en">beats feed steadily</span></div>
+      <div class="tick" style="flex:5"><b>&asymp; 11 s</b><span lang="zh">湊滿 9 拍 → HRV 出現</span><span lang="en">9 beats &rarr; HRV appears</span></div>
+    </div>
+  </div></div>
+
+  <div class="legend">
+    <span><i class="seg dead"></i><span lang="zh">空轉期(丟棄)</span><span lang="en">dead time (discarded)</span></span>
+    <span><i style="background:var(--drop-bg)"></i><span lang="zh">沉澱期(收但不吐)</span><span lang="en">settle (buffered, withheld)</span></span>
+    <span><i style="background:color-mix(in srgb,var(--ctrl) 25%,transparent)"></i><span lang="zh">暖機(有心率、還沒 HRV)</span><span lang="en">warm-up (HR yes, HRV not yet)</span></span>
+    <span><i style="background:var(--ctrl)"></i><span lang="zh">穩定運行</span><span lang="en">steady state</span></span>
+  </div>
+
+  <div class="note">
+    <span lang="zh"><b>若流程是「手指先放好、再按開始」</b>,壓下去的斜坡根本不會發生,
+      <code>fingerDeadMs</code> 可以調小甚至歸零 —— 它擋的是「按了才放手指」的那段爬升。</span>
+    <span lang="en"><b>If the workflow is "place the finger first, then start"</b>, the press-down ramp never happens and
+      <code>fingerDeadMs</code> can be reduced or zeroed — it exists to block the ramp when the finger arrives after start.</span>
+  </div>
+</section>
+</div>
+
+<!-- ═══════════════════════ D. MCU 通訊協定 ═══════════════════════ -->
+<div class="view" id="v-proto">
+<section>
+  <h2><span class="n">D</span><span lang="zh">MCU 通訊協定(命令號 <code>0x09</code>)</span><span lang="en">MCU protocol (command <code>0x09</code>)</span></h2>
+  <p class="lead">
+    <span lang="zh">這一頁<b>不屬於模組</b> —— 模組只建封包、只吃封包,<b>串口收送全部由軟體端負責</b>。
+      要自己實作組框與分流,看這裡就夠。</span>
+    <span lang="en">This page is <b>not part of the module</b> — the module only builds and consumes packets;
+      <b>all serial I/O belongs to the application</b>. Everything needed to frame and dispatch is here.</span>
+  </p>
+
+  <!-- 封包結構 -->
+  <div class="subhd"><span class="bn">D1</span><span lang="zh">封包結構</span><span lang="en">Packet layout</span></div>
+  <p class="lead"><span lang="zh">收發共用同一個外框。差別只在 <code>sub</code> 之後的內容與總長度。</span>
+    <span lang="en">The same frame is used both ways; only the payload after <code>sub</code> and the total length differ.</span></p>
+
+  <div class="pkt">
+    <span class="hd">40<b>[0]</b></span><span class="hd">71<b>[1]</b></span><span class="var">30/31<b>[2] board</b></span>
+    <span class="cmd">09<b>[3] cmd</b></span>
+    <span class="var">sub<b>[4]</b></span>
+    <span>p0<b>[5]</b></span><span>p1<b>[6]</b></span><span>p2<b>[7]</b></span>
+    <span class="cs">cs<b><span lang="zh">末位</span><span lang="en">last</span></b></span>
+  </div>
+
+  <table>
+    <thead><tr><th><span lang="zh">欄位</span><span lang="en">Field</span></th>
+      <th><span lang="zh">內容</span><span lang="en">Value</span></th>
+      <th><span lang="zh">說明</span><span lang="en">Notes</span></th></tr></thead>
+    <tbody>
+      <tr><td><code>[0..1]</code> header</td><td><code>40 71</code></td>
+        <td><span lang="zh">固定前綴。組框時先搜尋這兩個 byte</span><span lang="en">fixed prefix; scan for these two bytes to frame</span></td></tr>
+      <tr><td><code>[2]</code> board <span lang="zh">站號</span><span lang="en">station</span></td>
+        <td><code>30</code> <span lang="zh">或</span><span lang="en">or</span> <code>31</code></td>
+        <td><span lang="zh"><b>板子身分:0x30 主板 / 0x31 擴充板。</b>MAX30102 現在主要跑在擴充板 <code>0x31</code>;
+          兩者的 MAX30102 命令完全相同,差別只在這個 byte。<b>接收時兩種都收</b>,來源由 <code>packet[2]</code> 判讀。<br>
+          ⚠ 這個 byte 一變,CS 就跟著變:<code>0x31</code> 版的 CS = <code>0x30</code> 版 <b>−1</b>(見 D2)。</span>
+          <span lang="en"><b>Board identity: 0x30 main / 0x31 expansion.</b> The MAX30102 now runs mainly on the expansion board <code>0x31</code>;
+          the MAX30102 command set is identical on both — only this byte differs. <b>Both are accepted on receive</b>; the source is read from <code>packet[2]</code>.<br>
+          ⚠ Changing this byte changes the CS: the <code>0x31</code> CS is the <code>0x30</code> CS <b>minus 1</b> (see D2).</span></td></tr>
+      <tr><td><code>[3]</code> cmd</td><td><code>09</code></td>
+        <td><span lang="zh">MAX30102 專用命令號(與其他模組的 0x08 / 0xB0 區隔)</span>
+          <span lang="en">the MAX30102 command (distinct from 0x08 / 0xB0 used elsewhere)</span></td></tr>
+      <tr><td><code>[4]</code> sub</td><td><code>00 ~ 04</code></td>
+        <td><span lang="zh">子命令。<b>決定封包總長度</b> —— 見 D2</span><span lang="en">sub-command; <b>determines the total length</b> — see D2</span></td></tr>
+      <tr><td><code>[5..7]</code> payload</td><td><span lang="zh">依子命令</span><span lang="en">per sub-command</span></td>
+        <td><span lang="zh">QUERY_FIFO 的 <code>[5]</code> 是資料長度,其後接可變長度資料</span>
+          <span lang="en">for QUERY_FIFO, <code>[5]</code> is the data length followed by variable-length data</span></td></tr>
+      <tr><td><span lang="zh">末位</span><span lang="en">last</span> cs</td><td><span lang="zh">校驗</span><span lang="en">checksum</span></td>
+        <td><code>CS = (0x100 − (sum &amp; 0xFF)) &amp; 0xFF</code><br>
+          <span lang="zh">驗證:整包(含 CS)相加 <code>&amp; 0xFF == 0</code></span>
+          <span lang="en">verify: whole packet including CS sums to <code>0</code> under <code>&amp; 0xFF</code></span></td></tr>
+    </tbody>
+  </table>
+
+  <!-- 五個子命令 -->
+  <div class="subhd"><span class="bn">D2</span><span lang="zh">五個子命令</span><span lang="en">The five sub-commands</span></div>
+  <p class="lead"><span lang="zh">下列位元組串的 checksum 皆已實際算出,可直接複製驗證。<b>各卡片以主板 <code>0x30</code> 為例</b>;
+    擴充板 <code>0x31</code> 的完整對照見下表。</span>
+    <span lang="en">Every byte string below has its checksum computed — copy and verify directly. <b>Each card shows the main board <code>0x30</code></b>;
+    the expansion board <code>0x31</code> equivalents are in the table below.</span></p>
+
+  <div class="note crit">
+    <span lang="zh"><b>主板 0x30 ↔ 擴充板 0x31 的換算規則:</b>把第 3 個 byte 從 <code>30</code> 改成 <code>31</code>,
+      並把 <b>CS 減 1</b>(header 多 1 → CS 補 −1,整包相加維持為 0)。其餘 byte 完全不變。</span>
+    <span lang="en"><b>Converting main 0x30 ↔ expansion 0x31:</b> change byte[2] from <code>30</code> to <code>31</code>
+      and subtract <b>1 from the CS</b> (header +1 → CS −1, so the whole packet still sums to 0). All other bytes are unchanged.</span>
+  </div>
+
+  <div class="scroll"><table>
+    <thead><tr>
+      <th><span lang="zh">命令</span><span lang="en">Command</span></th>
+      <th><span lang="zh">主板 0x30</span><span lang="en">main 0x30</span></th>
+      <th><span lang="zh">擴充板 0x31</span><span lang="en">expansion 0x31</span></th></tr></thead>
+    <tbody>
+      <tr><td>QUERY_FIFO <span style="color:var(--ink-3)">TX</span></td>
+        <td><code>40 71 30 09 00 00 00 00 16</code></td>
+        <td><code>40 71 31 09 00 00 00 00 15</code></td></tr>
+      <tr><td>READ_REG PART_ID <span style="color:var(--ink-3)">TX</span></td>
+        <td><code>40 71 30 09 02 FF 00 00 15</code></td>
+        <td><code>40 71 31 09 02 FF 00 00 14</code></td></tr>
+      <tr><td>READ_REG PART_ID <span style="color:var(--ink-3)">RX</span></td>
+        <td><code>40 71 30 09 02 FF 15 00 00</code></td>
+        <td><code>40 71 31 09 02 FF 15 00 FF</code></td></tr>
+      <tr><td>WRITE_REG LED1=0x24 <span style="color:var(--ink-3)">TX</span></td>
+        <td><code>40 71 30 09 01 0C 24 00 E5</code></td>
+        <td><code>40 71 31 09 01 0C 24 00 E4</code></td></tr>
+      <tr><td>RESET <span style="color:var(--ink-3)">TX</span></td>
+        <td><code>40 71 30 09 03 00 00 00 13</code></td>
+        <td><code>40 71 31 09 03 00 00 00 12</code></td></tr>
+      <tr><td>ReInit <span style="color:var(--ink-3)">TX</span></td>
+        <td><code>40 71 30 09 04 00 00 00 12</code></td>
+        <td><code>40 71 31 09 04 00 00 00 11</code></td></tr>
+      <tr><td>ReInit <span style="color:var(--ink-3)">RX</span> <span lang="zh">成功</span><span lang="en">ok</span></td>
+        <td><code>40 71 30 09 04 01 00 00 11</code></td>
+        <td><code>40 71 31 09 04 01 00 00 10</code></td></tr>
+    </tbody>
+  </table></div>
+  <div class="note">
+    <span lang="zh"><b>連線時自動選站:</b>整合層(參考實作)開始量測時會同時探測兩塊,<b>收到 0x31 立刻鎖擴充板</b>;
+      若 0x31 逾時無回應、只有 0x30 有回,才退鎖主板。鎖定後只問贏家那塊。這是整合層行為,核心的協定本身只負責「兩種 header 都收、可指定站號建包」。</span>
+    <span lang="en"><b>Automatic station selection at connect:</b> the integration layer (reference implementation) probes both boards on start and
+      <b>locks onto 0x31 the moment it replies</b>; only if 0x31 stays silent and 0x30 answers does it fall back to the main board.
+      Once locked it polls only the winner. This is integration-layer behavior — the protocol itself only frames both headers and lets you target a station.</span>
+  </div>
+
+  <div class="sub">
+    <div class="sub-hd"><span class="op">0x09 0x00</span><span class="nm">QUERY_FIFO</span>
+      <span class="len"><span lang="zh">回應變動長度 7 ~ 151 bytes</span><span lang="en">reply 7–151 bytes (variable)</span></span></div>
+    <p><span lang="zh"><b>跟 MCU 要它累積的原始 RED/IR,取完即清空。</b>量測期間持續送(建議 100 ms,上限 240 ms)。
+      MCU 不會主動推資料 —— 不問就一直累積,滿了會覆蓋。</span>
+      <span lang="en"><b>Fetch the raw RED/IR the MCU has buffered; the buffer clears on read.</b> Send continuously while measuring
+      (100 ms recommended, 240 ms ceiling). The MCU never pushes — if you do not ask, it keeps accumulating and eventually overwrites.</span></p>
+    <div class="io">
+      <span class="dir tx">TX</span><span class="by"><code>40 71 30 09 00 00 00 00 16</code></span>
+      <span class="dir rx">RX</span><span class="by"><code>40 71 30 09 00 <b>[N×6]</b> [<i>N 組 × 6 bytes</i>] [cs]</code></span>
+      <span class="dir rx">RX</span><span class="by"><code>40 71 30 09 00 <b>0C</b> A0 86 01 90 5F 01 A0 86 01 90 5F 01 DC</code><br>
+        <span style="font-family:var(--cjk);font-size:11.5px;color:var(--ink-3)">
+          <span lang="zh">↑ 2 組樣本的實例:RED=100000, IR=90000</span>
+          <span lang="en">↑ example with 2 samples: RED=100000, IR=90000</span></span></span>
+    </div>
+    <div class="note" style="margin-top:10px">
+      <span lang="zh"><b>總長度算法:</b><code>total = 7 + packet[5]</code>(<code>packet[5]</code> 是 <b>byte 數</b> = N×6,不是組數)。
+        N = 0 時總長 7、N = 24 時 151(上限)。<br>
+        <b>樣本解碼:</b>每 6 bytes 一組 = RED 3 bytes + IR 3 bytes,各為 <b>18-bit little-endian</b>,取值要 <code>&amp; 0x3FFFF</code>。<br>
+        <code>red = b[0] | b[1]&lt;&lt;8 | b[2]&lt;&lt;16</code> &nbsp;&nbsp; <code>ir = b[3] | b[4]&lt;&lt;8 | b[5]&lt;&lt;16</code></span>
+      <span lang="en"><b>Total length:</b> <code>total = 7 + packet[5]</code> (<code>packet[5]</code> is a <b>byte count</b> = N×6, not the sample count).
+        N = 0 gives 7 bytes; N = 24 gives 151 (the cap).<br>
+        <b>Sample decoding:</b> 6 bytes per sample = RED 3 + IR 3, each <b>18-bit little-endian</b>, masked with <code>&amp; 0x3FFFF</code>.<br>
+        <code>red = b[0] | b[1]&lt;&lt;8 | b[2]&lt;&lt;16</code> &nbsp;&nbsp; <code>ir = b[3] | b[4]&lt;&lt;8 | b[5]&lt;&lt;16</code></span>
+    </div>
+  </div>
+
+  <div class="sub">
+    <div class="sub-hd"><span class="op">0x09 0x01</span><span class="nm">WRITE_REG</span>
+      <span class="len"><span lang="zh">回應固定 9 bytes</span><span lang="en">reply fixed 9 bytes</span></span></div>
+    <p><span lang="zh"><b>寫一顆 MAX30102 暫存器</b>(datasheet 級)。LED 電流就是走這條。</span>
+      <span lang="en"><b>Write one MAX30102 register</b> (datasheet level). LED current is set through this.</span></p>
+    <div class="io">
+      <span class="dir tx">TX</span><span class="by"><code>40 71 30 09 01 [reg] [value] 00 [cs]</code></span>
+      <span class="dir tx">TX</span><span class="by"><code>40 71 30 09 01 0C 24 00 E5</code><br>
+        <span style="font-family:var(--cjk);font-size:11.5px;color:var(--ink-3)">
+          <span lang="zh">↑ LED1_PA(0x0C)寫入 0x24</span><span lang="en">↑ write 0x24 to LED1_PA (0x0C)</span></span></span>
+      <span class="dir rx">RX</span><span class="by"><span style="font-family:var(--cjk);font-size:12px;color:var(--drop)">
+        <span lang="zh">固定 9 bytes 確認 —— <b>內容格式未在協定模組內定義,請對韌體確認</b></span>
+        <span lang="en">a fixed 9-byte acknowledgement — <b>its payload is not defined in the protocol module; confirm with the firmware</b></span></span></span>
+    </div>
+  </div>
+
+  <div class="sub">
+    <div class="sub-hd"><span class="op">0x09 0x02</span><span class="nm">READ_REG</span>
+      <span class="len"><span lang="zh">回應固定 9 bytes</span><span lang="en">reply fixed 9 bytes</span></span></div>
+    <p><span lang="zh"><b>讀一顆 MAX30102 暫存器。</b>讀回的值在 <code>packet[6]</code> ——
+      <b>模組不會吐這個值</b>,必須由軟體端自己取。</span>
+      <span lang="en"><b>Read one MAX30102 register.</b> The value arrives in <code>packet[6]</code> —
+      <b>the module never surfaces it</b>, so the application must read it.</span></p>
+    <div class="io">
+      <span class="dir tx">TX</span><span class="by"><code>40 71 30 09 02 [reg] 00 00 [cs]</code></span>
+      <span class="dir tx">TX</span><span class="by"><code>40 71 30 09 02 FF 00 00 15</code>
+        <span style="font-family:var(--cjk);font-size:11.5px;color:var(--ink-3)">
+          <span lang="zh">讀 PART_ID</span><span lang="en">read PART_ID</span></span></span>
+      <span class="dir rx">RX</span><span class="by"><code>40 71 30 09 02 [reg] <b>[值]</b> 00 [cs]</code></span>
+      <span class="dir rx">RX</span><span class="by"><code>40 71 30 09 02 FF <b>15</b> 00 00</code>
+        <span style="font-family:var(--cjk);font-size:11.5px;color:var(--ink-3)">
+          <span lang="zh">讀回 0x15 = 晶片在線</span><span lang="en">0x15 = chip present</span></span></span>
+    </div>
+  </div>
+
+  <div class="sub">
+    <div class="sub-hd"><span class="op">0x09 0x03</span><span class="nm">RESET</span>
+      <span class="len"><span lang="zh">回應固定 9 bytes</span><span lang="en">reply fixed 9 bytes</span></span></div>
+    <p><span lang="zh"><b>軟體復位晶片 → 回到 POR 休眠</b>(LED 關、無模式、不採樣)。
+      <b style="color:var(--crit)">復位後晶片不可用</b>,必須再送 ReInit 才會恢復。</span>
+      <span lang="en"><b>Software-reset the chip back to POR sleep</b> (LEDs off, no mode, no sampling).
+      <b style="color:var(--crit)">The chip is unusable afterwards</b> — ReInit is mandatory to recover.</span></p>
+    <div class="io">
+      <span class="dir tx">TX</span><span class="by"><code>40 71 30 09 03 00 00 00 13</code></span>
+    </div>
+  </div>
+
+  <div class="sub">
+    <div class="sub-hd"><span class="op">0x09 0x04</span><span class="nm">RE-INIT</span>
+      <span class="len"><span lang="zh">回應固定 9 bytes</span><span lang="en">reply fixed 9 bytes</span></span></div>
+    <p><span lang="zh"><b>把晶片初始化成可用狀態</b> —— 復位 + 清 FIFO + 寫入全部工作組態 + 驗 PART_ID。
+      <b>開始量測前必送</b>;拔插模組、送過 RESET 之後也要再送。</span>
+      <span lang="en"><b>Bring the chip into a usable state</b> — reset, clear the FIFO, write the full working configuration, verify PART_ID.
+      <b>Required before measuring</b>, and again after re-plugging or a RESET.</span></p>
+    <div class="io">
+      <span class="dir tx">TX</span><span class="by"><code>40 71 30 09 04 00 00 00 12</code></span>
+      <span class="dir rx">RX</span><span class="by"><code>40 71 30 09 04 <b>01</b> 00 00 11</code>
+        <span style="font-family:var(--cjk);font-size:11.5px;color:var(--ink-3)"><span lang="zh">成功</span><span lang="en">ok</span></span></span>
+      <span class="dir rx">RX</span><span class="by"><code>40 71 30 09 04 <b>00</b> 00 00 12</code>
+        <span style="font-family:var(--cjk);font-size:11.5px;color:var(--ink-3)"><span lang="zh">失敗(PART_ID 驗不過)</span><span lang="en">failed (PART_ID mismatch)</span></span></span>
+    </div>
+    <div class="note crit" style="margin-top:10px">
+      <span lang="zh"><b>失敗的回應與 TX 完全相同</b>(<code>40 71 30 09 04 00 00 00 12</code>)。
+        若串口會回音(echo),要靠時序或旗標分辨,不能只看內容。<br>
+        另外 ReInit 會把所有暫存器寫回工作組態(LED 電流回到 <code>0x24</code>),
+        <b>先前用 WRITE_REG 做的自訂會被覆蓋</b>。</span>
+      <span lang="en"><b>The failure reply is byte-identical to the request</b> (<code>40 71 30 09 04 00 00 00 12</code>).
+        If the port echoes, distinguish by timing or state — content alone is not enough.<br>
+        ReInit also rewrites every register to the working configuration (LED current back to <code>0x24</code>),
+        so <b>any WRITE_REG customisation is overwritten</b>.</span>
+    </div>
+  </div>
+
+  <!-- 組框 -->
+  <div class="subhd"><span class="bn">D3</span><span lang="zh">組框與分流</span><span lang="en">Framing &amp; dispatch</span></div>
+  <p class="lead"><span lang="zh">串口是位元組流,封包會被切斷、黏在一起、或夾雜雜訊。以下是可直接照做的狀態機。</span>
+    <span lang="en">A serial port is a byte stream: packets arrive split, concatenated, or mixed with noise. This state machine handles all of it.</span></p>
+
+  <table>
+    <thead><tr><th><span lang="zh">步驟</span><span lang="en">Step</span></th>
+      <th><span lang="zh">做什麼</span><span lang="en">Action</span></th>
+      <th><span lang="zh">失敗時</span><span lang="en">On failure</span></th></tr></thead>
+    <tbody>
+      <tr><td>1</td>
+        <td><span lang="zh">在緩衝裡找 header <code>40 71</code> + 站號(<code>30</code> 或 <code>31</code>)</span><span lang="en">scan the buffer for <code>40 71</code> + station (<code>30</code> or <code>31</code>)</span></td>
+        <td><span lang="zh">丟掉第一個 byte 繼續找</span><span lang="en">drop the first byte and keep scanning</span></td></tr>
+      <tr><td>2</td>
+        <td><span lang="zh">確認 <code>[3] == 0x09</code></span><span lang="en">check <code>[3] == 0x09</code></span></td>
+        <td><span lang="zh">同上</span><span lang="en">same</span></td></tr>
+      <tr><td>3</td>
+        <td><span lang="zh">看 <code>[4]</code> 決定長度:<br>
+          <code>0x00</code> → 要先收到 <code>[5]</code>,<code>total = 7 + [5]</code><br>
+          <code>0x01~0x04</code> → 固定 9</span>
+          <span lang="en">use <code>[4]</code> to determine length:<br>
+          <code>0x00</code> → wait for <code>[5]</code>, then <code>total = 7 + [5]</code><br>
+          <code>0x01–0x04</code> → fixed 9</span></td>
+        <td><span lang="zh"><code>total &gt; 151</code> 代表 <code>[5]</code> 不合理 → 丟第一個 byte 重找</span>
+          <span lang="en"><code>total &gt; 151</code> means <code>[5]</code> is bogus → drop a byte and rescan</span></td></tr>
+      <tr><td>4</td>
+        <td><span lang="zh">收滿 total bytes 後驗 CS</span><span lang="en">once total bytes have arrived, verify the CS</span></td>
+        <td><span lang="zh">CS 不過 → 丟第一個 byte 重找(不要整包丟,真正的封包可能就藏在裡面)</span>
+          <span lang="en">CS fails → drop only the first byte and rescan (do not discard the whole block; a real packet may start inside it)</span></td></tr>
+      <tr><td>5</td>
+        <td><span lang="zh">依 <code>[4]</code> 分流:<br>
+          <code>0x00</code> → <b>丟給 <code>core.feedData(packet)</code></b><br>
+          <code>0x01~0x04</code> → 軟體端自行解讀</span>
+          <span lang="en">dispatch on <code>[4]</code>:<br>
+          <code>0x00</code> → <b>pass to <code>core.feedData(packet)</code></b><br>
+          <code>0x01–0x04</code> → parse in the application</span></td>
+        <td>—</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <span lang="zh"><b>非 FIFO 的回應丟給 <code>feedData()</code> 不會壞,但值會拿不到。</b>
+      模組拆不出樣本就回 <code>K2FeedResult.empty</code>,不報錯 —— 但 READ_REG 讀回的值與 ReInit 的成功旗標
+      也就一併消失了。這兩種一定要在軟體端自己取。</span>
+    <span lang="en"><b>Passing a non-FIFO reply to <code>feedData()</code> is harmless but lossy.</b>
+      The module returns <code>K2FeedResult.empty</code> without error — but the READ_REG value and the ReInit success flag
+      are gone with it. Both must be read on the application side.</span>
+  </div>
+
+  <!-- 暫存器 -->
+  <div class="subhd"><span class="bn">D4</span><span lang="zh">晶片暫存器</span><span lang="en">Chip registers</span></div>
+  <table>
+    <thead><tr><th><span lang="zh">暫存器</span><span lang="en">Register</span></th><th>Addr</th>
+      <th><span lang="zh">ReInit 後</span><span lang="en">After ReInit</span></th>
+      <th><span lang="zh">用途</span><span lang="en">Purpose</span></th></tr></thead>
+    <tbody>
+      <tr><td>FIFO_CONFIG</td><td><code>0x08</code></td><td><code>0x1F</code></td><td><span lang="zh">FIFO 設定</span><span lang="en">FIFO settings</span></td></tr>
+      <tr><td>MODE_CONFIG</td><td><code>0x09</code></td><td><code>0x03</code></td><td><span lang="zh">工作模式(SpO2)。bit7 = SHDN 可作低功耗開關</span><span lang="en">mode (SpO2). bit7 = SHDN, usable as a low-power switch</span></td></tr>
+      <tr><td>SPO2_CONFIG</td><td><code>0x0A</code></td><td><code>0x27</code></td><td><span lang="zh">取樣率 / 解析度</span><span lang="en">sample rate / resolution</span></td></tr>
+      <tr><td>LED1_PA</td><td><code>0x0C</code></td><td><code>0x24</code></td><td><span lang="zh">紅光 LED 電流</span><span lang="en">red LED current</span></td></tr>
+      <tr><td>LED2_PA</td><td><code>0x0D</code></td><td><code>0x24</code></td><td><span lang="zh">紅外 LED 電流</span><span lang="en">IR LED current</span></td></tr>
+      <tr><td>PART_ID</td><td><code>0xFF</code></td><td><code>0x15</code></td>
+        <td><span lang="zh">驗晶片在線 —— 這欄是<b>晶片硬編碼</b>,與韌體無關</span><span lang="en">presence check — <b>hard-wired in the chip</b></span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <span lang="zh"><b>「ReInit 後」不是晶片的出廠值。</b>MAX30102 上電(POR)時這些暫存器幾乎全是 <code>0x00</code> ——
+      模式=關機、LED 電流=0,<b>不會吐任何資料</b>。表中的值是<b>韌體在 ReInit 時寫進去的工作組態</b>。
+      這也是 RESET 之後一定要 ReInit 的原因。</span>
+    <span lang="en"><b>"After ReInit" is not the factory state.</b> At power-on these registers are essentially all <code>0x00</code> —
+      mode off, LED current zero, <b>no data at all</b>. The values above are the working configuration
+      <b>written by the firmware during ReInit</b>, which is why a RESET must always be followed by a ReInit.</span>
+  </div>
+
+  <div class="note crit">
+    <span lang="zh"><b>協定中尚未由實機最終確認的部分</b>(程式內註記為「協定未定項」,目前依草稿實作):
+      <br>&middot; WRITE / READ_REG 的 <code>reg</code> 放 <code>[5]</code>、<code>value</code> 放 <code>[6]</code>
+      <br>&middot; QUERY_FIFO 的數量欄送 <b>N×6(byte 數)</b>而非組數 N
+      <br>對接時請以韌體實作為準,若有出入,兩邊要同步修正。</span>
+    <span lang="en"><b>Parts of the protocol not yet confirmed against hardware</b> (flagged in the source as provisional):
+      <br>&middot; for WRITE / READ_REG, <code>reg</code> sits at <code>[5]</code> and <code>value</code> at <code>[6]</code>
+      <br>&middot; the QUERY_FIFO count field carries <b>N×6 (a byte count)</b>, not the sample count N
+      <br>Defer to the firmware implementation; if they differ, both sides must be corrected together.</span>
+  </div>
+</section>
+</div>
+
+<footer>
+  <span lang="zh">參數與合法範圍見 <code>k2_config.dart</code> 與 <code>k2_setting_limits.dart</code>;
+    協定常數見 <code>k2_protocol.dart</code></span>
+  <span lang="en">Parameters and valid ranges: <code>k2_config.dart</code>, <code>k2_setting_limits.dart</code>;
+    protocol constants: <code>k2_protocol.dart</code></span>
+</footer>
+
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  function restore(key, attr, valid, applyLang) {
+    var v = null;
+    try { v = localStorage.getItem(key); } catch (e) {}
+    if (v && valid.indexOf(v) >= 0) {
+      root.setAttribute(attr, v);
+      if (applyLang) root.setAttribute('lang', v === 'zh' ? 'zh-Hant' : 'en');
+    }
+  }
+  restore('k2doc.lang', 'data-lang', ['zh', 'en'], true);
+  restore('k2doc.view', 'data-view', ['start', 'api', 'chain', 'arch', 'proto'], false);
+
+  document.querySelectorAll('.langbtn button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var v = b.getAttribute('data-set');
+      root.setAttribute('data-lang', v);
+      root.setAttribute('lang', v === 'zh' ? 'zh-Hant' : 'en');
+      try { localStorage.setItem('k2doc.lang', v); } catch (e) {}
+    });
+  });
+
+  document.querySelectorAll('.tabs button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var v = b.getAttribute('data-go');
+      root.setAttribute('data-view', v);
+      try { localStorage.setItem('k2doc.view', v); } catch (e) {}
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+})();
+</script>
+</body>
+</html>
