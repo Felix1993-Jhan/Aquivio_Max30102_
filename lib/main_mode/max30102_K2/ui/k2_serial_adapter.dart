@@ -28,7 +28,11 @@ import 'k2_snapshot.dart';
 
 class K2SerialAdapter extends ChangeNotifier {
   K2SerialAdapter({required this.manager, Max30102K2? core})
-      : core = core ?? Max30102K2() {
+      // 本專案是「免洗式」量測(一人一次),所以開 resetOnFingerOff:
+      // 確認手指離開時核心連絕對索引一起歸零,下一位使用者完全從零開始。
+      // 核心預設是 false(交接版的通用行為),這個開關只在這裡打開。
+      : core = core ??
+            Max30102K2(config: Max30102Config(resetOnFingerOff: true)) {
     _parser.onPacket = _onPacket;
     _parser.onError =
         (reason, partial) => _log(trParams('k2_log_parse_error', {
@@ -100,26 +104,10 @@ class K2SerialAdapter extends ChangeNotifier {
   /// —— 兩邊不同步的話,波形上看得到的段落在核心裡可能已經沒有對應的拍了。
   int get _waveCap => core.config.dataHistorySamples;
 
-  /// **長期 RR 累積(UI 自己存)** —— 核心只留最近 dataHistoryMs(30 秒),
-  /// 要看更長就是軟體端的責任。這裡示範最簡單的做法:每輪把新拍併進來。
-  /// 交接時這段可以直接抄:核心負責算、軟體負責存。
-  final List<HrvRrPoint> allPoints = [];
-  static const int _allCap = 300; // 拍;純顯示用,想存多久由軟體決定
-
-  /// 把核心這輪的 RR 併進長期池(靠 endAbs 去重,只收比現有更新的拍)。
-  void _mergePoints(List<HrvRrPoint> pts) {
-    for (final p in pts) {
-      if (allPoints.isEmpty || p.endAbs > allPoints.last.endAbs) {
-        allPoints.add(p);
-      }
-    }
-    final over = allPoints.length - _allCap;
-    if (over > 0) allPoints.removeRange(0, over);
-  }
-
-  /// 長期池的 HRV(跨手指離開的斷層會被連續性規則正確跳過)。
-  HrvStats? get allHrv =>
-      allPoints.isEmpty ? null : Max30102HrvCalculator.hrvFrom(allPoints);
+  // ⚠️ 這裡原本有一個「長期 RR 累積池」(allPoints,上限 300 拍),用來顯示跨越
+  //    核心 30 秒視窗的長期 HRV。**免洗版已整個移除** —— 一人一次量測的場景下,
+  //    跨測試累積的統計會把不同使用者的拍混在一起,不但沒有參考價值還會誤導。
+  //    現在畫面上的 HRV 一律來自核心當下的視窗(見 hrvRecentSeconds)。
 
   /// `waveIr[0]` 的絕對位置。由核心給的 firstAbs 維護,裁掉幾筆就往前推幾筆。
   /// 有了它,谷/RR 的絕對位置才能換算成波形陣列索引。
@@ -163,26 +151,22 @@ class K2SerialAdapter extends ChangeNotifier {
 
   /// 清空核心 + 波形歷史(開始一段新檢驗前用)。
   ///
-  /// **不動長期池** —— 那是 UI 自己的東西,由 [clearHistory] 各自負責。
-  /// 兩者分開的理由:核心什麼時候該重來、UI 的歷史什麼時候該丟,是兩件事;
-  /// 綁在一起的話,以後想「只重啟核心但保留長期統計」就沒得選了。
+  /// 免洗版沒有長期池,這一支就是「全部歸零」的唯一入口。
   void reset() {
     core.reset();
+    _clearLocal();
+    _log(tr('k2_log_cleared_core'));
+    notifyListeners();
+  }
+
+  /// 清掉 **UI 這一側**存的所有東西(核心不動)。
+  /// 手動 reset 與核心自行歸零(didReset)兩條路都走這裡,免得有一邊漏清。
+  void _clearLocal() {
     waveIr.clear();
     waveRed.clear();
     waveBase = 0;
     latest = null;
     held = null; // 保留值也一起清,不然清空後畫面還掛著上一次的數字
-    _log(tr('k2_log_cleared_core'));
-    notifyListeners();
-  }
-
-  /// 清空 **UI 自己累積的長期 RR 池**。與 [reset] 各自獨立呼叫。
-  /// 手指離開時不會清(那樣就不叫長期了),只有使用者主動要求才清。
-  void clearHistory() {
-    allPoints.clear();
-    _log(tr('k2_log_cleared_pool'));
-    notifyListeners();
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -256,12 +240,12 @@ class K2SerialAdapter extends ChangeNotifier {
     // ★ 唯一與核心互動的地方:原封丟進去,核心自己驗 CS、拆 red/ir、累積、算。
     final r = core.feedData(packet);
 
-    // 核心自行清空過(索引到頂)→ 我們存的座標全失效,一起丟掉重來
+    // 核心自行歸零過 → 我們存的座標全失效,一起丟掉重來。
+    // 兩種來源:①免洗模式下確認手指離開(常態) ②絕對索引到頂(約 497 天才一次)。
+    // 旗標只有一個、分不出來,所以訊息寫中性的。
     if (r.didReset) {
-      waveIr.clear();
-      waveRed.clear();
-      latest = null;
-      _log(tr('k2_log_index_wrap'));
+      _clearLocal();
+      _log(tr('k2_log_core_reset'));
     }
 
     // UI 自己存波形歷史(核心不存)
@@ -293,7 +277,6 @@ class K2SerialAdapter extends ChangeNotifier {
       if (c.fingerPresent && !c.settling && c.rrPoints.isNotEmpty) {
         held = c;
       }
-      _mergePoints(c.rrPoints); // 併進 UI 的長期池(核心只留 30 秒)
       notifyListeners(); // 約每秒一次才刷新畫面
       // 手指離開時**不清波形** —— 與數值一致地保留原樣,等手指回來才更新。
       // (畫面上有「保留上次」徽章,不會被誤認成即時資料。)
@@ -369,49 +352,22 @@ class K2SerialAdapter extends ChangeNotifier {
   // 快照(UI 層存檔;核心不參與)
   // ══════════════════════════════════════════════════════════════
 
-  /// 組一份快照 JSON。內容:
-  ///   ① 30 秒視窗(一定有):ir/red 波形、goldTroughs(視窗內索引)、當下短期數值
-  ///   ② 長期累積(超過 30 秒才有,否則 null):allPoints 的 rr/起訖谷 + 長期 HRV
+  /// 組一份快照 JSON:核心視窗內的 ir/red 波形、goldTroughs(視窗內索引)、
+  /// 當下數值與短期 HRV。
   ///
   /// 格式與舊版快照相容(ir/red/goldTroughs/fs 同名),可餵回核心重放。
+  /// ⚠️ 免洗版**不再寫 longTerm 欄位**(長期池已移除)。舊快照檔裡若有,讀取時忽略。
   Map<String, dynamic> buildSnapshot() {
     const fs = Max30102Config.samplingRateHz;
     final c = latest;
     final hv = c?.hrv;
-
-    // ── ② 長期:allPoints 涵蓋時間 > 30 秒才放,否則留白 ──
-    Map<String, dynamic>? longTerm;
-    if (allPoints.length >= 2) {
-      final spanSamples = allPoints.last.endAbs - allPoints.first.startAbs;
-      if (spanSamples > _waveCap) {
-        // 超過核心保留的 30 秒 → 長期池有「畫面上看不到的更早資料」,值得存
-        final lhv = allHrv;
-        longTerm = {
-          'spanSeconds': spanSamples / fs,
-          'rr': [for (final p in allPoints) p.rr],
-          'startAbs': [for (final p in allPoints) p.startAbs],
-          'endAbs': [for (final p in allPoints) p.endAbs],
-          if (lhv != null)
-            'hrv': {
-              'sdnn': lhv.sdnn,
-              'rmssd': lhv.rmssd,
-              'sd1': lhv.sd1,
-              'sd2': lhv.sd2,
-              'pnn50': lhv.pnn50,
-              'meanRr': lhv.meanRr,
-              'meanHr': lhv.meanHr,
-              'beats': lhv.beats,
-            },
-        };
-      }
-    }
 
     return {
       'version': 'k2-1',
       'tsMillis': DateTime.now().millisecondsSinceEpoch,
       'fs': fs,
       'windowSeconds': _waveCap ~/ fs,
-      // ── ① 30 秒視窗(畫面上看得到的那段)──
+      // 核心視窗(畫面上看得到的那段)
       'ir': List<int>.of(waveIr),
       'red': List<int>.of(waveRed),
       'goldTroughs': displayTroughs(), // 視窗內索引,重放對拍用
@@ -433,8 +389,6 @@ class K2SerialAdapter extends ChangeNotifier {
           'meanHr': hv.meanHr,
           'beats': hv.beats,
         },
-      // ── ② 長期(超過 30 秒才有)──
-      'longTerm': longTerm,
     };
   }
 
@@ -451,10 +405,8 @@ class K2SerialAdapter extends ChangeNotifier {
       snap['tsMillis'] as int,
     );
     if (path != null) {
-      final hasLong = snap['longTerm'] != null;
       _log(trParams('k2_log_snap_saved', {
         'name': path.split(RegExp(r'[\\/]')).last,
-        'scope': hasLong ? tr('k2_log_snap_long') : tr('k2_log_snap_short'),
       }));
     } else {
       _log(tr('k2_log_snap_failed'));

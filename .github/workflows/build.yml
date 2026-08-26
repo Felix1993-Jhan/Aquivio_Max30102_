@@ -1,0 +1,197 @@
+name: Build MAX30102 Tester
+
+# 這個 repo 的 Flutter 專案就在 repo 根,不在任何子資料夾裡
+# → 不需要 paths 過濾,也不需要 working-directory,所有路徑從根算。
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  # ══════════════════════════════════════════════════════════════
+  # (A) Windows 桌面 App
+  # ══════════════════════════════════════════════════════════════
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'
+
+    - name: Enable Windows desktop
+      run: flutter config --enable-windows-desktop
+
+    - name: Install dependencies
+      run: flutter pub get
+
+    - name: Analyze
+      run: flutter analyze
+
+    - name: Build Windows Release
+      run: flutter build windows --release
+
+    - name: Upload Windows artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: MAX30102Tester-Windows
+        path: build/windows/x64/runner/Release/
+        retention-days: 30
+
+  # ══════════════════════════════════════════════════════════════
+  # (B) Linux 桌面 App
+  # ══════════════════════════════════════════════════════════════
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Linux dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'
+
+    - name: Enable Linux desktop
+      run: flutter config --enable-linux-desktop
+
+    - name: Install dependencies
+      run: flutter pub get
+
+    - name: Build Linux Release
+      run: flutter build linux --release
+
+    - name: Upload Linux artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: MAX30102Tester-Linux
+        path: build/linux/x64/release/bundle/
+        retention-days: 30
+
+  # ══════════════════════════════════════════════════════════════
+  # (C) Linux AMD64 無頭 server(dart compile exe)
+  # ══════════════════════════════════════════════════════════════
+  # 注意:這個 job **不需要** GTK 那一整包桌面相依 —— server 是純 Dart,
+  # 不連結 Flutter engine。它只需要 libserialport 這個 C 函式庫(FFI 用)。
+  build-server:
+    name: Build Linux Server (AMD64)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install libserialport
+      run: |
+        sudo apt-get update
+        # socat 是為了下面的「虛擬串口」測試 —— 它能開一對假的 pty,
+        # 讓 CI 不接真硬體也能驗證 serial 模式真的開得起來。
+        sudo apt-get install -y libserialport-dev socat
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'
+
+    - name: Install dependencies
+      run: flutter pub get
+
+    - name: Compile server executable
+      # server 只 import 純 Dart 核心(lib/main_mode/max30102_K2/ 扣掉 ui/)。
+      # 這一步若失敗,幾乎都是 import 圖混進了 package:flutter 或 ui/。
+      run: dart compile exe bin/max30102_server.dart -o max30102_server
+
+    - name: Smoke test (feed mode)
+      # 起 server → 打 /health → 餵一個合成封包 → 確認 /vitals 回得出來。
+      # 不接串口,純粹驗證編出來的執行檔真的跑得動。
+      run: |
+        ./max30102_server --mode feed --port 8770 &
+        SERVER_PID=$!
+        sleep 2
+        echo "--- /health ---"
+        curl -fsS http://127.0.0.1:8770/health
+        echo ""
+        echo "--- /feed (一組合成樣本) ---"
+        # 封包內容:40 71 31 09 00 06 | 60 EA 00(RED=60000) | 50 66 01(IR=91728) | 0E
+        # 最後的 14(0x0E) 是 checksum:(0x100 - (前面總和 754 & 0xFF)) & 0xFF
+        curl -fsS -X POST http://127.0.0.1:8770/feed \
+          -H 'Content-Type: application/json' \
+          -d '{"bytes":[64,113,49,9,0,6,96,234,0,80,102,1,14]}'
+        echo ""
+        echo "--- /vitals ---"
+        curl -fsS http://127.0.0.1:8770/vitals
+        echo ""
+        kill $SERVER_PID
+
+    - name: Smoke test (serial mode, virtual port)
+      # 用 socat 開一對虛擬 pty 當假串口 —— 不接真硬體也能驗證:
+      #   ① serial 模式真的開得起來(libserialport 載入 + 開埠成功)
+      #   ② serial 模式下 POST /feed 確實被擋(409),不會默默吃掉
+      # ②在開發機(Windows)測不到,因為那裡的 Application Control 政策擋住 DLL。
+      run: |
+        set -e
+        # socat 會把配對好的兩個 pty 路徑印到 stderr
+        socat -d -d pty,raw,echo=0 pty,raw,echo=0 > /dev/null 2> socat.log &
+        SOCAT_PID=$!
+        sleep 2
+        PTY=$(grep -oE '/dev/pts/[0-9]+' socat.log | head -1)
+        if [ -z "$PTY" ]; then
+          echo "❌ 沒能從 socat 取得 pty 路徑"; cat socat.log; exit 1
+        fi
+        echo "虛擬串口:$PTY"
+
+        ./max30102_server --mode serial --serial "$PTY" --port 8771 &
+        SERVER_PID=$!
+        sleep 3
+
+        echo "--- /health (應為 serial 模式且 open=true) ---"
+        HEALTH=$(curl -fsS http://127.0.0.1:8771/health)
+        echo "$HEALTH"
+        echo "$HEALTH" | grep -q '"mode":"serial"' \
+          || { echo "❌ 沒有進入 serial 模式"; kill $SERVER_PID $SOCAT_PID; exit 1; }
+        echo "$HEALTH" | grep -q '"open":true' \
+          || { echo "❌ 串口沒有真的開啟"; kill $SERVER_PID $SOCAT_PID; exit 1; }
+        echo "✅ serial 模式啟動成功,串口已開"
+
+        echo "--- POST /feed 應被拒絕(409) ---"
+        CODE=$(curl -s -o /tmp/feed_resp.json -w '%{http_code}' \
+          -X POST http://127.0.0.1:8771/feed \
+          -H 'Content-Type: application/json' \
+          -d '{"bytes":[64,113,49,9,0,6,96,234,0,80,102,1,14]}')
+        cat /tmp/feed_resp.json; echo ""
+        [ "$CODE" = "409" ] \
+          || { echo "❌ 預期 409,實際 $CODE"; kill $SERVER_PID $SOCAT_PID; exit 1; }
+        echo "✅ serial 模式下 /feed 正確回 409"
+
+        echo "--- POST /mode 切回 feed 後 /feed 應恢復可用 ---"
+        curl -fsS -X POST http://127.0.0.1:8771/mode \
+          -H 'Content-Type: application/json' -d '{"mode":"feed"}'
+        echo ""
+        curl -fsS -X POST http://127.0.0.1:8771/feed \
+          -H 'Content-Type: application/json' \
+          -d '{"bytes":[64,113,49,9,0,6,96,234,0,80,102,1,14]}'
+        echo ""
+        echo "✅ 模式切換正常"
+
+        kill $SERVER_PID $SOCAT_PID
+
+    - name: Upload server artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: max30102-server-linux-amd64
+        path: max30102_server
+        retention-days: 30

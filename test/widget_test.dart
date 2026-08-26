@@ -21,13 +21,13 @@ void main() {
     );
 
     // 開場畫面應該先出現
-    expect(find.text('Aquivio Firmware Tester Unified'), findsOneWidget);
+    expect(find.text('Aquivio MAX30102 Tester'), findsOneWidget);
     expect(find.text('主畫面替身'), findsNothing);
 
     // 走完計時器與淡出動畫後，應切換到 child
     await tester.pumpAndSettle();
 
-    expect(find.text('Aquivio Firmware Tester Unified'), findsNothing);
+    expect(find.text('Aquivio MAX30102 Tester'), findsNothing);
     expect(find.text('主畫面替身'), findsOneWidget);
   });
 }

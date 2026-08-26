@@ -56,9 +56,8 @@ class _K2PageState extends State<K2Page> {
   /// 目前視窗長(秒)。上限受 K2SerialAdapter._waveCap 限制(目前 30s)。
   int _shortSec = 30;
 
-  /// 兩個區塊的高度(可拖曳調整,比照原本波形圖2 的做法)。
+  /// 即時區塊的高度(可拖曳調整,比照原本波形圖2 的做法)。
   double _sec1Height = 430;
-  double _sec2Height = 250;
 
   // ── 快照檢視 ──
   List<K2Snapshot> _snapshots = const [];
@@ -214,10 +213,7 @@ class _K2PageState extends State<K2Page> {
                 final label = '${two(t.month)}/${two(t.day)} '
                     '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
                 return ChoiceChip(
-                  label: Text(
-                    '$label${s.hasLong ? " ⏱" : ""}',
-                    style: const TextStyle(fontSize: 11),
-                  ),
+                  label: Text(label, style: const TextStyle(fontSize: 11)),
                   selected: open,
                   onSelected: (_) =>
                       setState(() => _openSnap = open ? null : s),
@@ -353,30 +349,6 @@ class _K2PageState extends State<K2Page> {
               ],
             ),
           ),
-          // ── 長期累積(超過 30 秒才有,否則留白)──
-          const SizedBox(height: 10),
-          if (s.hasLong) ...[
-            Text(
-                trParams('k2_long_span', {
-                  'sec': s.longSpanSeconds.toStringAsFixed(0),
-                  'beats': s.longRrPoints.length,
-                }),
-                style:
-                    const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            SizedBox(
-              height: 200,
-              child: Max30102HrvChartView(
-                rr: [for (final p in s.longRrPoints) p.rr],
-                cont: _adapter.contOf(s.longRrPoints),
-                hv: Max30102HrvCalculator.hrvFrom(s.longRrPoints),
-              ),
-            ),
-          ] else
-            Text(
-                trParams(
-                    'k2_snap_no_long', {'sec': s.windowSeconds}),
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade400)),
         ],
       ),
     );
@@ -404,14 +376,14 @@ class _K2PageState extends State<K2Page> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 免洗版移除了原本的「② 長期 HRV(UI 累積 300 拍)」——
+            // 跨測試累積會把不同使用者的拍混在一起。剩下三區重新編號。
             _sectionBox(trParams('k2_sec1', {'sec': _shortSec}),
                 _liveAndShortHrv()),
             const SizedBox(height: 12),
-            _sectionBox(tr('k2_sec2'), _longHrv()),
+            _sectionBox(tr('k2_sec2'), _snapshotViewer()),
             const SizedBox(height: 12),
-            _sectionBox(tr('k2_sec3'), _snapshotViewer()),
-            const SizedBox(height: 12),
-            _sectionBox(tr('k2_sec4'), _chipControl()),
+            _sectionBox(tr('k2_sec3'), _chipControl()),
           ],
         ),
       ),
@@ -522,10 +494,8 @@ class _K2PageState extends State<K2Page> {
           OutlinedButton(
             // 兩個池分開清:核心(緩衝+RR池)與 UI 長期池是各自獨立的東西,
             // 按鈕這裡決定「要清哪些」,而不是把它綁死在 adapter.reset() 裡。
-            onPressed: () {
-              _adapter.reset(); // 核心 + 波形
-              _adapter.clearHistory(); // UI 長期 RR 池
-            },
+            // 免洗版沒有長期池了,reset() 就是全部歸零的唯一入口。
+            onPressed: _adapter.reset,
             style: smallOut,
             child: Text(tr('k2_clear')),
           ),
@@ -749,49 +719,6 @@ class _K2PageState extends State<K2Page> {
           ),
         ),
         _resizeHandle(_sec1Height, (v) => _sec1Height = v),
-      ],
-    );
-  }
-
-  // ── ② 長期 HRV(同樣左右分欄:左面板 / 右 RR趨勢+Poincaré)────────
-  Widget _longHrv() {
-    // ★ 這一區讀的是 **UI 自己累積的長期池**,不是核心的(核心只留 30 秒)。
-    final pts = _adapter.allPoints;
-    final hv = _adapter.allHrv;
-    final rr = [for (final p in pts) p.rr];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          trParams('k2_long_desc',
-              {'sec': _adapter.core.config.dataHistoryMs ~/ 1000}),
-          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-        ),
-        const SizedBox(height: 6),
-        SizedBox(
-          height: _sec2Height,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _sidePanel([
-                Text(tr('k2_hrv_long'),
-                    style: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                _kvList(hv, rr.length),
-              ]),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Max30102HrvChartView(
-                  rr: rr,
-                  cont: _adapter.contOf(pts),
-                  hv: hv,
-                ),
-              ),
-            ],
-          ),
-        ),
-        _resizeHandle(_sec2Height, (v) => _sec2Height = v),
       ],
     );
   }

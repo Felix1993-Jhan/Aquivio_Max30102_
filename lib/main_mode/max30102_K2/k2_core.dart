@@ -312,7 +312,25 @@ class Max30102K2 {
     }
 
     if (!fingerNow && _noFingerBatches >= config.fingerOffBatches) {
-      final absNoFinger = _totalSamples;
+      // ── 免洗模式:已經歸零、正在等下一次量測 ─────────────────────────
+      // 這段「沒人的空檔」不計入時間軸 —— 它不屬於任何一次量測。
+      // 少了這個判斷,歸零之後只要還沒有人放手指,索引就會繼續往上加,
+      // 等越久下一位的起始索引越大,就不叫「完全從零開始」了。
+      final alreadyClean = _ir.isEmpty && _sinceFingerOn == 0;
+      if (config.resetOnFingerOff && alreadyClean) {
+        _last = const K2Compute.noFinger();
+        return K2FeedResult(
+          firstAbs: 0,
+          newIr: const [],
+          newRed: const [],
+          newIrTrim: const [],
+          newRedTrim: const [],
+          computed: _last,
+          didReset: didReset,
+        );
+      }
+
+      var absNoFinger = _totalSamples;
       _totalSamples += n; // 絕對時間軸照走(樣本丟棄不代表時間沒過)
       if (_ir.isNotEmpty || _sinceFingerOn > 0) {
         _ir.clear();
@@ -327,6 +345,22 @@ class Max30102K2 {
         // 序列鎖死在半速。樣本緩衝都清了,從它算出來的拍沒有理由留著。
         _beats.reset();
         _lastFedAbs = -1;
+
+        // ── 免洗模式:連絕對索引一起歸零,下一次量測完全從零開始 ──────────
+        //
+        // ⚠️ 這裡**刻意不呼叫 reset()** —— reset() 裡有 `_noFingerBatches = 0`,
+        //    而手指離開後通常會持續沒有手指。把去彈跳計數歸零的話,會變成
+        //    「每隔 fingerOffBatches 批就重新觸發一次歸零」,didReset 被反覆回報。
+        //    這裡只補該補的兩件事,其餘狀態上面幾行已經清乾淨了。
+        //
+        // 不會重複觸發:外層的 `_ir.isNotEmpty || _sinceFingerOn > 0` 守衛在第一次
+        // 清完後就不成立了,後續的無手指批次進不到這裡。
+        if (config.resetOnFingerOff) {
+          _totalSamples = 0; // 覆蓋掉上面的 += n
+          didReset = true; // 沿用既有旗標通知軟體端:你存的座標全失效了
+          // 已經歸零,回舊時間軸上的位置只會誤導軟體端(這批 newIr 本來就是空的)
+          absNoFinger = 0;
+        }
       }
       _last = const K2Compute.noFinger();
       return K2FeedResult(

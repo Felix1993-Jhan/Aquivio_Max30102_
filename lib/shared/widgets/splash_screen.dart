@@ -160,7 +160,7 @@ class _SplashScreenState extends State<SplashScreen>
                   child: Column(
                     children: [
                       const Text(
-                        'Aquivio Firmware Tester Unified',
+                        'Aquivio MAX30102 Tester',
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,

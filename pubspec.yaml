@@ -39,6 +39,11 @@ dependencies:
   window_manager: ^0.4.3  # 用於設定視窗最小尺寸
   file_picker: ^8.0.0  # 用於選擇韌體檔案
 
+  # 無頭 server(bin/max30102_server.dart)用的**純 Dart** 串口套件。
+  # ⚠️ 不可改用 flutter_libserialport —— 那支綁 Flutter,dart compile exe 編不過。
+  # 本來就是 flutter_libserialport 的傳遞相依,這裡只是提升為直接相依。
+  libserialport: ^0.3.0
+
 
 dev_dependencies:
   flutter_test:

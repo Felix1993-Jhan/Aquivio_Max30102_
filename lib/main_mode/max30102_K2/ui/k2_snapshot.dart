@@ -28,7 +28,7 @@ class K2Snapshot {
   final int fs;
   final int windowSeconds;
 
-  // ① 30 秒視窗
+  // 核心視窗那一段(免洗版沒有長期累積,快照就只有這一段)
   final List<int> ir;
   final List<int> red;
   final List<int> goldTroughs; // 視窗內索引
@@ -36,10 +36,6 @@ class K2Snapshot {
   final double? bpm;
   final double? spo2;
   final bool fingerPresent;
-
-  // ② 長期(可能為空)
-  final List<HrvRrPoint> longRrPoints;
-  final double longSpanSeconds;
 
   const K2Snapshot({
     required this.path,
@@ -53,12 +49,9 @@ class K2Snapshot {
     required this.bpm,
     required this.spo2,
     required this.fingerPresent,
-    required this.longRrPoints,
-    required this.longSpanSeconds,
   });
 
   DateTime get time => DateTime.fromMillisecondsSinceEpoch(tsMillis);
-  bool get hasLong => longRrPoints.isNotEmpty;
 
   static List<HrvRrPoint> _points(List rr, List sa, List ea) {
     final n = [rr.length, sa.length, ea.length].reduce((a, b) => a < b ? a : b);
@@ -75,7 +68,8 @@ class K2Snapshot {
   factory K2Snapshot.fromJson(String path, Map<String, dynamic> j) {
     List<int> ints(String k) =>
         ((j[k] as List?) ?? const []).map((e) => (e as num).toInt()).toList();
-    final lt = j['longTerm'] as Map<String, dynamic>?;
+    // ⚠️ 舊版快照檔裡可能還有 'longTerm' 欄位 —— 免洗版直接忽略,不會讀取失敗。
+    //    舊檔的波形與短期 HRV 照樣開得起來,只是不再顯示長期那一段。
     return K2Snapshot(
       path: path,
       tsMillis: (j['tsMillis'] as num?)?.toInt() ?? 0,
@@ -92,14 +86,6 @@ class K2Snapshot {
       bpm: (j['bpm'] as num?)?.toDouble(),
       spo2: (j['spo2'] as num?)?.toDouble(),
       fingerPresent: j['fingerPresent'] == true,
-      longRrPoints: lt == null
-          ? const []
-          : _points(
-              (lt['rr'] as List?) ?? const [],
-              (lt['startAbs'] as List?) ?? const [],
-              (lt['endAbs'] as List?) ?? const [],
-            ),
-      longSpanSeconds: (lt?['spanSeconds'] as num?)?.toDouble() ?? 0,
     );
   }
 }

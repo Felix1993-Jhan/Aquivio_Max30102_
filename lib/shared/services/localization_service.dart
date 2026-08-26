@@ -550,10 +550,9 @@ class LocalizationService {
       // ---------- MAX30102 K2（交接版驗證頁）----------
       // 頁面標題與區塊
       'k2_title': 'MAX30102 K2(交接版驗證)',
-      'k2_sec1': '① 即時數值 + 短期 HRV(滾動最近 {sec} 秒)',
-      'k2_sec2': '② 長期 HRV(UI 自行累積,上限 300 拍)',
-      'k2_sec3': '③ 快照檢視(存檔重畫)',
-      'k2_sec4': '④ 晶片控制',
+      'k2_sec1': '① 即時數值 + HRV(滾動最近 {sec} 秒)',
+      'k2_sec2': '② 快照檢視(存檔重畫)',
+      'k2_sec3': '③ 晶片控制',
 
       // 連線列
       'k2_connected': '● 已連線 {port}',
@@ -582,7 +581,6 @@ class LocalizationService {
 
       // HRV 面板
       'k2_hrv_short': 'HRV 心率變異(最近 {sec}s)',
-      'k2_hrv_long': 'HRV 心率變異(UI 長期累積)',
       'k2_hrv_insufficient': '— 拍數不足({beats} 拍;暖機需 ≥9)',
       'k2_hrv_score': 'HRV 分數',
       'k2_mean_rr': '平均 RR',
@@ -590,9 +588,6 @@ class LocalizationService {
       'k2_beats_total': '累積拍數',
       'k2_valid_pairs': '有效對數',
       'k2_skipped': ' (跳{n})',
-      'k2_long_desc': '核心只留最近 {sec} 秒 → 這一區的長期序列由 UI 自行累積'
-          '(每輪把新拍併進來,上限 300 拍)。'
-          '跨手指離開的斷層會被連續性規則正確跳過,不會被當成一個超長 RR。',
 
       // 快照檢視
       'k2_snap_hint': '把存過的快照點開,用同一套圖表重畫波形、谷、RR 趨勢',
@@ -607,8 +602,6 @@ class LocalizationService {
       'k2_window_sec': '{sec} 秒視窗',
       'k2_hr': '心率',
       'k2_spo2': '血氧',
-      'k2_long_span': '長期累積(涵蓋 {sec} 秒 · {beats} 拍)',
-      'k2_snap_no_long': '(此快照未超過 {sec} 秒,無長期累積)',
 
       // 晶片控制
       'k2_btn_init': 'INIT 初始化',
@@ -679,16 +672,15 @@ class LocalizationService {
       'k2_log_start': '🟢 開始量測(探測板子中:0x31 優先,逾時退 0x30)',
       'k2_log_stop': '⏸ 停止量測',
       'k2_log_cleared_core': '🧹 已清空核心 + 波形',
-      'k2_log_cleared_pool': '🧹 已清空 UI 長期 RR 池',
       'k2_log_board_main': '🔒 板子鎖定:主板 0x30(擴充板 0x31 逾時無回應)',
       'k2_log_board_expansion': '🔒 板子鎖定:擴充板 0x31',
       'k2_log_tx_failed': '❌ 送出失敗:{label}',
       'k2_log_tx': '→ TX {label}',
-      'k2_log_index_wrap': '♻ 核心索引到頂已自行清空,UI 波形同步重來',
+      // 免洗模式下每次手指離開都會印這句,所以寫中性的
+      // (didReset 只有一個旗標,分不出是「手指離開歸零」還是「索引到頂」)
+      'k2_log_core_reset': '♻ 核心已歸零,UI 波形同步重來',
       'k2_log_no_wave': '⚠ 沒有波形資料,無法存快照',
-      'k2_log_snap_saved': '📸 已存快照:{name}{scope}',
-      'k2_log_snap_long': '(含長期累積)',
-      'k2_log_snap_short': '(僅短期視窗)',
+      'k2_log_snap_saved': '📸 已存快照:{name}',
       'k2_log_snap_failed': '❌ 快照存檔失敗(找不到桌面路徑?)',
     },
 
@@ -1199,10 +1191,9 @@ class LocalizationService {
       // ---------- MAX30102 K2 (handover verification page) ----------
       // Page title and sections
       'k2_title': 'MAX30102 K2 (Handover Verification)',
-      'k2_sec1': '① Live values + short-term HRV (rolling last {sec}s)',
-      'k2_sec2': '② Long-term HRV (accumulated by UI, max 300 beats)',
-      'k2_sec3': '③ Snapshot viewer (replay from file)',
-      'k2_sec4': '④ Chip control',
+      'k2_sec1': '① Live values + HRV (rolling last {sec}s)',
+      'k2_sec2': '② Snapshot viewer (replay from file)',
+      'k2_sec3': '③ Chip control',
 
       // Connection bar
       'k2_connected': '● Connected {port}',
@@ -1233,7 +1224,6 @@ class LocalizationService {
 
       // HRV panel
       'k2_hrv_short': 'HRV (last {sec}s)',
-      'k2_hrv_long': 'HRV (UI long-term)',
       'k2_hrv_insufficient': '— not enough beats ({beats}; needs ≥9)',
       'k2_hrv_score': 'HRV score',
       'k2_mean_rr': 'Mean RR',
@@ -1241,10 +1231,6 @@ class LocalizationService {
       'k2_beats_total': 'Beats',
       'k2_valid_pairs': 'Valid pairs',
       'k2_skipped': ' (skip {n})',
-      'k2_long_desc': 'The core keeps only the last {sec}s → this long-term '
-          'series is accumulated by the UI (new beats merged each round, '
-          'max 300 beats). Gaps from the finger being removed are skipped by '
-          'the continuity rule instead of becoming one huge RR.',
 
       // Snapshot viewer
       'k2_snap_hint':
@@ -1261,9 +1247,6 @@ class LocalizationService {
       'k2_window_sec': '{sec}s window',
       'k2_hr': 'HR',
       'k2_spo2': 'SpO₂',
-      'k2_long_span': 'Long-term (spans {sec}s · {beats} beats)',
-      'k2_snap_no_long':
-          '(this snapshot is under {sec}s — no long-term series)',
 
       // Chip control
       'k2_btn_init': 'INIT',
@@ -1336,18 +1319,14 @@ class LocalizationService {
           '🟢 Measuring (probing board: 0x31 first, falls back to 0x30 on timeout)',
       'k2_log_stop': '⏸ Stopped',
       'k2_log_cleared_core': '🧹 Cleared core + waveform',
-      'k2_log_cleared_pool': '🧹 Cleared UI long-term RR pool',
       'k2_log_board_main':
           '🔒 Board locked: main 0x30 (expansion 0x31 did not answer)',
       'k2_log_board_expansion': '🔒 Board locked: expansion 0x31',
       'k2_log_tx_failed': '❌ Send failed: {label}',
       'k2_log_tx': '→ TX {label}',
-      'k2_log_index_wrap':
-          '♻ Core index wrapped and self-cleared; UI waveform restarted',
+      'k2_log_core_reset': '♻ Core reset; UI waveform restarted',
       'k2_log_no_wave': '⚠ No waveform data — cannot save snapshot',
-      'k2_log_snap_saved': '📸 Snapshot saved: {name}{scope}',
-      'k2_log_snap_long': ' (with long-term series)',
-      'k2_log_snap_short': ' (short-term window only)',
+      'k2_log_snap_saved': '📸 Snapshot saved: {name}',
       'k2_log_snap_failed': '❌ Failed to save snapshot (desktop path not found?)',
     },
   };

@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "AQUIVIO" "\0"
-            VALUE "FileDescription", "Firmware Tester Unified" "\0"
+            VALUE "FileDescription", "MAX30102 Handover Tester" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "firmware_tester_unified" "\0"
+            VALUE "InternalName", "max30102_handover_tester" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 AQUIVIO. All rights reserved." "\0"
-            VALUE "OriginalFilename", "firmware_tester_unified.exe" "\0"
-            VALUE "ProductName", "Firmware Tester Unified" "\0"
+            VALUE "OriginalFilename", "MAX30102HandoverTester.exe" "\0"
+            VALUE "ProductName", "MAX30102 Handover Tester" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

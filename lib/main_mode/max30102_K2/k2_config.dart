@@ -163,6 +163,8 @@ class Max30102Config {
     this.fingerDeadMs = 1500,
     this.dataHistoryMs = 30000,
     this.fingerOffBatches = 3,
+    // 預設 false:交接核心的通用行為不變,要免洗語意的專案自己開。
+    this.resetOnFingerOff = false,
     this.searchBackEnabled = false,
     this.cleanEnabled = true,
     this.spo2SmoothFactor = 0.7,
@@ -256,4 +258,20 @@ class Max30102Config {
   /// ⚠️ 小於 1 等於沒有去彈跳。一批 = 一次 [Max30102K2.feedData],以 100ms 輪詢
   ///    來說 3 批 ≈ 300ms。
   int fingerOffBatches;
+
+  /// **手指離開時連絕對索引一起歸零**(「免洗式」量測用;預設關閉)。
+  ///
+  /// · `true`  —— 確認手指離開時,除了清緩衝與 RR 池,連 [Max30102K2.totalSamples]
+  ///              也歸 0,並在該次回傳 `K2FeedResult.didReset = true`。
+  ///              **每次新量測完全從零開始**,適合一人一副免洗筷式的場景:
+  ///              下一位使用者的時間軸不會接在上一位後面。
+  /// · `false` —— 維持原行為:離開只清緩衝與 RR 池,**保留絕對索引繼續累加**。
+  ///
+  /// 兩者的**觸發時機完全相同** —— 都要先過 [fingerOffBatches] 去彈跳、確認
+  /// 「真的離開」才動作。單批雜訊不會觸發歸零。
+  ///
+  /// ⚠️ 開啟後,軟體端自己存的座標(波形陣列、`troughAbs`、`rrPoints` 的 abs)
+  ///    會在歸零那一刻全部失效。收到 `didReset == true` 就要把自己累積的東西
+  ///    一併丟掉重來 —— 不丟的話,新舊兩條時間軸的索引會混在一起。
+  bool resetOnFingerOff;
 }

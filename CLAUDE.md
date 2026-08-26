@@ -25,6 +25,8 @@
 ## 目錄結構
 
 ```
+bin/
+└── max30102_server.dart                         # ★ 無頭 server 進入點（純 Dart）
 lib/
 ├── main.dart                                    # 入口 + 視窗初始化
 ├── main_mode/
@@ -114,9 +116,48 @@ K2 的 `ui/` 已全面接上 `LocalizationService`（繁中 / English），字�
 
 日誌裡提到欄位名的地方（`_fieldToLabelKey` / `_switchToLabelKey`）存的是**欄位標籤的翻譯 key** 而非寫死字串，確保日誌講的欄位名與畫面上輸入框的 label 一致。新增可調參數時三處要同步：欄位本身、翻譯 key、對照表。
 
+### 免洗模式（`resetOnFingerOff`）
+
+本專案是「一人一次」的量測情境，所以 `Max30102Config(resetOnFingerOff: true)`：**確認手指離開時，核心連絕對索引 `totalSamples` 一起歸零**，下一位使用者完全從零開始。核心預設是 `false`（交接版的通用行為不變），開關只在兩個地方打開：[k2_serial_adapter.dart](lib/main_mode/max30102_K2/ui/k2_serial_adapter.dart) 的建構、以及 server 的 `K2Engine`。
+
+三個容易踩的點：
+
+1. **不能直接呼叫 `reset()`** — `reset()` 內含 `_noFingerBatches = 0`，會把去彈跳計數清掉，導致持續沒手指時每隔 `fingerOffBatches` 批就重複觸發一次 `didReset`。核心裡是在既有清除區塊內只補 `_totalSamples = 0` 與 `didReset = true`。
+2. **歸零後的空檔不計入時間軸** — 手指拿開後放著時，若繼續 `_totalSamples += n`，等越久下一位的起始索引越大，就不叫「從零開始」。核心用 `_ir.isEmpty && _sinceFingerOn == 0` 判斷「已經歸零、正在等下一位」並直接早退。
+3. **去彈跳照舊** — 觸發條件完全沒動，仍是 `!fingerNow && _noFingerBatches >= config.fingerOffBatches`，單批雜訊不會觸發歸零。
+
+UI 這一側原本有的「長期 RR 池（`allPoints`，上限 300 拍）」**已整個移除** — 跨測試累積會把不同使用者的拍混在一起。K2 頁面的區塊因此從 ①②③④ 重編為 ①②③，快照也不再寫 `longTerm` 欄位（舊快照檔仍可開啟，只是不顯示那段）。
+
 ### 參數安全（`k2_setting_limits.dart`）
 
 所有可調參數都有合法範圍。`enforce()` 會在核心建構時與每輪計算前自動夾回合法區間（例如 `hrMin=0` 會導致除以零崩潰，強制夾為 20）；`check()` 只回報不修改。**新增參數時務必同步補上限制**。
+
+---
+
+## 無頭伺服器（bin/max30102_server.dart）
+
+同一份 K2 核心的第二個消費者：包成 HTTP/WS 服務給 React + Koa 呼叫。詳見 [README_SERVER.md](README_SERVER.md)。
+
+### ⛔ 這支檔案的鐵則
+
+**只能 import 純 Dart**：`dart:*`、`package:libserialport`、`lib/main_mode/max30102_K2/` 的核心（**扣掉 `ui/`**）。一旦混進 `package:flutter` 或 `ui/` 底下任何東西，`dart compile exe` 立刻編不過，CI 的 `build-server` job 會紅。
+
+同理，串口一定要用 **`libserialport`（純 Dart）**，不可用 `flutter_libserialport`（綁 Flutter）。兩者並存於 pubspec：桌面 App 用後者，server 用前者。
+
+### 兩種進料模式互斥
+
+`serial`（server 自己開串口輪詢）與 `feed`（上層 POST 原始 bytes）**不可同時餵同一個引擎** —— 兩條時間軸混在一起會讓 RR 算成亂數且不會報錯。所以：
+
+- `serial` 模式下 `POST /feed` 回 **409**，不是默默吃掉
+- `POST /mode` 切換時一律 `k2.reset()` + 清空波形累積
+
+### 波形累積的斷層處理
+
+核心在空轉期/沉澱期**會丟棄樣本**，`K2FeedResult.firstAbs` 不保證等於「上一批結尾 + 1」。`K2Engine.feedPacket()` 會比對，對不上就整段重接。**不要改成硬接** —— 那會讓波形索引與 `troughAbs` 錯開，而且錯得很安靜。
+
+### 訊號處理跨平台
+
+`SIGTERM` 只有 POSIX 有，Windows 在 OS 層面沒有這個概念，且 `sigterm.watch()` 丟的是**非同步**例外（`try/catch` 攔不到，會 exit 255）。`_tryWatchSignal()` 因此必須在註冊前先判斷平台。Windows 與 Linux 都能執行，功能相同。
 
 ---
 
@@ -149,8 +190,10 @@ K2 的 `ui/` 已全面接上 `LocalizationService`（繁中 / English），字�
 - **平台**：Windows + Linux（依賴 `flutter_libserialport` + `window_manager`）
 - **SDK**：Flutter ^3.10.4
 - **建構**：`flutter build windows --release` / `flutter build linux --release`
+- **建構 server**：`dart compile exe bin/max30102_server.dart -o max30102_server`
 - **分析**：`flutter analyze`（目前零 issue）
 - **測試**：`flutter test`
+- **CI**：[.github/workflows/build.yml](.github/workflows/build.yml) — 三個 job（Windows App / Linux App / Linux AMD64 server）。這是**獨立 repo**，Flutter 專案就在 repo 根，所以 workflow 沒有 `paths` 過濾也沒有 `working-directory`，所有路徑從根算。
 - **串口安全**：所有串口操作 try-catch 保護，USB 拔除自動斷線
 
 ### 已知問題
@@ -159,9 +202,14 @@ K2 的 `ui/` 已全面接上 `LocalizationService`（繁中 / English），字�
 - **設定檢查訊息的本文仍是繁體中文**：`Max30102SettingLimits.check()` 回傳的 `message` / `applied` 寫在核心層 [k2_setting_limits.dart](lib/main_mode/max30102_K2/k2_setting_limits.dart)，那是交接內容，UI 依設計原則「原封輸出、一個字都不改」。日誌裡的 `↳ UI:` 註解行會跟著語言走，但它引述的核心訊息不會。要翻譯就得動交接核心，需另行決定。
 - 從別處複製整個專案資料夾後首次建置，可能因殘留的 plugin symlink 而報 `PathExistsException`。解法：`flutter clean && flutter pub get`。
 
+- **server 的串口模式在 Windows 上需要 `serialport.dll`**（Linux 的 `libserialport.so` 由 apt 裝到系統目錄，Windows 要自己放到執行檔旁或 PATH）。DLL 不必另外下載，`build/windows/x64/runner/Release/serialport.dll` 就有一份 —— Flutter App 的 CMake 會自動搬過去，server 是純 Dart 沒有這道步驟，兩者用同一個 DLL。缺少時 `feed` 模式完全正常，切 `serial` 回 error 126。
+- **開發機（Windows）上無法驗證 server 的串口模式**：Application Control 政策會擋掉 `dart.exe` 載入未簽署的 `serialport.dll`（error 4551），換路徑無效。所以 serial 模式改由 CI 用 `socat` 虛擬串口驗證（見 workflow 的 `Smoke test (serial mode, virtual port)`），那一步同時驗證「serial 模式下 `POST /feed` 回 409」。
+
 ### 未使用的依賴
 
 `pubspec.yaml` 中的 `file_picker` 與 `shared_preferences` 在精簡後已無任何程式碼使用（原本由 Bootloader/OTA 與舊版 MAX30102 模組使用），刻意保留未移除。
+
+`libserialport` 則是 **server 專用**（原本就是 `flutter_libserialport` 的傳遞相依，這次提升為直接相依），桌面 App 不使用它。
 
 ---
 
