@@ -274,12 +274,34 @@ ws.onmessage = (e) => {
 串口模式透過 FFI 呼叫系統的 libserialport，執行機器**必須**裝：
 
 ```bash
-sudo apt-get install -y libserialport0        # 只執行
-sudo apt-get install -y libserialport-dev     # 要編譯的話
+sudo apt-get install -y libserialport-dev
 ```
 
-沒裝的話 server 仍會啟動（feed 模式完全正常），但切 `serial` 會回錯：
-`Failed to load dynamic library 'libserialport.so'`。
+⚠️ **一定要 `-dev`，裝 `libserialport0` 是不夠的。**
+
+Dart 的 FFI 綁定呼叫的是 `dlopen("libserialport.so")` —— **無版本號**的檔名。
+但 Linux 套件的慣例是：
+
+| 套件 | 提供的檔案 |
+|---|---|
+| `libserialport0`（runtime） | `libserialport.so.0`、`libserialport.so.0.1.1` |
+| `libserialport-dev` | **`libserialport.so`（無版本號的 symlink）** ← `dlopen` 要的是這個 |
+
+只裝 runtime 套件會得到：
+`Failed to load dynamic library 'libserialport.so': cannot open shared object file`
+
+不想裝 `-dev` 的話，另外兩條路也可以：
+
+```bash
+# ① 自己補 symlink
+sudo ln -s libserialport.so.0.1.1 /usr/lib/x86_64-linux-gnu/libserialport.so
+
+# ② 用環境變數直接指路（不必動系統目錄，適合容器）
+export LIBSERIALPORT_PATH=/usr/lib/x86_64-linux-gnu/libserialport.so.0.1.1
+./max30102_server --mode serial --serial /dev/ttyUSB0
+```
+
+沒裝的話 server 仍會啟動（feed 模式完全正常），只有切 `serial` 會失敗。
 
 ### 2. 串口權限（沿用 `LINUX_DEPLOYMENT.md` 的做法）
 
