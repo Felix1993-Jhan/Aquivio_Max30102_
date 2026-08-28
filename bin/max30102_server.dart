@@ -34,9 +34,45 @@ import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_protoco
 /// 取樣率(Hz)。核心固定 100Hz,波形秒數↔筆數的換算都靠它。
 const int kFs = Max30102Config.samplingRateHz;
 
-void _log(String msg) {
+/// 輸出一行日誌,**中英雙語**。
+///
+/// 這支服務的維運方通常同時有中文與英文使用者(韌體端看中文、部署與整合端
+/// 看英文),日誌是出事時唯一的線索 —— 只給其中一種語言,等於有一半的人
+/// 看不懂發生什麼事。所以同一行兩種都給,用 ` | ` 分隔。
+void _log(String zh, [String? en]) {
   final t = DateTime.now().toIso8601String().substring(11, 23);
-  stdout.writeln('[$t] $msg');
+  stdout.writeln(en == null ? '[$t] $zh' : '[$t] $zh | $en');
+}
+
+/// 帶中英兩種說法的錯誤。
+///
+/// 錯誤訊息最後會進到 HTTP 回應裡給人看,而看的人可能是任一種語言。
+/// 用這個類別把兩種說法一起帶著走,回應時就能拆成 `error` / `errorZh` 兩個欄位,
+/// 而不是把兩種語言黏成一長串。
+class BilingualException implements Exception {
+  const BilingualException(this.zh, this.en);
+  final String zh;
+  final String en;
+
+  @override
+  String toString() => '$zh | $en';
+}
+
+/// 從任意例外取出中文說法(不是雙語例外就原樣回傳)。
+String _errZh(Object e) => e is BilingualException ? e.zh : '$e';
+
+/// 從任意例外取出英文說法。
+String _errEn(Object e) => e is BilingualException ? e.en : '$e';
+
+/// 組一則「前綴 + 例外內容」的雙語訊息,回傳 (中文, 英文)。
+///
+/// 多數例外(尤其是函式庫拋的)訊息本身就是英文,兩邊都接上去會變成
+/// 同一串英文印兩遍。所以這裡先比對:兩種說法相同就只在中文側留前綴,
+/// 細節交給英文側講一次就好。
+(String, String) _biError(String zhPrefix, String enPrefix, Object e) {
+  final zh = _errZh(e);
+  final en = _errEn(e);
+  return (zh == en ? zhPrefix : '$zhPrefix:$zh', '$enPrefix: $en');
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -61,8 +97,15 @@ class K2Engine {
   /// 波形保留上限(筆)。超過就從頭裁掉。
   final int _waveCap;
 
+  // 原始樣本
   final List<int> _waveIr = [];
   final List<int> _waveRed = [];
+
+  // 截尾平滑後的樣本 —— 核心已經算好了(K2FeedResult.newIrTrim/newRedTrim),
+  // 要畫「乾淨線」就用這組。核心的原則是 raw 與 trim **兩個都給,呈現層自己選**,
+  // server 只是忠實轉發,不該在中間丟掉其中一半。
+  final List<double> _waveIrTrim = [];
+  final List<double> _waveRedTrim = [];
 
   /// `_waveIr[0]` 的**絕對樣本位置**。上層靠它把波形對齊到 troughAbs / rrPoints。
   int _waveBase = 0;
@@ -89,17 +132,22 @@ class K2Engine {
       //    索引與 troughAbs 錯開,而且錯得很安靜。
       final expected = _waveBase + _waveIr.length;
       if (_waveIr.isEmpty || r.firstAbs != expected) {
-        _waveIr.clear();
-        _waveRed.clear();
+        _clearWave();
         _waveBase = r.firstAbs;
       }
       _waveIr.addAll(r.newIr);
       _waveRed.addAll(r.newRed);
+      // raw 與 trim 逐筆對應(核心保證兩者等長),必須同步累積與裁切,
+      // 否則兩條線的索引會錯開。
+      _waveIrTrim.addAll(r.newIrTrim);
+      _waveRedTrim.addAll(r.newRedTrim);
 
       final over = _waveIr.length - _waveCap;
       if (over > 0) {
         _waveIr.removeRange(0, over);
         _waveRed.removeRange(0, over);
+        _waveIrTrim.removeRange(0, over);
+        _waveRedTrim.removeRange(0, over);
         _waveBase += over; // 裁掉幾筆,base 就往前推幾筆
       }
     }
@@ -120,6 +168,8 @@ class K2Engine {
   void _clearWave() {
     _waveIr.clear();
     _waveRed.clear();
+    _waveIrTrim.clear();
+    _waveRedTrim.clear();
     _waveBase = 0;
   }
 
@@ -154,18 +204,29 @@ class K2Engine {
   ///
   /// `firstAbs` 是回傳陣列第 0 筆的絕對位置 —— 上層要把波形跟 `troughAbs`
   /// 對齊就靠它:`陣列索引 = abs - firstAbs`。
+  ///
+  /// 四個陣列**逐筆對應、等長**:
+  ///   · `ir` / `red`         —— 感測器原始讀值
+  ///   · `irTrim` / `redTrim` —— 核心截尾平滑後的值,要畫乾淨線就用這組
+  /// 兩組都給,由呈現層自己選(與核心 K2FeedResult 的做法一致)。
   Map<String, dynamic> waveformJson({int? seconds}) {
     var from = 0;
     if (seconds != null && seconds > 0) {
       final want = seconds * kFs;
       if (_waveIr.length > want) from = _waveIr.length - want;
     }
+    // 平滑值取一位小數就夠 —— IR 讀值是 ~90000 的量級,更多位數只是把
+    // JSON 撐大(未修剪的 double 一筆可以長到 18 個字元)。
+    List<double> round1(List<double> v) =>
+        [for (final x in v.sublist(from)) (x * 10).roundToDouble() / 10];
     return {
       'firstAbs': _waveBase + from,
       'fs': kFs,
       'count': _waveIr.length - from,
       'ir': _waveIr.sublist(from),
       'red': _waveRed.sublist(from),
+      'irTrim': round1(_waveIrTrim),
+      'redTrim': round1(_waveRedTrim),
     };
   }
 
@@ -245,8 +306,58 @@ class SerialSource extends FeedSource {
   String? _lastError;
   bool _stopped = false;
 
+  // ── 指令的請求／回應配對 ──────────────────────────────────────────────
+  //
+  // QUERY_FIFO 是「一直問、一直收」的串流,但 INIT / RESET / READ_REG 是
+  // 「問一句、等一句」。兩者的回應混在同一條串口上,靠 sub-cmd 分流:
+  //   sub == 0x00(QUERY_FIFO) → 資料,丟給核心
+  //   其餘                     → 是某個指令的回覆,交給等在那裡的人
+  //
+  // 同時只允許一個等待中的指令 —— 這些操作都是偶發的人為動作(初始化、查狀態),
+  // 沒有平行化的需要;允許併發只會讓「哪個回應對應哪個請求」變得難以確定。
+  Completer<Uint8List>? _pending;
+  int _pendingSub = -1;
+
+  /// 指令逾時。MCU 正常時 100ms 內就會回,1 秒已經很寬鬆。
+  static const Duration _cmdTimeout = Duration(seconds: 1);
+
   @override
   String get name => 'serial';
+
+  /// 送一個指令並等它的回覆。逾時或串口沒開都會丟例外。
+  Future<Uint8List> request(Uint8List packet, int expectSub) async {
+    final port = _port;
+    if (port == null || !port.isOpen) {
+      throw const BilingualException('串口未開啟', 'serial port is not open');
+    }
+    if (_pending != null) {
+      throw const BilingualException('已有另一個指令在等回應,請稍後再試',
+          'another command is already awaiting a reply; try again shortly');
+    }
+
+    final completer = Completer<Uint8List>();
+    _pending = completer;
+    _pendingSub = expectSub;
+    try {
+      port.write(packet);
+    } catch (e) {
+      _pending = null;
+      _pendingSub = -1;
+      rethrow;
+    }
+
+    try {
+      return await completer.future.timeout(_cmdTimeout);
+    } on TimeoutException {
+      throw BilingualException(
+          'MCU 沒有回應(逾時 ${_cmdTimeout.inMilliseconds}ms)',
+          'no reply from MCU (timeout ${_cmdTimeout.inMilliseconds}ms)');
+    } finally {
+      // 不論成功、逾時或例外,都要把位子讓出來,否則之後的指令全被擋住。
+      _pending = null;
+      _pendingSub = -1;
+    }
+  }
 
   @override
   Map<String, dynamic> status() => {
@@ -262,18 +373,34 @@ class SerialSource extends FeedSource {
   Future<void> start() async {
     _parser.onPacket = (pkt) {
       _consecutiveErrors = 0; // 收到完整封包 = 連線是好的
+
+      // ── 分流:資料歸資料,指令回覆歸指令 ──
+      final sub = pkt.length > 4 ? pkt[4] : -1;
+      if (sub != Max30102Protocol.kSubQueryFifo) {
+        // 這是某個指令的回覆。有人在等就交給他;沒人等就是遲到的回覆,丟掉。
+        final waiting = _pending;
+        if (waiting != null && !waiting.isCompleted && sub == _pendingSub) {
+          waiting.complete(pkt);
+        }
+        return; // ⚠️ 絕對不能往下丟給核心 —— 固定長度回覆的 byte[5] 是暫存器
+                //    位址,被 decodeFifoResponse 當成資料長度解讀是錯的。
+      }
+
       try {
         engine.feedPacket(pkt);
       } catch (e) {
-        _log('⚠ feedPacket 失敗:$e');
+        final (zh, en) = _biError('⚠ feedPacket 失敗', 'feedPacket failed', e);
+        _log(zh, en);
       }
     };
 
     final port = SerialPort(portName);
     if (!port.openReadWrite()) {
       port.dispose();
-      throw StateError(
-          '無法開啟串口 $portName(是否被佔用?權限是否在 dialout 群組?)');
+      throw BilingualException(
+          '無法開啟串口 $portName(是否被佔用?權限是否在 dialout 群組?)',
+          'cannot open serial port $portName '
+              '(in use? is the user in the dialout group?)');
     }
     port.config = SerialPortConfig()
       ..baudRate = baud
@@ -289,20 +416,81 @@ class SerialSource extends FeedSource {
         try {
           _parser.feed(data);
         } catch (e) {
-          _log('⚠ 解析失敗:$e');
+          final (zh, en) = _biError('⚠ 解析失敗', 'parse failed', e);
+          _log(zh, en);
         }
       },
       onError: (Object e) {
         // USB 被拔掉多半走這裡。記錄後讓計時器那邊去累積錯誤次數。
         _lastError = '$e';
-        _log('⚠ 串口讀取錯誤:$e');
+        final (zh, en) = _biError('⚠ 串口讀取錯誤', 'serial read error', e);
+        _log(zh, en);
       },
       cancelOnError: false,
     );
 
+    // ── 連上就先初始化一次晶片 ──────────────────────────────────────────
+    //
+    // 韌體開機時本來就會 init 一次,這裡是**保險**:server 可能在韌體跑了很久
+    // 之後才連上,期間晶片的狀態可能被別的東西改過(例如有人按過 RESET)。
+    //
+    // 失敗不阻斷啟動 —— 串口是通的,只是晶片沒回話。硬要中斷的話,上層連
+    // /health 都看不到,反而更難查。把原因記進 lastError 讓人看得見就好。
+    try {
+      await initChip();
+      _log('✅ 晶片初始化完成', 'chip initialised');
+    } catch (e) {
+      final (zh, en) = _biError('初始化晶片失敗', 'chip init failed', e);
+      _lastError = '$zh | $en';
+      _log('⚠ $zh(串口仍在運作,可稍後用 POST /chip/init 重試)',
+          '$en (serial port still running; retry later with POST /chip/init)');
+    }
+
     _timer = Timer.periodic(Duration(milliseconds: intervalMs), (_) => _poll());
-    _log('🟢 串口模式啟動:$portName @$baud,board=0x${board.toRadixString(16)},'
-        '每 ${intervalMs}ms 詢問一次');
+    _log(
+        '🟢 串口模式啟動:$portName @$baud,'
+            'board=0x${board.toRadixString(16)},每 ${intervalMs}ms 詢問一次',
+        'serial mode started: $portName @$baud, '
+            'board=0x${board.toRadixString(16)}, polling every ${intervalMs}ms');
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // 晶片控制(都要等 MCU 回覆確認,不是送出去就當作成功)
+  // ══════════════════════════════════════════════════════════════
+
+  /// RE-INIT:把晶片重新初始化成可用狀態。
+  /// 回覆的 byte[5]:1 = 成功、0 = 失敗。
+  Future<void> initChip() async {
+    final res = await request(
+      Max30102Protocol.buildReInit(board: board),
+      Max30102Protocol.kSubReInit,
+    );
+    if (res.length > 5 && res[5] != 1) {
+      throw const BilingualException('MCU 回報初始化失敗(晶片是否接好?)',
+          'MCU reported init failure (is the chip connected?)');
+    }
+  }
+
+  /// RESET:軟體復位 → 晶片進入 POR 休眠。
+  /// ⚠️ 復位後晶片**不可用**,必須再 [initChip] 才會恢復採樣。
+  Future<void> resetChip() async {
+    await request(
+      Max30102Protocol.buildReset(board: board),
+      Max30102Protocol.kSubReset,
+    );
+  }
+
+  /// 讀一顆暫存器,回傳讀到的值。
+  Future<int> readReg(int reg) async {
+    final res = await request(
+      Max30102Protocol.buildReadReg(reg, board: board),
+      Max30102Protocol.kSubReadReg,
+    );
+    if (res.length < 7) {
+      throw const BilingualException(
+          'READ_REG 回覆長度不足', 'READ_REG reply too short');
+    }
+    return Max30102Protocol.parseReg(res).value;
   }
 
   void _poll() {
@@ -315,7 +503,10 @@ class SerialSource extends FeedSource {
       _lastError = '$e';
       _consecutiveErrors++;
       if (_consecutiveErrors >= _maxConsecutiveErrors) {
-        _log('❌ 串口連續失敗 $_consecutiveErrors 次,停止輪詢(HTTP 服務繼續運行)');
+        _log(
+            '❌ 串口連續失敗 $_consecutiveErrors 次,停止輪詢(HTTP 服務繼續運行)',
+            'serial failed $_consecutiveErrors times in a row; polling stopped '
+                '(HTTP service stays up)');
         // 不要在這裡 await —— 這是計時器回呼。
         unawaited(stop());
       }
@@ -327,6 +518,14 @@ class SerialSource extends FeedSource {
     _stopped = true;
     _timer?.cancel();
     _timer = null;
+    // 有人還在等回覆就先叫醒他,否則那個 Future 會一直懸著到逾時。
+    final waiting = _pending;
+    if (waiting != null && !waiting.isCompleted) {
+      waiting.completeError(
+          const BilingualException('串口已關閉', 'serial port closed'));
+    }
+    _pending = null;
+    _pendingSub = -1;
     // 每一段都各自 try,任何一步失敗都不能擋住後面的釋放。
     try {
       await _sub?.cancel();
@@ -344,8 +543,37 @@ class SerialSource extends FeedSource {
     } catch (_) {}
     _port = null;
     _parser.onPacket = null;
-    _log('⏸ 串口模式已停止:$portName');
+    _log('⏸ 串口模式已停止:$portName', 'serial mode stopped: $portName');
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 晶片控制動作
+// ════════════════════════════════════════════════════════════════════════════
+
+enum _ChipAction {
+  /// RE-INIT:重新初始化成可用狀態。日常修復用這個。
+  init,
+
+  /// RESET:軟體復位 → 晶片進入 POR 休眠。⚠️ 之後必須 init 才會恢復。
+  reset,
+
+  /// RESET + RE-INIT:完整重來。包成一個動作,init 不會被忘記。
+  resetInit;
+
+  /// 這個動作對應的封包序列(feed 模式下交給上層自己送)。
+  List<List<int>> packets(int board) => switch (this) {
+        _ChipAction.init => [
+            Max30102Protocol.buildReInit(board: board).toList()
+          ],
+        _ChipAction.reset => [
+            Max30102Protocol.buildReset(board: board).toList()
+          ],
+        _ChipAction.resetInit => [
+            Max30102Protocol.buildReset(board: board).toList(),
+            Max30102Protocol.buildReInit(board: board).toList(),
+          ],
+      };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -376,8 +604,13 @@ class ApiServer {
     final server = await HttpServer.bind(
         InternetAddress.anyIPv4, opts.port, shared: false);
     _http = server;
-    _log('🌐 HTTP 監聽 0.0.0.0:${opts.port}(目前模式:$mode)');
-    server.listen(_handle, onError: (Object e) => _log('⚠ HTTP 錯誤:$e'));
+    _log('🌐 HTTP 監聽 0.0.0.0:${opts.port}(目前模式:$mode)',
+        'HTTP listening on 0.0.0.0:${opts.port} (mode: $mode)');
+    server.listen(_handle,
+        onError: (Object e) {
+      final (zh, en) = _biError('⚠ HTTP 錯誤', 'HTTP error', e);
+      _log(zh, en);
+    });
   }
 
   Future<void> _handle(HttpRequest req) async {
@@ -419,14 +652,23 @@ class ApiServer {
           await _handleFeed(req);
         case 'POST /mode':
           await _handleMode(req);
+        case 'GET /chip':
+          await _handleChipStatus(req);
+        case 'POST /chip/init':
+          await _handleChipCommand(req, _ChipAction.init);
+        case 'POST /chip/reset':
+          await _handleChipCommand(req, _ChipAction.reset);
+        case 'POST /chip/reset-init':
+          await _handleChipCommand(req, _ChipAction.resetInit);
         default:
           await _json(
               req, {'error': 'not found', 'path': path}, HttpStatus.notFound);
       }
     } catch (e, st) {
-      _log('⚠ 處理 $path 失敗:$e\n$st');
+      _log('⚠ 處理 $path 失敗:$e\n$st', 'failed handling $path: $e');
       try {
-        await _json(req, {'error': '$e'}, HttpStatus.internalServerError);
+        await _json(req, {'error': _errEn(e), 'errorZh': _errZh(e)},
+            HttpStatus.internalServerError);
       } catch (_) {}
     }
   }
@@ -441,8 +683,11 @@ class ApiServer {
           req,
           {
             'error': 'feed rejected',
-            'reason': '目前是 $mode 模式,POST /feed 只在 feed 模式可用',
-            'hint': '先 POST /mode {"mode":"feed"}',
+            'reason': 'currently in $mode mode; POST /feed is only available '
+                'in feed mode',
+            'reasonZh': '目前是 $mode 模式,POST /feed 只在 feed 模式可用',
+            'hint': 'switch first: POST /mode {"mode":"feed"}',
+            'hintZh': '先 POST /mode {"mode":"feed"}',
           },
           HttpStatus.conflict);
       return;
@@ -466,7 +711,10 @@ class ApiServer {
               .toList();
         }
       } catch (e) {
-        await _json(req, {'error': 'JSON 解析失敗:$e'}, HttpStatus.badRequest);
+        await _json(
+            req,
+            {'error': 'invalid JSON: $e', 'errorZh': 'JSON 解析失敗:$e'},
+            HttpStatus.badRequest);
         return;
       }
     } else {
@@ -474,7 +722,8 @@ class ApiServer {
     }
 
     if (bytes == null || bytes.isEmpty) {
-      await _json(req, {'error': 'body 是空的'}, HttpStatus.badRequest);
+      await _json(req, {'error': 'empty body', 'errorZh': 'body 是空的'},
+          HttpStatus.badRequest);
       return;
     }
 
@@ -486,6 +735,158 @@ class ApiServer {
     });
   }
 
+  // ── 晶片控制 /chip/* ───────────────────────────────────────────────────
+  //
+  // 晶片控制是「對 MAX30102 下指令」,與進料模式無關 —— 但**誰能把指令送上線**
+  // 兩種模式不同:
+  //   serial → server 持有串口,直接送並等 MCU 確認
+  //   feed   → server 沒有串口,只能把算好的封包交給上層,由上層自己送
+  // 兩種模式都回 200,差別在 `sent` 欄位。上層看 sent==false 就知道要自己送。
+  Future<void> _handleChipCommand(HttpRequest req, _ChipAction action) async {
+    final src = _source;
+
+    if (src is! SerialSource) {
+      // feed 模式:給封包,讓上層用自己的串口送出去。
+      // 這樣上層不必碰協定(表頭 / checksum 算錯會被 MCU 靜默丟棄,極難查)。
+      await _json(req, {
+        'ok': true,
+        'sent': false,
+        'action': action.name,
+        'packet': action.packets(opts.board).first,
+        if (action == _ChipAction.resetInit)
+          'packets': action.packets(opts.board),
+        'note': action == _ChipAction.resetInit
+            ? 'no serial port in feed mode — send the two packets in `packets` '
+                'in order (RESET, wait 500ms, RE-INIT)'
+            : 'no serial port in feed mode — please send this packet yourself',
+        'noteZh': action == _ChipAction.resetInit
+            ? 'feed 模式下 server 沒有串口。請依序送出 packets 內的兩個封包'
+                '(RESET → 等 500ms → RE-INIT)'
+            : 'feed 模式下 server 沒有串口,請自行送出這個封包',
+      });
+      return;
+    }
+
+    try {
+      switch (action) {
+        case _ChipAction.init:
+          await src.initChip();
+        case _ChipAction.reset:
+          await src.resetChip();
+        case _ChipAction.resetInit:
+          await src.resetChip();
+          // 復位後晶片進入 POR 休眠,要留時間讓它安定再初始化。
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          await src.initChip();
+      }
+      // 晶片狀態變了 → 之前累積的波形與拍全部作廢。
+      engine.reset();
+      _log('🔧 晶片指令完成:${action.name}',
+          'chip command done: ${action.name}');
+      await _json(req, {
+        'ok': true,
+        'sent': true,
+        'confirmed': true,
+        'action': action.name,
+        if (action == _ChipAction.reset)
+          'warning': 'the chip is now asleep; call /chip/init to resume sampling',
+        if (action == _ChipAction.reset)
+          'warningZh': '晶片已進入休眠,必須再呼叫 /chip/init 才會恢復採樣',
+      });
+    } catch (e) {
+      await _json(
+          req,
+          {
+            'ok': false,
+            'sent': true,
+            'action': action.name,
+            'error': _errEn(e),
+            'errorZh': _errZh(e),
+          },
+          HttpStatus.internalServerError);
+    }
+  }
+
+  // ── GET /chip ──────────────────────────────────────────────────────────
+  //
+  // 一次 READ_REG 就能分辨兩層:
+  //   逾時沒回應      → MCU 沒回話(線斷了 / 韌體沒跑)
+  //   有回應但非 0x15 → MCU 正常,但 MAX30102 讀不到(晶片沒接好 / 壞了)
+  //   有回應且 0x15   → 兩層都健康
+  // 這是 /health 做不到的 —— 它只知道「串口開著」。
+  Future<void> _handleChipStatus(HttpRequest req) async {
+    final src = _source;
+    if (src is! SerialSource) {
+      await _json(
+          req,
+          {
+            'error': 'not available in feed mode',
+            'reason': 'no serial port in feed mode, so the chip cannot be queried',
+            'reasonZh': 'feed 模式下 server 沒有串口,無法查詢晶片',
+            'hint': 'send READ_REG(0xFF) yourself and check whether byte[6] '
+                'of the reply is 0x15',
+            'hintZh': '請自行送出 READ_REG(0xFF) 並檢查回覆的 byte[6] 是否為 0x15',
+            'packet': Max30102Protocol.buildReadReg(
+                    Max30102Protocol.kRegPartId,
+                    board: opts.board)
+                .toList(),
+          },
+          HttpStatus.conflict);
+      return;
+    }
+
+    try {
+      final partId = await src.readReg(Max30102Protocol.kRegPartId);
+      final ledRed = await src.readReg(Max30102Protocol.kRegLedRed);
+      final ledIr = await src.readReg(Max30102Protocol.kRegLedIr);
+
+      final cfg = engine.k2.config;
+      final chipOk = partId == Max30102Protocol.kPartIdValue;
+      // 晶片實際的 LED 電流與本程式設定的是否一致。不一致代表晶片被別的東西
+      // 改過(或復位回 baseline 0x24) → 演算法用的參數與硬體實況對不上。
+      final inSync =
+          chipOk && ledRed == cfg.ledCurrentRed && ledIr == cfg.ledCurrentIr;
+
+      await _json(req, {
+        'mcu': {'online': true},
+        'chip': {
+          'online': chipOk,
+          'partId': '0x${partId.toRadixString(16).padLeft(2, '0')}',
+          'ledRed': ledRed,
+          'ledIr': ledIr,
+        },
+        'expected': {
+          'partId': '0x${Max30102Protocol.kPartIdValue.toRadixString(16)}',
+          'ledRed': cfg.ledCurrentRed,
+          'ledIr': cfg.ledCurrentIr,
+        },
+        'inSync': inSync,
+        if (!chipOk) ...{
+          'hint': 'PART_ID is not 0x15 — the chip is not connected or is faulty',
+          'hintZh': 'PART_ID 不是 0x15 —— 晶片沒接好或已損壞',
+        },
+        if (chipOk && !inSync) ...{
+          'hint': 'LED currents differ from the configured values (the chip may '
+              'have been reset to baseline). POST /chip/init to realign',
+          'hintZh': 'LED 電流與本服務的設定不符(晶片可能被復位回 baseline)。'
+              '呼叫 POST /chip/init 可讓兩邊回到一致',
+        },
+      });
+    } catch (e) {
+      // 讀不到 = MCU 根本沒回話
+      await _json(req, {
+        'mcu': {'online': false, 'error': _errEn(e), 'errorZh': _errZh(e)},
+        'chip': {'online': false},
+        'inSync': false,
+        'hint': 'no reply from the MCU. The serial port itself is fine '
+            '(otherwise /health would show open:false), but nobody is answering '
+            '— check that the firmware is running and the wiring is correct',
+        'hintZh': 'MCU 沒有回應。串口是通的(否則 /health 的 open 會是 false),'
+            '但另一端沒有人回話 —— 檢查韌體是否運行、接線是否正確',
+      });
+    }
+  }
+
   // ── POST /mode ─────────────────────────────────────────────────────────
   Future<void> _handleMode(HttpRequest req) async {
     final raw = await _readBody(req);
@@ -495,7 +896,10 @@ class ApiServer {
           ? <String, dynamic>{}
           : (jsonDecode(utf8.decode(raw)) as Map).cast<String, dynamic>();
     } catch (e) {
-      await _json(req, {'error': 'JSON 解析失敗:$e'}, HttpStatus.badRequest);
+      await _json(
+          req,
+          {'error': 'invalid JSON: $e', 'errorZh': 'JSON 解析失敗:$e'},
+          HttpStatus.badRequest);
       return;
     }
 
@@ -503,7 +907,11 @@ class ApiServer {
     if (want != 'serial' && want != 'feed') {
       await _json(
           req,
-          {'error': 'mode 必須是 "serial" 或 "feed"', 'got': body['mode']},
+          {
+            'error': 'mode must be "serial" or "feed"',
+            'errorZh': 'mode 必須是 "serial" 或 "feed"',
+            'got': body['mode'],
+          },
           HttpStatus.badRequest);
       return;
     }
@@ -533,19 +941,23 @@ class ApiServer {
       try {
         await next.start();
         _source = next;
-        _log('🔄 已切換到 $mode 模式');
+        _log('🔄 已切換到 $mode 模式', 'switched to $mode mode');
         await _json(req, {'mode': mode, 'source': _source.status()});
       } catch (e) {
         // 新來源起不來(例如串口不存在)→ 退回 feed 模式,不要留下半死狀態。
-        _log('❌ 切換到 $want 失敗:$e → 退回 feed 模式');
+        final (ezh, een) = _biError(
+            '❌ 切換到 $want 失敗', 'switch to $want failed', e);
+        _log('$ezh → 退回 feed 模式', '$een -> falling back to feed mode');
         _source = HttpFeedSource();
         await _source.start();
         await _json(
             req,
             {
-              'error': '$e',
+              'error': _errEn(e),
+              'errorZh': _errZh(e),
               'mode': mode,
-              'note': '切換失敗,已退回 feed 模式',
+              'note': 'switch failed; fell back to feed mode',
+              'noteZh': '切換失敗,已退回 feed 模式',
             },
             HttpStatus.badRequest);
       }
@@ -557,7 +969,7 @@ class ApiServer {
   // ── WS /stream ─────────────────────────────────────────────────────────
   Future<void> _handleStream(HttpRequest req) async {
     final ws = await WebSocketTransformer.upgrade(req);
-    _log('🔌 WS 訂閱者接上(/stream)');
+    _log('🔌 WS 訂閱者接上(/stream)', 'WS subscriber connected (/stream)');
     // 一接上先給一份現況,對方不必等下一次計算才有畫面。
     ws.add(jsonEncode(engine.vitalsJson()));
     final sub = engine.vitalsStream.listen(
@@ -570,7 +982,7 @@ class ApiServer {
     );
     ws.done.whenComplete(() {
       sub.cancel();
-      _log('🔌 WS 訂閱者離線');
+      _log('🔌 WS 訂閱者離線', 'WS subscriber disconnected');
     });
   }
 
@@ -668,34 +1080,64 @@ class ServerOptions {
 }
 
 const String _usage = '''
-max30102_server — MAX30102 K2 無頭伺服器
+max30102_server — MAX30102 K2 無頭伺服器 / headless vitals service
 
-用法:
-  max30102_server [選項]
+用法 / Usage:
+  max30102_server [選項 / options]
 
-選項:
-  --mode <serial|feed>   預設進料模式(預設 feed;可執行中用 POST /mode 改)
-  --serial <path>        串口路徑,serial 模式用(預設 /dev/ttyUSB0)
-  --baud <n>             鮑率(預設 115200)
-  --port <n>             HTTP 監聽埠(預設 8770)
-  --board <48|49>        表頭板子 byte,十進位(48=0x30 主板,49=0x31 擴充板;預設 49)
-  --interval <ms>        串口輪詢間隔(預設 100)
-  --wave-seconds <n>     /waveform 保留秒數(預設 30)
+選項 / Options:
+  --mode <serial|feed>
+      預設進料模式(預設 feed;可執行中用 POST /mode 改)
+      input mode at startup (default: feed; changeable at runtime via POST /mode)
+
+  --serial <path>
+      串口路徑,serial 模式用(預設 /dev/ttyUSB0)
+      serial device path, used in serial mode (default: /dev/ttyUSB0)
+
+  --baud <n>
+      鮑率(預設 115200) / baud rate (default: 115200)
+
+  --port <n>
+      HTTP 監聽埠(預設 8770) / HTTP listen port (default: 8770)
+
+  --board <48|49>
+      表頭板子 byte,十進位(48=0x30 主板,49=0x31 擴充板;預設 49)
+      board id byte, decimal (48=0x30 main, 49=0x31 expansion; default: 49)
+
+  --interval <ms>
+      串口輪詢間隔(預設 100) / serial polling interval (default: 100)
+
+  --wave-seconds <n>
+      /waveform 保留秒數(預設 30)
+      seconds of waveform retained for /waveform (default: 30)
+
   --reset-on-finger-off <true|false>
-                         免洗模式:確認手指離開時連絕對索引一起歸零(預設 true)
-  --help                 顯示這份說明
+      免洗模式:確認手指離開時連絕對索引一起歸零(預設 true)
+      single-session mode: reset the sample index when the finger is
+      confirmed removed (default: true)
 
-環境變數(優先度低於命令列):
-  K2_MODE K2_SERIAL K2_BAUD K2_PORT K2_BOARD K2_INTERVAL K2_WAVE_SECONDS
-  K2_RESET_ON_FINGER_OFF
+  --help
+      顯示這份說明 / show this help
+
+環境變數(優先度低於命令列)/ Environment variables (lower precedence than CLI):
+  K2_MODE  K2_SERIAL  K2_BAUD  K2_PORT  K2_BOARD  K2_INTERVAL
+  K2_WAVE_SECONDS  K2_RESET_ON_FINGER_OFF
 
 API:
-  GET  /health           存活探測 + 目前模式
-  GET  /vitals           最新計算結果
-  GET  /waveform?seconds=10   近一段波形
-  POST /feed             餵原始 MCU bytes(僅 feed 模式)
-  POST /mode             切換進料模式
-  WS   /stream           每算出新結果就推播一份 /vitals
+  GET  /health                存活探測 + 目前模式 / liveness + current mode
+  GET  /vitals                最新計算結果 / latest computed values
+  GET  /waveform?seconds=10   近一段波形(原始 + 截尾平滑)
+                              recent waveform (raw + trim-smoothed)
+  POST /feed                  餵原始 MCU bytes(僅 feed 模式)
+                              push raw MCU bytes (feed mode only)
+  POST /mode                  切換進料模式 / switch input mode
+  WS   /stream                每算出新結果就推播 / push on every new result
+  GET  /chip                  MCU 與 MAX30102 在線狀態(僅 serial 模式)
+                              MCU and MAX30102 status (serial mode only)
+  POST /chip/init             初始化晶片(RE-INIT) / initialise the chip
+  POST /chip/reset            復位晶片(⚠ 之後會休眠,必須再 init)
+                              reset the chip (⚠ it then sleeps; init required)
+  POST /chip/reset-init       復位後立刻初始化 / reset then initialise
 ''';
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -732,9 +1174,11 @@ Future<void> main(List<String> args) async {
   } catch (e) {
     // 串口起不來不該讓整支 server 死掉 —— 退回 feed 模式繼續服務,
     // 上層可以之後用 POST /mode 再試一次。
-    _log('❌ 啟動失敗:$e');
+    final (zh, en) = _biError('❌ 啟動失敗', 'startup failed', e);
+    _log(zh, en);
     if (opts.mode == 'serial') {
-      _log('→ 退回 feed 模式繼續啟動(可稍後用 POST /mode 重試串口)');
+      _log('→ 退回 feed 模式繼續啟動(可稍後用 POST /mode 重試串口)',
+          '-> starting in feed mode instead (retry serial later via POST /mode)');
       final fallback =
           ApiServer(engine: engine, opts: opts, initial: HttpFeedSource());
       await fallback.start();
@@ -757,7 +1201,7 @@ Future<void> main(List<String> args) async {
 /// 所以這裡是「能掛的就掛」,不是「挑一個平台支援」。server 的功能在兩邊完全相同。
 void _installSignalHandlers(ApiServer api) {
   Future<void> bye(String sig) async {
-    _log('收到 $sig,正在關閉…');
+    _log('收到 $sig,正在關閉…', 'received $sig, shutting down...');
     await api.shutdown();
     exit(0);
   }
@@ -779,12 +1223,15 @@ void _tryWatchSignal(
 ) {
   // Windows 只有 SIGINT 可用;其餘訊號在該平台不存在,直接跳過。
   if (Platform.isWindows && sig != ProcessSignal.sigint) {
-    _log('ℹ️ 本平台(Windows)沒有 $name,略過註冊(不影響服務運行)');
+    _log('ℹ️ 本平台(Windows)沒有 $name,略過註冊(不影響服務運行)',
+        '$name does not exist on Windows; skipped (service unaffected)');
     return;
   }
   try {
     sig.watch().listen((_) => onSignal(name));
   } catch (e) {
-    _log('⚠ 無法註冊 $name:$e(不影響服務運行)');
+    final (zh, en) =
+        _biError('⚠ 無法註冊 $name', 'could not register $name', e);
+    _log('$zh(不影響服務運行)', '$en (service unaffected)');
   }
 }

@@ -160,6 +160,64 @@ void main() {
     expect(r.status, 404);
   });
 
+  // ── 晶片控制 ────────────────────────────────────────────────────────
+  //
+  // 這裡的假來源不是 SerialSource,所以走的是「feed 模式」那條路徑:
+  // server 沒有串口 → 把算好的封包交出去,由上層自己送。
+  // (serial 模式那條需要真串口,只能在實機上驗。)
+
+  group('晶片控制端點', () {
+    setUp(() async {
+      // 先切到 feed 模式,模擬「server 沒有串口」的情境
+      await send('POST', '/mode', json: {'mode': 'feed'});
+    });
+
+    test('沒有串口時 /chip/init 回傳可自行送出的封包', () async {
+      final r = await send('POST', '/chip/init');
+      expect(r.status, 200);
+      expect(r.body['ok'], isTrue);
+      expect(r.body['sent'], isFalse, reason: 'server 沒有串口,送不出去');
+      // RE-INIT:40 71 31 09 04 00 00 00 11
+      expect(r.body['packet'], [64, 113, 49, 9, 4, 0, 0, 0, 17]);
+      expect(r.body['note'], isNotNull, reason: '要說明為什麼沒送出去');
+      expect(r.body['noteZh'], isNotNull, reason: '中英雙語都要有');
+    });
+
+    test('/chip/reset 回傳 RESET 封包', () async {
+      final r = await send('POST', '/chip/reset');
+      expect(r.status, 200);
+      // RESET:40 71 31 09 03 00 00 00 12
+      expect(r.body['packet'], [64, 113, 49, 9, 3, 0, 0, 0, 18]);
+    });
+
+    test('/chip/reset-init 回傳兩個封包(順序:先 RESET 再 RE-INIT)', () async {
+      final r = await send('POST', '/chip/reset-init');
+      expect(r.status, 200);
+      final packets = r.body['packets'] as List;
+      expect(packets, hasLength(2), reason: '復位後一定要接初始化');
+      expect(packets[0], [64, 113, 49, 9, 3, 0, 0, 0, 18], reason: 'RESET 在前');
+      expect(packets[1], [64, 113, 49, 9, 4, 0, 0, 0, 17], reason: 'RE-INIT 在後');
+    });
+
+    test('沒有串口時 GET /chip 回 409,並附上可自行送出的查詢封包', () async {
+      final r = await send('GET', '/chip');
+      expect(r.status, 409);
+      // READ_REG(0xFF):40 71 31 09 02 FF 00 00 14
+      expect(r.body['packet'], [64, 113, 49, 9, 2, 255, 0, 0, 20]);
+      expect(r.body['hint'], isNotNull);
+      expect(r.body['hintZh'], isNotNull);
+    });
+  });
+
+  test('錯誤回應同時提供英文與中文', () async {
+    final r = await send('POST', '/mode', json: {'mode': 'banana'});
+    expect(r.status, 400);
+    expect(r.body['error'], isNotNull, reason: '英文放主欄位給程式用');
+    expect(r.body['errorZh'], isNotNull, reason: '中文放 Zh 後綴欄位');
+    expect(r.body['error'], isNot(equals(r.body['errorZh'])),
+        reason: '兩個欄位要真的是不同語言,不是同一串複製兩份');
+  });
+
   test('GET /vitals 在沒資料時所有數值為 null(不是 0)', () async {
     final r = await send('GET', '/vitals');
     expect(r.status, 200);
