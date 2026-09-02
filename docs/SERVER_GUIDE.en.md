@@ -495,6 +495,64 @@ call `/chip/init` to bring both sides back in line.
 
 ---
 
+#### Response fields
+
+| Field | Type | Description |
+|---|---|---|
+| `mcu.online` | bool | Whether the MCU (STM32) replied at all |
+| `mcu.error` / `mcu.errorZh` | string | Why it did not reply (EN / ZH) |
+| `chip.online` | bool | Whether the MAX30102 is reachable (PART_ID == `0x15`) |
+| `chip.partId` | string | PART_ID actually read back, e.g. `"0x15"` |
+| `chip.ledRed` / `chip.ledIr` | int | LED currents **actually on the chip** |
+| `expected.partId` | string | What it should be (`"0x15"`) |
+| `expected.ledRed` / `expected.ledIr` | int | LED currents **this service expects** |
+| `inSync` | bool | Whether chip settings match the service configuration |
+| `hint` / `hintZh` | string | What to check next (EN / ZH) |
+
+#### Diagnosis matrix
+
+| `mcu.online` | `chip.online` | `inSync` | Meaning | Action |
+|---|---|---|---|---|
+| `true` | `true` | `true` | **All healthy.** No readings simply means no finger | none |
+| `true` | `true` | `false` | Chip online, but LED currents differ from config (likely reset to baseline) | `POST /chip/init` |
+| `true` | `false` | `false` | **MCU fine, MAX30102 unreachable** — not connected or faulty | Check sensor wiring |
+| `false` | `false` | `false` | **No reply from MCU** — port is open but nobody answers | Check firmware is running, check wiring |
+
+> 💡 `mcu.online: false` and `source.open: false` (in `/health`) mean **different
+> things**: `open: false` means the port itself cannot be opened (device missing,
+> in use, or no permission); `mcu.online: false` means the port is open but
+> nothing answers on the other end.
+
+#### Failure response examples
+
+MCU not responding:
+
+```json
+{
+  "mcu":  { "online": false,
+            "error": "no reply from MCU (timeout 1000ms)",
+            "errorZh": "MCU 沒有回應(逾時 1000ms)" },
+  "chip": { "online": false },
+  "inSync": false,
+  "hint": "no reply from the MCU. The serial port itself is fine ...",
+  "hintZh": "MCU 沒有回應。串口是通的 ..."
+}
+```
+
+Chip unreachable:
+
+```json
+{
+  "mcu":  { "online": true },
+  "chip": { "online": false, "partId": "0x00", "ledRed": 0, "ledIr": 0 },
+  "inSync": false,
+  "hint": "PART_ID is not 0x15 — the chip is not connected or is faulty",
+  "hintZh": "PART_ID 不是 0x15 —— 晶片沒接好或已損壞"
+}
+```
+
+---
+
 <a id="chip-init"></a>
 ### `POST /chip/init` · `/chip/reset` · `/chip/reset-init` — chip control
 

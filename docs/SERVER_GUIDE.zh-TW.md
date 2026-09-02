@@ -476,6 +476,63 @@ curl http://localhost:8770/chip
 
 ---
 
+#### 回應欄位對照
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `mcu.online` | bool | MCU（STM32）有沒有回話 |
+| `mcu.error` / `mcu.errorZh` | string | MCU 無回應時的原因（英 / 中） |
+| `chip.online` | bool | MAX30102 是否在線（PART_ID == `0x15`） |
+| `chip.partId` | string | 實際讀到的 PART_ID，例如 `"0x15"` |
+| `chip.ledRed` / `chip.ledIr` | int | 晶片上**實際**的 LED 電流 |
+| `expected.partId` | string | 應該要是 `"0x15"` |
+| `expected.ledRed` / `expected.ledIr` | int | 本服務**設定**的 LED 電流 |
+| `inSync` | bool | 晶片實際設定與服務設定是否一致 |
+| `hint` / `hintZh` | string | 該檢查什麼（英 / 中） |
+
+#### 狀況判讀
+
+| `mcu.online` | `chip.online` | `inSync` | 意思 | 該做什麼 |
+|---|---|---|---|---|
+| `true` | `true` | `true` | **一切正常**。沒數值就只是沒放手指 | 無 |
+| `true` | `true` | `false` | 晶片在線，但 LED 電流與設定不符（可能被復位回原廠值） | `POST /chip/init` |
+| `true` | `false` | `false` | **MCU 正常，但讀不到 MAX30102** —— 晶片沒接好或已損壞 | 檢查感測器接線 |
+| `false` | `false` | `false` | **MCU 沒有回應** —— 串口是通的，但另一端沒人回話 | 檢查韌體是否運行、接線 |
+
+> 💡 `mcu.online: false` 與 `/health` 的 `source.open: false` 是**不同的兩件事**：
+> `open: false` 是連串口都打不開（裝置不存在／被佔用／無權限）；
+> `mcu.online: false` 是串口開著、但另一端沒有人回話。
+
+#### 異常時的回應範例
+
+MCU 沒回應：
+
+```json
+{
+  "mcu":  { "online": false,
+            "error": "no reply from MCU (timeout 1000ms)",
+            "errorZh": "MCU 沒有回應(逾時 1000ms)" },
+  "chip": { "online": false },
+  "inSync": false,
+  "hint": "no reply from the MCU. The serial port itself is fine ...",
+  "hintZh": "MCU 沒有回應。串口是通的 ..."
+}
+```
+
+晶片讀不到：
+
+```json
+{
+  "mcu":  { "online": true },
+  "chip": { "online": false, "partId": "0x00", "ledRed": 0, "ledIr": 0 },
+  "inSync": false,
+  "hint": "PART_ID is not 0x15 — the chip is not connected or is faulty",
+  "hintZh": "PART_ID 不是 0x15 —— 晶片沒接好或已損壞"
+}
+```
+
+---
+
 <a id="chip-init"></a>
 ### `POST /chip/init` · `/chip/reset` · `/chip/reset-init` — 晶片控制
 
