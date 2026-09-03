@@ -247,9 +247,12 @@ class K2Engine {
       'lf_hf_raw': spec?.lfHf, // 未經可信度過濾的原始比值
       'lf_reliable': spec?.lfUsable ?? false,
       'hf_reliable': spec?.hfUsable ?? false,
-      // LF 低頻邊緣(0.04Hz,週期 25 秒)在這段窗裡走了幾個完整週期。
-      // < 4.4 就不可信 —— 30 秒窗約 1.2 圈,5 分鐘約 12 圈。
+      // 各頻帶下緣在這段窗裡走了幾個完整週期。< 4 就不可信
+      // (門檻 Max30102VitalsMetrics 那側是從頻率導出的,不是湊的)。
+      // 30 秒窗:LF 約 1.2 圈、HF 約 4.3 圈 —— HF 剛好在線上,
+      // 所以 hf_reliable 偶爾會是 false,看連續值比看布林準。
       'lf_cycles': spec?.lfCycles,
+      'hf_cycles': spec?.hfCycles,
       'window_sec': spec?.spanSeconds,
       // 時域版的自律平衡(SNS−PNS)。**刻意不放進 `ans`** ——
       // 對方的 ans 源自 LF/HF,定義與尺度都不同,塞進去等於偷換定義。

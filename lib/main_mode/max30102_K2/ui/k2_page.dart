@@ -946,8 +946,9 @@ class _K2PageState extends State<K2Page> {
             padding: const EdgeInsets.only(top: 2, bottom: 2),
             child: Text(
               '⚠ LF 只走 ${spec.lfCycles.toStringAsFixed(1)} 圈'
-              '(需 ≥4.4)→ LF 與比值不可信,對外送 null。\n'
-              '  HF 有 ${(spec.spanSeconds * 0.15).toStringAsFixed(1)} 圈,'
+              '(需 ≥${HrvSpectrum.minBandCycles.toStringAsFixed(0)})'
+              '→ LF 與比值不可信,對外送 null。\n'
+              '  HF 有 ${spec.hfCycles.toStringAsFixed(1)} 圈,'
               '是勉強可用的那一半(灰字=不可信)',
               style: TextStyle(fontSize: 9.5, color: Colors.orange.shade800),
             ),
