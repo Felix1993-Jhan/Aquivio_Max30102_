@@ -380,8 +380,11 @@ class _K2PageState extends State<K2Page> {
           children: [
             // 免洗版移除了原本的「② 長期 HRV(UI 累積 300 拍)」——
             // 跨測試累積會把不同使用者的拍混在一起。剩下三區重新編號。
-            _sectionBox(trParams('k2_sec1', {'sec': _shortSec}),
-                _liveAndShortHrv()),
+            _sectionBox(
+              trParams('k2_sec1', {'sec': _shortSec}),
+              _liveAndShortHrv(),
+              trailing: _sec1Controls(),
+            ),
             const SizedBox(height: 12),
             _sectionBox(tr('k2_sec2'), _snapshotViewer()),
             const SizedBox(height: 12),
@@ -510,6 +513,70 @@ class _K2PageState extends State<K2Page> {
     );
   }
 
+  /// 區塊 ① 標題列右側的控制項:視窗長度、實際涵蓋、存快照、進料計數。
+  ///
+  /// 這排本來自己佔一列,現在併進標題列 —— 側欄高度是稀缺資源,
+  /// 省下的那一列直接變成多看得到一列資料。
+  Widget _sec1Controls() {
+    final shortPts = _adapter.pointsRecentSeconds(_shortSec);
+    return Row(
+      children: [
+        Text(tr('k2_window'),
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+        const SizedBox(width: 6),
+        for (final s in _secOptions)
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: ChoiceChip(
+              label: Text('${s}s', style: const TextStyle(fontSize: 11)),
+              selected: _shortSec == s,
+              visualDensity: VisualDensity.compact,
+              onSelected: (_) => setState(() => _shortSec = s),
+            ),
+          ),
+        const SizedBox(width: 8),
+        // 實際涵蓋時間 = 末拍終谷 − 首拍起谷(用絕對索引算,**含洞**)。
+        // 它與「RR 加總」的差就是被過濾器剔掉的空窗長度 → 對照著看很有用。
+        Text(
+          trParams('k2_actual_span', {
+            'sec': _adapter.spanSeconds(shortPts).toStringAsFixed(1),
+            'beats': shortPts.length,
+          }),
+          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+        ),
+        const SizedBox(width: 12),
+        // 存快照:把當下 30 秒視窗存成 JSON。純 UI 行為。
+        OutlinedButton.icon(
+          onPressed: _saveSnapshot,
+          icon: const Icon(Icons.photo_camera_outlined, size: 15),
+          label: Text(tr('k2_save_snapshot')),
+          style: OutlinedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            textStyle: const TextStyle(fontSize: 12),
+          ),
+        ),
+        const Spacer(),
+        // 即時心跳計數:直接聽 sampleVersionNotifier(10Hz),不靠整頁 rebuild。
+        // 用途:一眼分辨「資料停了」vs「畫面沒重繪」——
+        //   數字不動 = 串口/解析停了;數字在動但波形不動 = 繪圖問題。
+        ValueListenableBuilder<int>(
+          valueListenable: _adapter.sampleVersionNotifier,
+          builder: (context, ver, _) => Text(
+            trParams('k2_feed_stats', {
+              'ver': ver,
+              'rx': _adapter.rxPackets,
+              'wave': _adapter.waveIr.length,
+            }),
+            style: TextStyle(
+                fontSize: 11,
+                fontFeatures: const [FontFeature.tabularFigures()],
+                color: Colors.blueGrey.shade400),
+          ),
+        ),
+      ],
+    );
+  }
+
   // ── ① 即時數值 + 短期 HRV ─────────────────────────────────────
   Widget _liveAndShortHrv() {
     final c = _adapter.latest; // 狀態旗標(手指 / SQI / 沉澱中)看原始的
@@ -539,63 +606,6 @@ class _K2PageState extends State<K2Page> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(tr('k2_window'),
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-            const SizedBox(width: 6),
-            for (final s in _secOptions)
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: ChoiceChip(
-                  label: Text('${s}s', style: const TextStyle(fontSize: 11)),
-                  selected: _shortSec == s,
-                  visualDensity: VisualDensity.compact,
-                  onSelected: (_) => setState(() => _shortSec = s),
-                ),
-              ),
-            const SizedBox(width: 8),
-            // 實際涵蓋時間 = 末拍終谷 − 首拍起谷(用絕對索引算,**含洞**)。
-            // 它與「RR 加總」的差就是被過濾器剔掉的空窗長度 → 對照著看很有用。
-            Text(
-              trParams('k2_actual_span', {
-                'sec': _adapter.spanSeconds(shortPts).toStringAsFixed(1),
-                'beats': shortPts.length,
-              }),
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-            ),
-            const SizedBox(width: 12),
-            // 存快照:把當下 30 秒視窗(+超過 30 秒的長期累積)存成 JSON。純 UI 行為。
-            OutlinedButton.icon(
-              onPressed: _saveSnapshot,
-              icon: const Icon(Icons.photo_camera_outlined, size: 15),
-              label: Text(tr('k2_save_snapshot')),
-              style: OutlinedButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                textStyle: const TextStyle(fontSize: 12),
-              ),
-            ),
-            const Spacer(),
-            // 即時心跳計數:直接聽 sampleVersionNotifier(10Hz),不靠整頁 rebuild。
-            // 用途:一眼分辨「資料停了」vs「畫面沒重繪」——
-            //   數字不動 = 串口/解析停了;數字在動但波形不動 = 繪圖問題。
-            ValueListenableBuilder<int>(
-              valueListenable: _adapter.sampleVersionNotifier,
-              builder: (context, ver, _) => Text(
-                trParams('k2_feed_stats', {
-                  'ver': ver,
-                  'rx': _adapter.rxPackets,
-                  'wave': _adapter.waveIr.length,
-                }),
-                style: TextStyle(
-                    fontSize: 11,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                    color: Colors.blueGrey.shade400),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
         SizedBox(
           height: _sec1Height,
           child: Row(
@@ -692,15 +702,6 @@ class _K2PageState extends State<K2Page> {
                         fontSize: 12, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 _strapiPanel(metrics),
-                const Divider(height: 18),
-                Text('LF 窗長對照實驗',
-                    style: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.bold)),
-                Text('同一段錄 2 分鐘,切成 30 秒窗跟全長比',
-                    style:
-                        TextStyle(fontSize: 9.5, color: Colors.grey.shade600)),
-                const SizedBox(height: 6),
-                _lfExperimentPanel(),
               ]),
               const SizedBox(width: 8),
               // ── 綠:右側(上波形 / 下 RR趨勢+Poincaré)──
@@ -747,6 +748,11 @@ class _K2PageState extends State<K2Page> {
           ),
         ),
         _resizeHandle(_sec1Height, (v) => _sec1Height = v),
+        // ── LF 窗長對照實驗:全寬 ────────────────────────────────────
+        // 不放側欄的理由:10 個窗 + 基準 + 統計在 215px 寬裡一定要捲,
+        // 而這一塊的重點就是「一眼看完整個分布」。全寬才排得下兩欄。
+        const SizedBox(height: 10),
+        _lfExperimentPanelWide(),
       ],
     );
   }
@@ -913,146 +919,206 @@ class _K2PageState extends State<K2Page> {
   // LF 窗長對照實驗
   // ══════════════════════════════════════════════════════════════
 
-  /// 2 分鐘錄一段 → 用完整長度算基準,再切成 30 秒窗跟基準比。
+  /// 2 分鐘錄一段 → 用完整長度算基準,再切成 30 秒窗跟基準比。**全寬版**。
   ///
   /// 為什麼不是「量兩次」:兩次之間人的呼吸與狀態都變了,測到的差異
   /// 分不清是窗長造成的還是生理變化造成的。同一段切窗才是對照。
-  Widget _lfExperimentPanel() {
+  Widget _lfExperimentPanelWide() {
     final exp = _adapter.lfExperiment;
-    return ListenableBuilder(
-      listenable: exp,
-      builder: (context, _) {
-        final r = exp.result;
-
-        if (exp.running) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: ListenableBuilder(
+        listenable: exp,
+        builder: (context, _) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const Text('LF 窗長對照實驗',
+                    style: TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('同一段錄 2 分鐘,切成 30 秒窗跟全長比',
+                      style: TextStyle(
+                          fontSize: 10.5, color: Colors.grey.shade600)),
+                ),
+                _lfExperimentAction(exp),
+              ],
+            ),
+            if (exp.running) ...[
+              const SizedBox(height: 8),
               LinearProgressIndicator(value: exp.progress, minHeight: 6),
               const SizedBox(height: 4),
               Text(
                 '${exp.elapsedSeconds} / ${K2LfExperiment.targetSeconds} 秒'
-                '  ·  ${exp.collectedBeats} 拍',
-                style: TextStyle(fontSize: 10.5, color: Colors.grey.shade700),
-              ),
-              Text('手指請保持不動,中途離開會中止',
-                  style:
-                      TextStyle(fontSize: 9.5, color: Colors.orange.shade800)),
-              const SizedBox(height: 4),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: exp.cancel,
-                  child: const Text('取消', style: TextStyle(fontSize: 11)),
-                ),
+                '  ·  已收 ${exp.collectedBeats} 拍'
+                '  ·  手指請保持不動,中途離開會中止實驗',
+                style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
               ),
             ],
-          );
-        }
+            if (!exp.running && exp.abortReason != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  switch (exp.abortReason!) {
+                    'reset' => '⚠ 手指離開,核心已歸零 → 實驗中止'
+                        '(兩段時間軸不能接起來,硬接會算出無意義的數字)',
+                    'cancelled' => '已取消',
+                    'insufficient' => '⚠ 拍數不足,算不出頻譜',
+                    _ => '已停止',
+                  },
+                  style:
+                      TextStyle(fontSize: 11, color: Colors.orange.shade800),
+                ),
+              ),
+            if (exp.result != null) _lfResultBody(exp.result!),
+          ],
+        ),
+      ),
+    );
+  }
 
-        if (r == null) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  /// 右上角那顆按鈕:依狀態換成 開始 / 取消 / 再測一次。
+  Widget _lfExperimentAction(K2LfExperiment exp) {
+    if (exp.running) {
+      return OutlinedButton(
+        onPressed: exp.cancel,
+        style: OutlinedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            textStyle: const TextStyle(fontSize: 12)),
+        child: const Text('取消'),
+      );
+    }
+    if (exp.result != null) {
+      return OutlinedButton(
+        onPressed: exp.clear,
+        style: OutlinedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            textStyle: const TextStyle(fontSize: 12)),
+        child: const Text('清除,再測一次'),
+      );
+    }
+    return FilledButton.tonal(
+      onPressed: () => exp.start(_adapter.core.totalSamples),
+      style: FilledButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          textStyle: const TextStyle(fontSize: 12)),
+      child: const Text('開始 2 分鐘錄製'),
+    );
+  }
+
+  /// 結果本體:基準一列、10 個窗分兩欄、結論一列。
+  Widget _lfResultBody(LfExperimentResult r) {
+    final b = r.baseline;
+    Color devColor(double d) {
+      final a = d.abs();
+      if (a <= 20) return Colors.green.shade700;
+      if (a <= 50) return Colors.orange.shade800;
+      return Colors.red.shade700;
+    }
+
+    Widget stat(String k, String v, {Color? color}) => Padding(
+          padding: const EdgeInsets.only(right: 20),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('$k ',
+                style:
+                    TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+            Text(v,
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'monospace',
+                    color: color)),
+          ]),
+        );
+
+    Widget windowRow(LfWindow w) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 1.5),
+          child: Row(
             children: [
-              if (exp.abortReason != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    switch (exp.abortReason!) {
-                      'reset' => '⚠ 手指離開,核心已歸零 → 實驗中止\n'
-                          '  (兩段時間軸不能接起來)',
-                      'cancelled' => '已取消',
-                      'insufficient' => '⚠ 拍數不足,算不出頻譜',
-                      _ => '已停止',
-                    },
+              SizedBox(
+                width: 62,
+                child: Text('${w.startSec.toInt()}-${w.endSec.toInt()}s',
                     style: TextStyle(
-                        fontSize: 9.5, color: Colors.orange.shade800),
+                        fontSize: 11, color: Colors.grey.shade600)),
+              ),
+              SizedBox(
+                width: 50,
+                child: Text(w.spec.lfHf.toStringAsFixed(2),
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                        fontSize: 12, fontFamily: 'monospace')),
+              ),
+              SizedBox(
+                width: 62,
+                child: Text(
+                  '${w.lfHfDevPct >= 0 ? '+' : ''}'
+                  '${w.lfHfDevPct.toStringAsFixed(0)}%',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.bold,
+                    color: devColor(w.lfHfDevPct),
                   ),
                 ),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.tonal(
-                  onPressed: () =>
-                      exp.start(_adapter.core.totalSamples),
-                  child: const Text('開始 2 分鐘錄製',
-                      style: TextStyle(fontSize: 11)),
-                ),
               ),
             ],
-          );
-        }
+          ),
+        );
 
-        // ── 有結果 ────────────────────────────────────────────────
-        final b = r.baseline;
-        Color devColor(double d) {
-          final a = d.abs();
-          if (a <= 20) return Colors.green.shade700;
-          if (a <= 50) return Colors.orange.shade800;
-          return Colors.red.shade700;
-        }
-
-        return Column(
+    final half = (r.windows.length + 1) ~/ 2;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 16),
+        Wrap(children: [
+          stat('基準', '${b.spanSeconds.toStringAsFixed(0)}s · ${b.beats} 拍'),
+          stat('LF/HF', b.lfHf.toStringAsFixed(2)),
+          stat('LF', '${b.lf.toStringAsFixed(0)} ms²'),
+          stat('HF', '${b.hf.toStringAsFixed(0)} ms²'),
+        ]),
+        const SizedBox(height: 8),
+        Text('30 秒窗 (${r.windows.length} 個,每 10 秒滑動一次)',
+            style:
+                const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('基準 ${b.spanSeconds.toStringAsFixed(0)}s · ${b.beats} 拍',
-                style: const TextStyle(
-                    fontSize: 10.5, fontWeight: FontWeight.bold)),
-            _kv('LF/HF', b.lfHf.toStringAsFixed(2)),
-            _kv('LF', '${b.lf.toStringAsFixed(0)} ms²'),
-            _kv('HF', '${b.hf.toStringAsFixed(0)} ms²'),
-            const Divider(height: 12),
-            Text('30 秒窗 (${r.windows.length} 個)',
-                style: const TextStyle(
-                    fontSize: 10.5, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 2),
-            for (final w in r.windows)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 1),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('${w.startSec.toInt()}-${w.endSec.toInt()}s',
-                        style: TextStyle(
-                            fontSize: 9.5, color: Colors.grey.shade600)),
-                    Text(w.spec.lfHf.toStringAsFixed(2),
-                        style: const TextStyle(
-                            fontSize: 10, fontFamily: 'monospace')),
-                    SizedBox(
-                      width: 52,
-                      child: Text(
-                        '${w.lfHfDevPct >= 0 ? '+' : ''}'
-                        '${w.lfHfDevPct.toStringAsFixed(0)}%',
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.bold,
-                          color: devColor(w.lfHfDevPct),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            const Divider(height: 12),
-            _kv('偏差中位數',
-                '${r.medianAbsDevPct?.toStringAsFixed(0) ?? '—'}%'),
-            _kv('偏差範圍',
-                '${r.minAbsDevPct?.toStringAsFixed(0) ?? '—'}'
-                    '~${r.maxAbsDevPct?.toStringAsFixed(0) ?? '—'}%'),
-            _kv('±20% 內', '${r.windowsWithin20pct}/${r.windows.length}'),
-            const SizedBox(height: 6),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: exp.clear,
-                child: const Text('清除,再測一次',
-                    style: TextStyle(fontSize: 11)),
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final w in r.windows.take(half)) windowRow(w),
+              ],
+            ),
+            const SizedBox(width: 24),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final w in r.windows.skip(half)) windowRow(w),
+              ],
             ),
           ],
-        );
-      },
+        ),
+        const Divider(height: 16),
+        Wrap(children: [
+          stat('偏差中位數',
+              '${r.medianAbsDevPct?.toStringAsFixed(0) ?? '—'}%',
+              color: Colors.red.shade700),
+          stat('偏差範圍',
+              '${r.minAbsDevPct?.toStringAsFixed(0) ?? '—'}'
+                  '~${r.maxAbsDevPct?.toStringAsFixed(0) ?? '—'}%'),
+          stat('±20% 內', '${r.windowsWithin20pct}/${r.windows.length}'),
+        ]),
+      ],
     );
   }
 
@@ -1242,15 +1308,27 @@ class _K2PageState extends State<K2Page> {
   }
 
   // ── 小元件 ────────────────────────────────────────────────────
-  Widget _sectionBox(String title, Widget child) {
+  /// [trailing] 會擺在**標題的同一列**(靠右)。
+  /// 控制項併進標題列可以省下一整列的高度 —— 側欄本來就不夠高,
+  /// 少一列就多看得到一列資料。
+  Widget _sectionBox(String title, Widget child, {Widget? trailing}) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.bold)),
+                if (trailing != null) ...[
+                  const SizedBox(width: 16),
+                  Expanded(child: trailing),
+                ],
+              ],
+            ),
             const SizedBox(height: 8),
             child,
           ],
