@@ -16,6 +16,7 @@ import 'package:flutter_libserialport/flutter_libserialport.dart';
 import '../../../shared/services/localization_service.dart';
 import '../../../shared/services/serial_port_manager.dart';
 import '../k2_config.dart';
+import '../k2_core.dart';
 import '../k2_hrv_calculator.dart';
 import '../k2_protocol.dart';
 import '../k2_setting_limits.dart';
@@ -577,6 +578,102 @@ class _K2PageState extends State<K2Page> {
     );
   }
 
+  /// 即時數值列:心率 / 血氧 / 手指 / SQI / spike **橫排**,擺在區塊最上面。
+  ///
+  /// [c] 看狀態旗標(原始結果),[v] 看數值(手指離開時是保留的舊值)。
+  /// 兩個狀態橫幅(保留中 / 沉澱期)接在同一列右側 —— 它們互斥,
+  /// 而且放右邊剛好用掉本來空著的水平空間,不再另外吃掉一列高度。
+  Widget _liveValuesBar(K2Compute? c, K2Compute? v, bool holding) {
+    final settling = c?.settling ?? false;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          _bigValue(tr('k2_hr_new'), v?.bpm?.toStringAsFixed(0), 'bpm',
+              Colors.red,
+              dim: holding),
+          const SizedBox(width: 28),
+          _bigValue(tr('k2_spo2_new'), v?.spo2?.toStringAsFixed(1), '%',
+              Colors.blue,
+              dim: holding),
+          const SizedBox(width: 28),
+          _flag(tr('k2_finger'), c?.fingerPresent ?? false),
+          const SizedBox(width: 14),
+          _flag('SQI', c?.sqiOk ?? false),
+          const SizedBox(width: 14),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('spike',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+            const SizedBox(height: 4),
+            Text(c?.spikeMax.toStringAsFixed(2) ?? '—',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange.shade800)),
+          ]),
+          const SizedBox(width: 16),
+          // 手指離開 → 顯示保留的舊值,但一定要標示出來,
+          // 不然會被當成這一次量測的即時數字。
+          if (holding)
+            Expanded(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.blueGrey.shade50,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.blueGrey.shade200),
+                ),
+                child: Row(children: [
+                  Icon(Icons.pause_circle_outline,
+                      size: 14, color: Colors.blueGrey.shade600),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      tr('k2_finger_off_hold'),
+                      style: TextStyle(
+                          fontSize: 10.5, color: Colors.blueGrey.shade700),
+                    ),
+                  ),
+                ]),
+              ),
+            )
+          // 沉澱期:明確講「在等什麼」,不要放一個 0 或殘留的舊值誤導人
+          else if (settling)
+            Expanded(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.amber.shade300),
+                ),
+                child: Text(
+                  trParams('k2_settling', {
+                    'dead': (_adapter.core.config.fingerDeadMs / 1000)
+                        .toStringAsFixed(1),
+                    'settle': (_adapter.core.config.settleSamples / 100)
+                        .toStringAsFixed(1),
+                  }),
+                  style:
+                      TextStyle(fontSize: 11, color: Colors.amber.shade900),
+                ),
+              ),
+            )
+          else
+            const Spacer(),
+        ],
+      ),
+    );
+  }
+
   // ── ① 即時數值 + 短期 HRV ─────────────────────────────────────
   Widget _liveAndShortHrv() {
     final c = _adapter.latest; // 狀態旗標(手指 / SQI / 沉澱中)看原始的
@@ -606,6 +703,12 @@ class _K2PageState extends State<K2Page> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── 即時數值:橫排一列,擺在最上面 ────────────────────────────
+        // 心率 / 血氧 / 手指 / SQI / spike 原本是直向擠在側欄最上方,
+        // 佔掉約 150px 的欄高。橫排之後側欄那段高度全部還給 HRV 與衍生指標,
+        // 而且這五個值本來就該一眼掃過去,不需要垂直排列。
+        _liveValuesBar(c, v, holding),
+        const SizedBox(height: 8),
         SizedBox(
           height: _sec1Height,
           child: Row(
@@ -613,83 +716,6 @@ class _K2PageState extends State<K2Page> {
             children: [
               // ── 黃:左側垂直資料面板 ──
               _sidePanel([
-                // 手指離開 → 顯示保留的舊值,但一定要標示出來,
-                // 不然會被當成這一次量測的即時數字。
-                if (holding) ...[
-                  Container(
-                    width: double.infinity,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.blueGrey.shade50,
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: Colors.blueGrey.shade200),
-                    ),
-                    child: Row(children: [
-                      Icon(Icons.pause_circle_outline,
-                          size: 14, color: Colors.blueGrey.shade600),
-                      const SizedBox(width: 5),
-                      Expanded(
-                        child: Text(
-                          tr('k2_finger_off_hold'),
-                          style: TextStyle(
-                              fontSize: 10.5, color: Colors.blueGrey.shade700),
-                        ),
-                      ),
-                    ]),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                _bigValue(tr('k2_hr_new'), v?.bpm?.toStringAsFixed(0), 'bpm',
-                    Colors.red,
-                    dim: holding),
-                const SizedBox(height: 8),
-                _bigValue(tr('k2_spo2_new'), v?.spo2?.toStringAsFixed(1), '%',
-                    Colors.blue,
-                    dim: holding),
-                const SizedBox(height: 8),
-                Row(children: [
-                  _flag(tr('k2_finger'), c?.fingerPresent ?? false),
-                  const SizedBox(width: 10),
-                  _flag('SQI', c?.sqiOk ?? false),
-                  const SizedBox(width: 10),
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('spike',
-                        style: TextStyle(
-                            fontSize: 11, color: Colors.grey.shade700)),
-                    const SizedBox(height: 4),
-                    Text(c?.spikeMax.toStringAsFixed(2) ?? '—',
-                        style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange.shade800)),
-                  ]),
-                ]),
-                // 沉澱期:明確講「在等什麼」,不要放一個 0 或殘留的舊值誤導人
-                if (c?.settling ?? false) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: Colors.amber.shade50,
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: Colors.amber.shade300),
-                    ),
-                    child: Text(
-                      trParams('k2_settling', {
-                        'dead': (_adapter.core.config.fingerDeadMs / 1000)
-                            .toStringAsFixed(1),
-                        'settle': (_adapter.core.config.settleSamples / 100)
-                            .toStringAsFixed(1),
-                      }),
-                      style: TextStyle(
-                          fontSize: 11, color: Colors.amber.shade900),
-                    ),
-                  ),
-                ],
-                const Divider(height: 18),
                 Text(trParams('k2_hrv_short', {'sec': _shortSec}),
                     style: const TextStyle(
                         fontSize: 12, fontWeight: FontWeight.bold)),
