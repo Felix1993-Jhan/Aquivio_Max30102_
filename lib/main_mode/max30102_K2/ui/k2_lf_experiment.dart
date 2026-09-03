@@ -83,6 +83,26 @@ class LfExperimentResult {
       windows.where((w) => w.lfHfDevPct.abs() <= 20).length;
 }
 
+/// 一次錄製的摘要,存進歷次清單用。
+///
+/// 為什麼需要這個:實測發現**單次結果不能下結論** —— 第一次量到偏差中位數
+/// 75%、第二次卻只有 15%,連 2 分鐘基準本身都從 1.06 跳到 1.97。
+/// 也就是說「30 秒差多少」這件事本身就會變,必須看多次的分布才有意義。
+typedef LfRunSummary = ({
+  int index,
+  DateTime time,
+  double baselineLfHf,
+  double baselineLf,
+  double baselineHf,
+  double spanSec,
+  int beats,
+  double? medianAbsDevPct,
+  double? minAbsDevPct,
+  double? maxAbsDevPct,
+  int within20,
+  int windowCount,
+});
+
 class K2LfExperiment extends ChangeNotifier {
   /// 錄製目標長度(秒)。2 分鐘 —— 0.04Hz 走 4.8 圈,勉強站得住。
   /// 國際標準其實是 5 分鐘,這裡取 2 分鐘是「還能要求使用者忍受」的下限。
@@ -106,9 +126,40 @@ class K2LfExperiment extends ChangeNotifier {
   String? _abortReason;
   LfExperimentResult? _result;
 
+  /// 歷次完成的錄製摘要(最舊在前)。
+  ///
+  /// [clear] **不會**清掉它 —— 「清除,再測一次」的用意就是保留前面幾次
+  /// 再測下一次。要整批丟掉請用 [clearHistory]。
+  final List<LfRunSummary> _history = [];
+
   bool get running => _running;
   String? get abortReason => _abortReason;
   LfExperimentResult? get result => _result;
+
+  List<LfRunSummary> get history => List.unmodifiable(_history);
+
+  /// 歷次「基準 LF/HF」的最小 / 最大。兩者差很多 = 連 2 分鐘的基準都不穩,
+  /// 那「基準」這個詞就要打折 —— 我們是在拿一把會動的尺量東西。
+  (double, double)? get baselineRange {
+    if (_history.isEmpty) return null;
+    final v = [for (final h in _history) h.baselineLfHf]..sort();
+    return (v.first, v.last);
+  }
+
+  /// 歷次「偏差中位數」的最小 / 最大。這是最終要回報的那個數字的分布。
+  (double, double)? get medianDevRange {
+    final v = [
+      for (final h in _history)
+        if (h.medianAbsDevPct != null) h.medianAbsDevPct!,
+    ]..sort();
+    if (v.isEmpty) return null;
+    return (v.first, v.last);
+  }
+
+  void clearHistory() {
+    _history.clear();
+    notifyListeners();
+  }
 
   int get elapsedSeconds => _elapsedSamples ~/ _fs;
   int get collectedBeats => _pts.length;
@@ -221,12 +272,27 @@ class K2LfExperiment extends ChangeNotifier {
       ));
     }
 
-    _result = LfExperimentResult(
+    final res = LfExperimentResult(
       baseline: baseline,
       windows: windows,
       durationSec: baseline.spanSeconds,
       totalBeats: _pts.length + 1,
     );
+    _result = res;
+    _history.add((
+      index: _history.length + 1,
+      time: DateTime.now(),
+      baselineLfHf: baseline.lfHf,
+      baselineLf: baseline.lf,
+      baselineHf: baseline.hf,
+      spanSec: baseline.spanSeconds,
+      beats: res.totalBeats,
+      medianAbsDevPct: res.medianAbsDevPct,
+      minAbsDevPct: res.minAbsDevPct,
+      maxAbsDevPct: res.maxAbsDevPct,
+      within20: res.windowsWithin20pct,
+      windowCount: windows.length,
+    ));
     notifyListeners();
   }
 }

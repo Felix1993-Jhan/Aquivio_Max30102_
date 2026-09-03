@@ -161,6 +161,59 @@ void main() {
     expect(exp.abortReason, isNull);
   });
 
+  group('歷次結果', () {
+    /// 跑完一整段錄製,回傳實驗器。[fromSec] 讓多次錄製接在同一條時間軸上
+    /// (現實中核心的 totalSamples 只會遞增)。
+    void runOnce(K2LfExperiment exp, int fromSec) {
+      exp.start(fromSec * fs);
+      playback(exp, series(fromSec + 125, fromAbs: 0),
+          seconds: fromSec + 125, fromSec: fromSec);
+    }
+
+    test('★ clear() 不能洗掉歷史 —— 「再測一次」的用意就是要留著前幾次', () {
+      final exp = K2LfExperiment();
+      runOnce(exp, 0);
+      expect(exp.history, hasLength(1));
+
+      exp.clear();
+      expect(exp.result, isNull, reason: '當次結果要清掉');
+      expect(exp.history, hasLength(1), reason: '但歷史必須留著');
+
+      runOnce(exp, 130);
+      expect(exp.history, hasLength(2));
+      expect(exp.history[0].index, 1);
+      expect(exp.history[1].index, 2);
+    });
+
+    test('clearHistory 才是整批丟掉', () {
+      final exp = K2LfExperiment();
+      runOnce(exp, 0);
+      exp.clearHistory();
+      expect(exp.history, isEmpty);
+    });
+
+    test('中止的錄製不進歷史', () {
+      final exp = K2LfExperiment()..start(0);
+      playback(exp, series(125), seconds: 40);
+      exp.cancel();
+      expect(exp.history, isEmpty, reason: '沒錄完就沒有結果,不該留下記錄');
+    });
+
+    test('跨次範圍:少於 2 次時 medianDevRange 仍算得出來,空的時候回 null', () {
+      final exp = K2LfExperiment();
+      expect(exp.baselineRange, isNull);
+      expect(exp.medianDevRange, isNull);
+
+      runOnce(exp, 0);
+      final b = exp.baselineRange!;
+      expect(b.$1, closeTo(b.$2, 1e-9), reason: '只有一次 → 最小=最大');
+
+      runOnce(exp, 130);
+      final b2 = exp.baselineRange!;
+      expect(b2.$1, lessThanOrEqualTo(b2.$2));
+    });
+  });
+
   test('★ 錄製開始前的舊拍不會被收進來', () {
     // 機器已經跑了 60 秒(核心視窗裡有一堆舊拍),這時才按下開始錄製。
     final all = series(180);

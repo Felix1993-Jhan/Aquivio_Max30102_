@@ -1005,9 +1005,125 @@ class _K2PageState extends State<K2Page> {
                 ),
               ),
             if (exp.result != null) _lfResultBody(exp.result!),
+            if (exp.history.isNotEmpty) _lfHistoryBody(exp),
           ],
         ),
       ),
+    );
+  }
+
+  /// 歷次錄製的摘要表。
+  ///
+  /// 為什麼需要它:實測發現**單次結果不能下結論** —— 第一次量到偏差中位數
+  /// 75%(2/10 在 ±20% 內),第二次卻是 15%(7/10),兩次的結論完全相反。
+  /// 連 2 分鐘的基準本身都從 1.06 跳到 1.97。所以要看的是**多次的分布**,
+  /// 不是任何單獨一次。最下面那兩個範圍就是真正要回報的東西。
+  Widget _lfHistoryBody(K2LfExperiment exp) {
+    final h = exp.history;
+    final bRange = exp.baselineRange;
+    final mRange = exp.medianDevRange;
+
+    Widget cell(String s, double w,
+            {Color? color, bool bold = false, TextAlign align = TextAlign.right}) =>
+        SizedBox(
+          width: w,
+          child: Text(s,
+              textAlign: align,
+              style: TextStyle(
+                fontSize: 11,
+                fontFamily: 'monospace',
+                fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+                color: color,
+              )),
+        );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 16),
+        Row(children: [
+          Text('歷次結果 (${h.length} 次)',
+              style:
+                  const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+          const Spacer(),
+          TextButton(
+            onPressed: exp.clearHistory,
+            style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                textStyle: const TextStyle(fontSize: 11)),
+            child: const Text('清空歷史'),
+          ),
+        ]),
+        // 表頭
+        Row(children: [
+          cell('#', 26, align: TextAlign.left),
+          cell('時間', 52),
+          cell('基準LF/HF', 74),
+          cell('偏差中位數', 76),
+          cell('偏差範圍', 76),
+          cell('±20%內', 56),
+          cell('拍數', 46),
+        ]),
+        const SizedBox(height: 2),
+        for (final r in h)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 1.5),
+            child: Row(children: [
+              cell('${r.index}', 26, align: TextAlign.left),
+              cell(
+                  '${r.time.hour.toString().padLeft(2, '0')}:'
+                  '${r.time.minute.toString().padLeft(2, '0')}',
+                  52,
+                  color: Colors.grey.shade600),
+              cell(r.baselineLfHf.toStringAsFixed(2), 74, bold: true),
+              cell('${r.medianAbsDevPct?.toStringAsFixed(0) ?? '—'}%', 76,
+                  bold: true,
+                  color: (r.medianAbsDevPct ?? 0) <= 20
+                      ? Colors.green.shade700
+                      : ((r.medianAbsDevPct ?? 0) <= 50
+                          ? Colors.orange.shade800
+                          : Colors.red.shade700)),
+              cell(
+                  '${r.minAbsDevPct?.toStringAsFixed(0) ?? '—'}'
+                  '~${r.maxAbsDevPct?.toStringAsFixed(0) ?? '—'}%',
+                  76,
+                  color: Colors.grey.shade700),
+              cell('${r.within20}/${r.windowCount}', 56),
+              cell('${r.beats}', 46, color: Colors.grey.shade600),
+            ]),
+          ),
+        if (h.length >= 2) ...[
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.blueGrey.shade50,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '跨次分布  ·  基準 LF/HF '
+                  '${bRange!.$1.toStringAsFixed(2)}~${bRange.$2.toStringAsFixed(2)}'
+                  '  ·  偏差中位數 '
+                  '${mRange == null ? '—' : '${mRange.$1.toStringAsFixed(0)}~${mRange.$2.toStringAsFixed(0)}%'}',
+                  style: const TextStyle(
+                      fontSize: 11.5, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '基準本身若跨次差很多,代表連 2 分鐘的尺都在動;'
+                  '偏差中位數若跨次差很多,代表「30 秒差多少」這件事本身不可預測。',
+                  style:
+                      TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -1038,6 +1154,12 @@ class _K2PageState extends State<K2Page> {
           textStyle: const TextStyle(fontSize: 12)),
       child: const Text('開始 2 分鐘錄製'),
     );
+  }
+
+  /// 帶正負號的百分比。**先四捨五入再決定符號** —— 否則 −0.3 會顯示成「-0%」。
+  static String _pct(double v) {
+    final n = v.round();
+    return '${n > 0 ? '+' : ''}$n%';
   }
 
   /// 結果本體:基準一列、10 個窗分兩欄、結論一列。
@@ -1085,8 +1207,9 @@ class _K2PageState extends State<K2Page> {
               SizedBox(
                 width: 62,
                 child: Text(
-                  '${w.lfHfDevPct >= 0 ? '+' : ''}'
-                  '${w.lfHfDevPct.toStringAsFixed(0)}%',
+                  // 先四捨五入再決定正負號 —— 直接 toStringAsFixed(0) 會讓
+                  // −0.3 顯示成「-0%」。
+                  _pct(w.lfHfDevPct),
                   textAlign: TextAlign.right,
                   style: TextStyle(
                     fontSize: 12,
