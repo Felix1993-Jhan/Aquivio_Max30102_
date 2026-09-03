@@ -26,6 +26,7 @@ import 'package:libserialport/libserialport.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_config.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_core.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_protocol.dart';
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_vitals_metrics.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
 // 常數與小工具
@@ -174,6 +175,22 @@ class K2Engine {
   }
 
   /// 最新一次計算結果。沒手指 / 沉澱中時對應欄位為 null,照核心現況輸出。
+  ///
+  /// ⚠️ **`/vitals` 與 `/stream` 吐的是同一個函式的輸出** —— WS 一接上先推
+  ///    一份現況,之後每算完一次推一份。所以改這裡兩個端點會自動同步,
+  ///    不會有一邊漏改。
+  ///
+  /// 回應分兩區:
+  ///   · 頂層 + `hrv` —— **我們自己的欄位**,名稱與型別照核心的語意。
+  ///   · `strapi` —— **整合方介面的形狀**(aquivio-station 的 `VitalsResult`),
+  ///     欄位名與型別完全照他們的宣告,可以直接 `const v: VitalsResult = json.strapi`
+  ///     零映射取用。
+  ///
+  /// 為什麼不直接把頂層欄位改名成他們的:**有些根本不是同一個量**。
+  ///   · `sqiOk`(布林閘門) vs `sqi`(number 1/0)—— 型別不同
+  ///   · `bpm`(最近 6 拍**中位**) vs `mean_hr`(全窗**平均**)—— 同一次量測
+  ///     會差 1~3 bpm,改名等於送錯值
+  /// 所以兩區並存,重複幾個 byte 不是問題。
   Map<String, dynamic> vitalsJson() {
     final c = k2.latest;
     final hv = c?.hrv;
@@ -197,6 +214,48 @@ class K2Engine {
               'beats': hv.beats,
             },
       'totalSamples': k2.totalSamples,
+      'strapi': strapiJson(),
+    };
+  }
+
+  /// 整合方介面(`VitalsResult`)形狀的區塊。
+  ///
+  /// ⚠️ **與 `hrv` 區塊必須同源。** 兩區的 `sdnn` / `rmssd` / `mean_hr` 是同一份
+  ///    `HrvStats` 導出的,不可以各算各的 —— 各算一次就會有一天只改到一邊。
+  ///    這裡直接把 `c.hrv` 傳進 [Max30102VitalsMetrics.compute]。
+  Map<String, dynamic> strapiJson() {
+    final c = k2.latest;
+    final m = Max30102VitalsMetrics.compute(
+      pts: c?.rrPoints ?? const [],
+      hv: c?.hrv,
+      sqiOk: c?.sqiOk ?? false,
+      settling: c?.settling ?? false,
+      bpm: c?.bpm,
+      ir: _waveIr,
+    );
+    final spec = m.spectrum;
+    return {
+      ...m.toStrapiJson(),
+      // ── 以下是 VitalsResult 沒宣告、但介面有 `[key: string]: unknown`
+      //    所以塞得進去的補充欄位 ──────────────────────────────────
+      //
+      // `lf_hf` 本身在窗長不足時是 null(見 k2_vitals_metrics 的誠實性規則)。
+      // 但實測資料本身是算得出來的,所以連同**可信度**一起送:上層想用就
+      // 用得到,同時看得到它可不可信,不必自己去猜。
+      'lf': spec?.lf,
+      'hf': spec?.hf,
+      'lf_hf_raw': spec?.lfHf, // 未經可信度過濾的原始比值
+      'lf_reliable': spec?.lfUsable ?? false,
+      'hf_reliable': spec?.hfUsable ?? false,
+      // LF 低頻邊緣(0.04Hz,週期 25 秒)在這段窗裡走了幾個完整週期。
+      // < 4.4 就不可信 —— 30 秒窗約 1.2 圈,5 分鐘約 12 圈。
+      'lf_cycles': spec?.lfCycles,
+      'window_sec': spec?.spanSeconds,
+      // 時域版的自律平衡(SNS−PNS)。**刻意不放進 `ans`** ——
+      // 對方的 ans 源自 LF/HF,定義與尺度都不同,塞進去等於偷換定義。
+      // 放在另一個名字下,要用的人必須先看到這個名字、知道它是別的東西。
+      'ans_time_domain': m.ansTimeDomain,
+      'sns': m.sns,
     };
   }
 

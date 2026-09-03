@@ -14,6 +14,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -225,5 +226,133 @@ void main() {
     expect(r.body['spo2'], isNull);
     expect(r.body['hrv'], isNull);
     expect(r.body['fingerPresent'], isFalse);
+  });
+
+  // ── strapi 區塊 ────────────────────────────────────────────────────
+  //
+  // `/vitals` 與 `/stream` 吐的是同一個函式,所以這裡驗過等於兩個端點都驗過。
+  //
+  // 這一組直接把合成 PPG 餵進 K2Engine(不走 HTTP),原因是要湊滿 HRV 的
+  // 暖機拍數需要 30 秒以上的波形 —— 走 HTTP 要打幾百次請求,在行程內餵快得多,
+  // 而且驗的是同一條計算鏈。
+
+  group('strapi 區塊', () {
+    /// 組一個合法的 QUERY_FIFO 回應封包(擴充板 0x31)。
+    List<int> packetOf(List<(int red, int ir)> samples) {
+      final b = <int>[0x40, 0x71, 0x31, 0x09, 0x00, samples.length * 6];
+      for (final (red, ir) in samples) {
+        b.addAll([red & 0xFF, (red >> 8) & 0xFF, (red >> 16) & 0xFF]);
+        b.addAll([ir & 0xFF, (ir >> 8) & 0xFF, (ir >> 16) & 0xFF]);
+      }
+      var sum = 0;
+      for (final v in b) {
+        sum += v;
+      }
+      b.add((0x100 - (sum & 0xFF)) & 0xFF);
+      return b;
+    }
+
+    /// 餵 [seconds] 秒的合成 PPG:70bpm 的脈搏,再疊一個 0.25Hz 的呼吸調變
+    /// 讓 RR 有變異(否則每拍間距完全相同,RMSSD 會是 0,測不出東西)。
+    /// IR 的 DC 設在 100000,遠高於手指偵測門檻 50000。
+    K2Engine feedSynthetic({int seconds = 60}) {
+      final e = K2Engine(waveSeconds: 30);
+      const fs = 100;
+      const f0 = 70 / 60; // 70 bpm
+      double phase = 0;
+      final buf = <(int, int)>[];
+      for (int i = 0; i < fs * seconds; i++) {
+        final t = i / fs;
+        // 呼吸調變 → RR 隨之起伏(落在 HF 帶)
+        final f = f0 * (1 + 0.06 * math.sin(2 * math.pi * 0.25 * t));
+        phase += 2 * math.pi * f / fs;
+        final s = math.sin(phase);
+        buf.add(((60000 + 900 * s).round(), (100000 + 2000 * s).round()));
+        if (buf.length == 20) {
+          e.feedPacket(packetOf(buf));
+          buf.clear();
+        }
+      }
+      return e;
+    }
+
+    test('★ 合成 PPG 餵滿後,strapi 區塊真的算得出數值', () {
+      final v = feedSynthetic().vitalsJson();
+      final s = v['strapi'] as Map<String, dynamic>;
+
+      expect(v['fingerPresent'], isTrue, reason: 'IR DC 100000 遠高於門檻');
+      expect(v['hrv'], isNotNull, reason: '60 秒足夠湊滿 HRV 暖機拍數');
+      expect(s['mean_hr'], isNotNull);
+      expect(s['sdnn'], isNotNull);
+      expect(s['rmssd'], isNotNull);
+      expect(s['ln_rmssd'], isNotNull);
+      expect(s['pns'], isNotNull);
+      expect(s['confidence'], isNotNull);
+      // 合成訊號是 70bpm,允許演算法有幾 bpm 的誤差
+      expect(s['mean_hr'] as double, closeTo(70, 6));
+    });
+
+    test('★ strapi 與 hrv 必須同源 —— 兩區的同一個量不可以有兩份計算', () {
+      final v = feedSynthetic().vitalsJson();
+      final hrv = v['hrv'] as Map<String, dynamic>;
+      final s = v['strapi'] as Map<String, dynamic>;
+
+      expect(s['sdnn'], hrv['sdnn'], reason: '各算各的遲早會有一天只改到一邊');
+      expect(s['rmssd'], hrv['rmssd']);
+      expect(s['mean_hr'], hrv['meanHr']);
+      // ln_rmssd 必須真的是 rmssd 的對數,不是另外算的
+      expect(s['ln_rmssd'] as double,
+          closeTo(math.log(hrv['rmssd'] as double), 1e-9));
+    });
+
+    test('★ 誠實性規則:30 秒窗的 lf_hf 是 null,但原始值與可信度照給', () {
+      final s = feedSynthetic().vitalsJson()['strapi'] as Map<String, dynamic>;
+
+      expect(s['lf_hf'], isNull, reason: '30 秒測不到 LF,不送看似合理的假數字');
+      expect(s['lf_reliable'], isFalse);
+      // 但原始值要給 —— 上層想用就用得到,同時看得到它不可信
+      expect(s['lf_hf_raw'], isNotNull, reason: '算得出來的值不藏');
+      expect(s['lf'], isNotNull);
+      expect(s['hf'], isNotNull);
+      expect(s['lf_cycles'] as double, lessThan(4.4),
+          reason: '30 秒窗約 1.2 圈,遠低於可信門檻');
+      expect(s['hf_reliable'], isTrue, reason: 'HF 在 30 秒是勉強可用的那一半');
+    });
+
+    test('★ ans 恆為 null,時域替代值放在另一個名字下', () {
+      final s = feedSynthetic().vitalsJson()['strapi'] as Map<String, dynamic>;
+
+      expect(s['ans'], isNull,
+          reason: '對方的 ans 源自 LF/HF,塞時域值進去等於偷換定義');
+      expect(s['ans_time_domain'], isNotNull, reason: '但值本身要給,只是換名字');
+      expect(s['sns'], isNotNull);
+      // 時域版 = SNS − PNS
+      expect(s['ans_time_domain'] as double,
+          closeTo((s['sns'] as double) - (s['pns'] as double), 1e-9));
+    });
+
+    test('Parseval:lf + hf 不可能超過 sdnn²', () {
+      final v = feedSynthetic().vitalsJson();
+      final s = v['strapi'] as Map<String, dynamic>;
+      final sdnn = (v['hrv'] as Map<String, dynamic>)['sdnn'] as double;
+      final band = (s['lf'] as double) + (s['hf'] as double);
+      expect(band, lessThanOrEqualTo(sdnn * sdnn * 1.02),
+          reason: '三個頻帶加起來等於變異數,LF+HF 只是其中兩段');
+    });
+
+    test('沒有資料時 strapi 區塊仍在,欄位為 null 而非缺席', () async {
+      final r = await send('GET', '/vitals');
+      final s = r.body['strapi'] as Map<String, dynamic>;
+      // VitalsResult 宣告的 12 個欄位都要出現(值可以是 null,但 key 不能少,
+      // 否則對方的 TypeScript 取用時會是 undefined 而不是 null)
+      for (final k in [
+        'mean_hr', 'sdnn', 'rmssd', 'ln_rmssd', 'lf_hf', 'sqi',
+        'snr_db', 'confidence', 'pns', 'ans', 'stress', 'activity',
+      ]) {
+        expect(s.containsKey(k), isTrue, reason: '缺少欄位 $k');
+      }
+      expect(s['mean_hr'], isNull);
+      expect(s['sqi'], 0, reason: 'sqi 是 1/0 的數字,沒訊號時是 0');
+    });
   });
 }

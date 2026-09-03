@@ -190,7 +190,7 @@ Everything returns JSON.
 | Endpoint | Method | Purpose | Key response fields |
 |---|---|---|---|
 | [`/health`](#health) | GET | Is the service alive, current mode, serial status | `ok` `mode` `source` |
-| [`/vitals`](#vitals) | GET | **★ Most used** — heart rate, SpO₂, HRV | `bpm` `spo2` `hrv` `fingerPresent` `settling` |
+| [`/vitals`](#vitals) | GET | **★ Most used** — heart rate, SpO₂, HRV | `bpm` `spo2` `hrv` `fingerPresent` `settling` [`strapi`](#strapi) |
 | [`/waveform`](#waveform) | GET | Last N seconds of waveform (raw + smoothed) | `ir` `red` `irTrim` `redTrim` `firstAbs` |
 | [`/stream`](#stream) | WS | **★ Recommended** — live push, ~1/sec | same as `/vitals` |
 | [`/feed`](#feed) | POST | Push raw data (**feed mode only**) | `accepted` `computed` `totalSamples` |
@@ -326,19 +326,25 @@ If the USB device is unplugged the service **stays up**, but these two fields wi
     "meanRr": 827.6, "meanHr": 72.5,
     "hrvScore": 73.0, "beats": 30
   },
-  "totalSamples": 6000
+  "totalSamples": 6000,
+  "strapi": { "…see the strapi block below…" }
 }
 ```
+
+> ⚠️ **`GET /vitals` and the WebSocket `/stream` return the same payload.**
+> The socket pushes a snapshot on connect and then one after every computation
+> (roughly once per second). Everything below applies to both.
 
 | Field | Meaning |
 |---|---|
 | `fingerPresent` | Whether a finger is detected on the sensor |
 | `settling` | **Stabilising** — finger just placed, waiting for the signal to settle |
 | `sqiOk` | Whether signal quality passed for this round |
-| `bpm` | Heart rate |
+| `bpm` | Heart rate (**median** of the last 6 beats — reacts quickly) |
 | `spo2` | Blood oxygen saturation (%) |
 | `hrv` | Heart rate variability, see below |
 | `totalSamples` | Cumulative samples received (100 samples = 1 second) |
+| `strapi` | Block shaped to your interface — see [the `strapi` block](#strapi) |
 
 HRV fields (milliseconds unless noted):
 
@@ -349,8 +355,118 @@ HRV fields (milliseconds unless noted):
 | `pnn50` | Percentage of adjacent intervals differing by more than 50ms |
 | `sd1` / `sd2` | Poincaré plot short / long axis |
 | `meanRr` / `meanHr` | Mean beat interval / mean heart rate |
-| `hrvScore` | 0–100 friendly score (meaningful compared against yourself) |
+| `hrvScore` | Friendly score = `ln(rmssd) × 20`, capped at 150 (compare against yourself) |
 | `beats` | How many beats this statistic is based on |
+
+---
+
+<a id="strapi"></a>
+### The `strapi` block — shaped to your interface
+
+The `strapi` object inside `/vitals` matches `aquivio-station`'s `VitalsResult`
+exactly, so you can use it without any mapping:
+
+```ts
+const v: VitalsResult = (await res.json()).strapi;
+```
+
+```json
+"strapi": {
+  "mean_hr": 70.13,
+  "sdnn": 39.79,
+  "rmssd": 48.65,
+  "ln_rmssd": 3.885,
+  "lf_hf": null,
+  "sqi": 1,
+  "snr_db": 13.96,
+  "confidence": "good",
+  "pns": 0.029,
+  "ans": null,
+  "stress": 15.59,
+  "activity": null,
+
+  "lf": 19.4,
+  "hf": 1558.1,
+  "lf_hf_raw": 0.0124,
+  "lf_reliable": false,
+  "hf_reliable": true,
+  "lf_cycles": 1.16,
+  "window_sec": 29.09,
+  "ans_time_domain": 1.481,
+  "sns": 1.511
+}
+```
+
+The first group is the 12 fields your `VitalsResult` declares — **none of them
+is ever omitted; a missing value is `null`, never `undefined`**. The second
+group is extra, carried by the interface's `[key: string]: unknown`.
+
+#### Why we didn't just rename the outer fields
+
+Because some of them are **not the same quantity**, so renaming would send you
+the wrong value:
+
+| Ours | Yours | Difference |
+|---|---|---|
+| `sqiOk` | `sqi` | Boolean vs numeric 1/0 — different type |
+| `bpm` | `mean_hr` | **Median** of the last 6 beats vs **mean** over the whole window — they differ by 1–3 bpm in the same reading |
+
+So both live side by side. Duplicated fields such as `sdnn` are derived from
+**the same `HrvStats` object**, not computed twice — there's a test pinning
+`strapi.sdnn == hrv.sdnn` so the two can never drift apart.
+
+#### Two fields that are always `null`
+
+**`lf_hf`** — these values are computed over a **30-second window**, and the
+lower edge of the LF band (0.04 Hz) has a 25-second period, so 30 seconds
+contains barely 1.2 cycles of it (see `lf_cycles`).
+
+Measured, by slicing one continuous recording into different window lengths and
+comparing against a 5-minute baseline:
+
+| Window | Median deviation | Within ±20% |
+|---|---|---|
+| 30 seconds | **42%** | 6 of 28 |
+| 2 minutes | **26%** | 1 of 7 |
+
+And it **drifts continuously** rather than fluctuating around a stable value —
+within a single 5-minute recording the 2-minute windows moved monotonically from
+−39% to +63%. So a longer measurement would not fix it.
+
+`lf_hf` therefore returns `null`. **The raw numbers are not hidden**: `lf`, `hf`
+and `lf_hf_raw` are all provided, along with `lf_reliable` / `lf_cycles` /
+`window_sec` so you can judge for yourself.
+
+**`ans`** — your `ans` is derived from LF/HF. We do have a **time-domain**
+substitute (`SNS − PNS`, computable in 30 seconds), but it has a **different
+definition and a different scale**, so putting it in `ans` would make the same
+field name mean different things on the two devices. It is exposed under the
+separate name `ans_time_domain` instead. If you'd like us to populate `ans` with
+it, let us know first so we can confirm your downstream — especially the LLM
+prompt — can accept the change of definition.
+
+#### Suggested substitute: `rmssd`
+
+The half of LF/HF that is mechanistically sound is **HF (parasympathetic)**, and
+`rmssd` correlates with HF at **r > 0.9** — RMSSD is a first difference of the
+interval series, which is a high-pass filter, so it measures essentially the same
+thing. Unlike HF, RMSSD **is validated at 30-second windows** in the literature.
+
+So if what you need is a relaxation / recovery signal, `rmssd` or `ln_rmssd`
+gives you that today. What we can't give you is the sympathetic half — and that
+is the half LF was never really measuring.
+
+#### Extra fields
+
+| Field | Meaning |
+|---|---|
+| `lf` / `hf` | Absolute band power (ms²). The ratio discards information — a rising `lf_hf` can mean LF went up *or* HF went down, and only the absolute values tell you which |
+| `lf_hf_raw` | The raw ratio, without the reliability filter |
+| `lf_reliable` / `hf_reliable` | Whether that band is trustworthy at this window length |
+| `lf_cycles` | How many full cycles of the LF lower edge (0.04 Hz) fit in this window. Below 4.4 it isn't trustworthy |
+| `window_sec` | How many seconds these values actually span (typically 28–29) |
+| `ans_time_domain` | Time-domain autonomic balance = `sns − pns` |
+| `sns` | Sympathetic index (time domain: mean HR + stress index + SD2) |
 
 ---
 

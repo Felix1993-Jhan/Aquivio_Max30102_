@@ -14,7 +14,7 @@
 | 記號 | 意思 |
 |------|------|
 | ✅ | **已在 `/vitals`** — 現在呼叫就拿得到 |
-| 🟡 | **已算出，未導出** — 演算法完成、有測試、桌面 App 跑得出來，但**還沒接到 HTTP 回應**。要接是小工程（`vitalsJson()` 多幾個欄位） |
+| 🟡 | **已算出，未導出** — 目前**沒有欄位屬於這一類**。先前標 🟡 的已全數接進 `/vitals` 的 `strapi` 區塊 |
 | 🔴 | **恆為 null** — 刻意不給，**不是還沒做** |
 | ⬜ | **不提供** — 我們沒有對應的量 |
 
@@ -31,14 +31,14 @@
 | 1 | [`mean_hr`](#mean_hr) | `number \| null` | ✅ | 視窗內全部 RR 的平均換算心率 |
 | 2 | [`sdnn`](#sdnn) | `number \| null` | ✅ | RR 的標準差；整體變異 |
 | 3 | [`rmssd`](#rmssd) | `number \| null` | ✅ | 逐拍變異；**最可信的指標** |
-| 4 | [`ln_rmssd`](#ln_rmssd) | `number \| null` | 🟡 | `rmssd` 取自然對數 |
+| 4 | [`ln_rmssd`](#ln_rmssd) | `number \| null` | ✅ | `rmssd` 取自然對數 |
 | 5 | [`lf_hf`](#lf_hf) | `number \| null` | 🔴 | **恆為 null**；量不到穩定值 |
-| 6 | [`sqi`](#sqi) | `number \| null` | 🟡 | 訊號品質閘門，`1` / `0` |
-| 7 | [`snr_db`](#snr_db) | `number \| null` | 🟡 | 波形的頻帶訊噪比 |
-| 8 | [`confidence`](#confidence) | `'good' \| 'rough' \| 'very rough' \| null` | 🟡 | 這次量測該信幾分 |
-| 9 | [`pns`](#pns) | `number \| null` | 🟡 | 副交感神經活性指數 |
+| 6 | [`sqi`](#sqi) | `number \| null` | ✅ | 訊號品質閘門，`1` / `0` |
+| 7 | [`snr_db`](#snr_db) | `number \| null` | ✅ | 波形的頻帶訊噪比 |
+| 8 | [`confidence`](#confidence) | `'good' \| 'rough' \| 'very rough' \| null` | ✅ | 這次量測該信幾分 |
+| 9 | [`pns`](#pns) | `number \| null` | ✅ | 副交感神經活性指數 |
 | 10 | [`ans`](#ans) | `number \| null` | 🔴 | **恆為 null**；定義與你方不同 |
-| 11 | [`stress`](#stress) | `number \| null` | 🟡 | Baevsky 壓力指數 |
+| 11 | [`stress`](#stress) | `number \| null` | ✅ | Baevsky 壓力指數 |
 | 12 | [`activity`](#activity) | `number \| null` | ⬜ | 需先確認語意 |
 
 ### `VitalsReading` — `aquivio-strapi/src/helpers/deepseek.ts`
@@ -51,10 +51,10 @@
 | 2 | [`rmssd`](#rmssd) | ✅ | 見上 |
 | 3 | [`lf_hf`](#lf_hf) | 🔴 | **會是 null**，prompt 需能處理 |
 | 4 | [`ans`](#ans) | 🔴 | **會是 null**，prompt 需能處理 |
-| 5 | [`pns`](#pns) | 🟡 | 見上 |
-| 6 | [`stress`](#stress) | 🟡 | 見上 |
+| 5 | [`pns`](#pns) | ✅ | 見上 |
+| 6 | [`stress`](#stress) | ✅ | 見上 |
 | 7 | [`mean_hr`](#mean_hr) | ✅ | 見上 |
-| 8 | [`confidence`](#confidence) | 🟡 | 見上 |
+| 8 | [`confidence`](#confidence) | ✅ | 見上 |
 
 **8 個裡有 2 個恆為 null。** 兩者在你的介面裡都已經是 optional
 （`?: number | null`），所以型別上沒問題，但要確認 prompt 對缺欄位的
@@ -228,7 +228,7 @@ RMSSD 是一階差分，在訊號處理上就是**高通濾波器**，本質上�
 | | |
 |---|---|
 | **型別** | `number \| null` |
-| **狀態** | 🟡 已算出，未導出 |
+| **狀態** | ✅ 已在 `/vitals` 的 `strapi` 區塊 |
 | **單位** | 無（對數值） |
 | **實測值** | 3.36 ~ 3.75 |
 | **30 秒可信度** | **高**（同 `rmssd`） |
@@ -359,7 +359,7 @@ HRV 頻譜分析是把 **RR 間期序列的起伏**拆解成不同週期的成�
 | | |
 |---|---|
 | **型別** | `number \| null`（我們給 `1` 或 `0`） |
-| **狀態** | 🟡 已算出，未導出（布林版 `sqiOk` **已在 `/vitals`**） |
+| **狀態** | ✅ 已在 `/vitals` 的 `strapi` 區塊（布林版 `sqiOk` 在頂層） |
 | **實測值** | 良好貼合時穩定為 `1` |
 | **更新頻率** | 每個演算窗一次（5 秒） |
 
@@ -420,7 +420,7 @@ HRV 頻譜分析是把 **RR 間期序列的起伏**拆解成不同週期的成�
 | | |
 |---|---|
 | **型別** | `number \| null` |
-| **狀態** | 🟡 已算出，未導出 |
+| **狀態** | ✅ 已在 `/vitals` 的 `strapi` 區塊 |
 | **單位** | dB |
 | **實測值** | 3.3 ~ 10.1 |
 | **null 條件** | 波形不足 5 秒、或沒有 `bpm`（定位不到基頻） |
@@ -463,7 +463,7 @@ rPPG 領域的常見定義：
 | | |
 |---|---|
 | **型別** | `'good' \| 'rough' \| 'very rough' \| null` |
-| **狀態** | 🟡 已算出，未導出（三個依據都已在 `/vitals`） |
+| **狀態** | ✅ 已在 `/vitals` 的 `strapi` 區塊（三個依據也在頂層） |
 | **實測值** | 正常貼合時為 `'good'` |
 
 ### 這不是生理指標，是工程指標
@@ -514,7 +514,7 @@ if (v.confidence === 'very rough') {
 | | |
 |---|---|
 | **型別** | `number \| null` |
-| **狀態** | 🟡 已算出，未導出 |
+| **狀態** | ✅ 已在 `/vitals` 的 `strapi` 區塊 |
 | **單位** | 無（z-score 平均） |
 | **典型範圍** | −3 ~ +3，0 = 常模平均 |
 | **實測值** | −1.15 ~ −0.16 |
@@ -621,7 +621,7 @@ ansTimeDomain = SNS − PNS
 | | |
 |---|---|
 | **型別** | `number \| null` |
-| **狀態** | 🟡 已算出，未導出 |
+| **狀態** | ✅ 已在 `/vitals` 的 `strapi` 區塊 |
 | **單位** | 無（√SI） |
 | **實測值** | 10.9 ~ 16.8 |
 | **30 秒可信度** | **低** —— 見下 |

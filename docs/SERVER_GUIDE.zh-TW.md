@@ -184,7 +184,7 @@ export LIBSERIALPORT_PATH=/usr/lib/x86_64-linux-gnu/libserialport.so.0.1.1
 | 端點 | 方法 | 用途 | 主要回傳欄位 |
 |---|---|---|---|
 | [`/health`](#health) | GET | 服務活著嗎、目前模式、串口狀態 | `ok` `mode` `source` |
-| [`/vitals`](#vitals) | GET | **★ 最常用** — 心率、血氧、HRV | `bpm` `spo2` `hrv` `fingerPresent` `settling` |
+| [`/vitals`](#vitals) | GET | **★ 最常用** — 心率、血氧、HRV | `bpm` `spo2` `hrv` `fingerPresent` `settling` [`strapi`](#strapi) |
 | [`/waveform`](#waveform) | GET | 近 N 秒波形（原始 + 平滑兩組） | `ir` `red` `irTrim` `redTrim` `firstAbs` |
 | [`/stream`](#stream) | WS | **★ 建議用** — 即時推播，約每秒一次 | 同 `/vitals` |
 | [`/feed`](#feed) | POST | 餵原始資料（**僅 feed 模式**） | `accepted` `computed` `totalSamples` |
@@ -316,19 +316,25 @@ USB 被拔掉時服務**不會死**，但這兩個欄位會反映出來。
     "meanRr": 827.6, "meanHr": 72.5,
     "hrvScore": 73.0, "beats": 30
   },
-  "totalSamples": 6000
+  "totalSamples": 6000,
+  "strapi": { "…見下方「strapi 區塊」…" }
 }
 ```
+
+> ⚠️ **`GET /vitals` 與 WebSocket `/stream` 吐的是同一份資料。**
+> WS 一接上先推一份現況，之後每算完一次推一份（約每秒）。
+> 所以底下講的欄位在兩個端點都一樣。
 
 | 欄位 | 意義 |
 |---|---|
 | `fingerPresent` | 有沒有偵測到手指 |
 | `settling` | **沉澱中**——手指剛放上，還在等訊號穩定 |
 | `sqiOk` | 這一輪訊號品質是否過關 |
-| `bpm` | 心率 |
+| `bpm` | 心率（最近 6 拍的**中位數**，反應快） |
 | `spo2` | 血氧（%） |
 | `hrv` | 心跳變異度，見下表 |
 | `totalSamples` | 累計收到的樣本數（100 筆 = 1 秒） |
+| `strapi` | 整合方介面形狀的區塊，見 [`strapi` 區塊](#strapi) |
 
 HRV 各項（單位 ms）：
 
@@ -339,8 +345,109 @@ HRV 各項（單位 ms）：
 | `pnn50` | 相鄰差超過 50ms 的比例（%） |
 | `sd1` / `sd2` | Poincaré 圖的短軸 / 長軸 |
 | `meanRr` / `meanHr` | 平均心跳間隔 / 平均心率 |
-| `hrvScore` | 0~100 的親切分數（跟自己比） |
+| `hrvScore` | 親切分數 = `ln(rmssd) × 20`，上限 150（跟自己比用） |
 | `beats` | 這段統計用了幾拍 |
+
+---
+
+<a id="strapi"></a>
+### `strapi` 區塊 — 整合方介面形狀
+
+`/vitals` 回應裡的 `strapi` 物件，**形狀完全等於** `aquivio-station` 的
+`VitalsResult`，可以直接取用不必轉換：
+
+```ts
+const v: VitalsResult = (await res.json()).strapi;
+```
+
+```json
+"strapi": {
+  "mean_hr": 70.13,
+  "sdnn": 39.79,
+  "rmssd": 48.65,
+  "ln_rmssd": 3.885,
+  "lf_hf": null,
+  "sqi": 1,
+  "snr_db": 13.96,
+  "confidence": "good",
+  "pns": 0.029,
+  "ans": null,
+  "stress": 15.59,
+  "activity": null,
+
+  "lf": 19.4,
+  "hf": 1558.1,
+  "lf_hf_raw": 0.0124,
+  "lf_reliable": false,
+  "hf_reliable": true,
+  "lf_cycles": 1.16,
+  "window_sec": 29.09,
+  "ans_time_domain": 1.481,
+  "sns": 1.511
+}
+```
+
+上排是 `VitalsResult` 宣告的 12 個欄位（**一個都不會缺，沒有值就是 `null`**）；
+下排是額外附帶的，靠介面的 `[key: string]: unknown` 塞進去。
+
+#### 為什麼不直接把外層欄位改名
+
+因為有些**根本不是同一個量**，改名等於送錯值：
+
+| 我們的 | 他們的 | 差在哪 |
+|---|---|---|
+| `sqiOk` | `sqi` | 布林 vs 數字 1/0，型別不同 |
+| `bpm` | `mean_hr` | 最近 6 拍**中位** vs 全窗**平均**，同一次量測差 1~3 bpm |
+
+所以兩區並存。`sdnn` 之類重複的欄位是**同一份 `HrvStats` 導出的**，
+不是各算一次——測試有釘死這條（`strapi.sdnn` 必須等於 `hrv.sdnn`）。
+
+#### 兩個永遠是 `null` 的欄位
+
+**`lf_hf`** —— 這裡的數值是用**30 秒視窗**算的，而 LF 頻帶下緣 0.04 Hz
+週期就有 25 秒，30 秒只裝得下約 1.2 個週期（見 `lf_cycles`）。
+
+實測（同一段錄製切成不同窗長，對 5 分鐘基準）：
+
+| 窗長 | 偏差中位數 | 落在 ±20% 內 |
+|---|---|---|
+| 30 秒 | **42%** | 6 / 28 |
+| 2 分鐘 | **26%** | 1 / 7 |
+
+而且它是**持續漂移**而非上下抖動——單一段 5 分鐘錄製裡，2 分鐘窗的偏差
+從 −39% 單調爬到 +63%。所以拉長量測時間也解決不了。
+
+`lf_hf` 因此固定回 `null`。**但原始值沒有藏**：`lf`、`hf`、`lf_hf_raw`
+照給，另附 `lf_reliable` / `lf_cycles` / `window_sec` 讓你自己判斷。
+
+**`ans`** —— 你的 `ans` 定義源自 LF/HF。我們有一個**時域**的替代值
+（`SNS − PNS`，30 秒算得出來），但**定義與尺度都不同**，塞進 `ans` 會讓
+兩台裝置的同名欄位語意衝突。所以放在 `ans_time_domain` 這個另外的名字下。
+要改用它請先跟我們講一聲，我們再一起確認下游（特別是 LLM prompt）
+能接受定義變更。
+
+#### 建議的替代：`rmssd`
+
+`LF/HF` 裡機制真正站得住的那一半是 **HF（副交感）**，而 `rmssd` 與 HF 的
+相關性通常 **> 0.9**（RMSSD 是一階差分，本質上就是高通濾波器），
+而且**在 30 秒視窗下經過文獻驗證**。
+
+所以如果你要的是「放鬆／恢復程度」的訊號，用 `rmssd` 或 `ln_rmssd`，
+今天就能用。給不了的是交感那一半——而那一半 LF 本來就沒有真的量到。
+
+#### 額外欄位
+
+| 欄位 | 意義 |
+|---|---|
+| `lf` / `hf` | 兩個頻帶的絕對功率（ms²）。比值會把資訊丟掉——`lf_hf` 變大可能是 LF 漲、也可能是 HF 掉，看絕對值才分得出來 |
+| `lf_hf_raw` | 未經可信度過濾的原始比值 |
+| `lf_reliable` / `hf_reliable` | 該頻帶在這段窗長下可不可信 |
+| `lf_cycles` | LF 下緣（0.04 Hz）在這段窗裡走了幾個完整週期。< 4.4 就不可信 |
+| `window_sec` | 這些數值實際涵蓋幾秒（約 28~29） |
+| `ans_time_domain` | 時域版自律平衡 = `sns − pns` |
+| `sns` | 交感指數（時域：平均心率 + 壓力指數 + SD2） |
+
+> 各欄位的完整算法、常模來源與限制，見 `docs/VITALS_FIELDS.zh-TW.md`。
 
 ---
 
