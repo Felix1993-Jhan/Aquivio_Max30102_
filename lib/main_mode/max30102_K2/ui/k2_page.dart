@@ -910,6 +910,25 @@ class _K2PageState extends State<K2Page> {
         _kv('SQI', '${m.sqi}', api: 'sqi'),
         _kv('訊噪比', m.snrDb == null ? '—' : '${f(m.snrDb, digits: 1)} dB',
             api: 'snr_db'),
+        // ── 頻域:LF / HF 分開顯示,比值另外一列 ──────────────────────
+        //
+        // 為什麼要分開列:比值會把資訊丟掉。LF/HF 從 0.91 變成 2.42 可能是
+        // LF 漲、也可能是 HF 掉,兩者的生理意涵完全不同(後者往往只是
+        // 呼吸變淺)。只看比值分不出來,看絕對值就一目瞭然。
+        //
+        // 顏色編碼帶著判讀:HF 在 30 秒窗是**勉強可用**的(0.15Hz 週期只有
+        // 6.7 秒,30 秒有 4.5 圈),LF 則完全不可用(0.04Hz 只走 1.2 圈)。
+        // 所以 LF 與比值會被灰掉,HF 維持正常色 —— 灰不灰直接對應可不可信。
+        _kv(
+          'LF',
+          spec == null ? '—' : '${spec.lf.toStringAsFixed(0)} ms²',
+          color: (spec?.lfUsable ?? false) ? null : Colors.grey.shade400,
+        ),
+        _kv(
+          'HF',
+          spec == null ? '—' : '${spec.hf.toStringAsFixed(0)} ms²',
+          color: (spec?.hfUsable ?? false) ? null : Colors.grey.shade400,
+        ),
         // LF/HF 在 30 秒窗一定是 null。顯示原始值(灰)讓人看得到「它算得出來,
         // 只是不可信」,而不是一個看不出原因的空白。
         _kv(
@@ -927,7 +946,9 @@ class _K2PageState extends State<K2Page> {
             padding: const EdgeInsets.only(top: 2, bottom: 2),
             child: Text(
               '⚠ LF 只走 ${spec.lfCycles.toStringAsFixed(1)} 圈'
-              '(需 ≥4.4)→ 對外送 null',
+              '(需 ≥4.4)→ LF 與比值不可信,對外送 null。\n'
+              '  HF 有 ${(spec.spanSeconds * 0.15).toStringAsFixed(1)} 圈,'
+              '是勉強可用的那一半(灰字=不可信)',
               style: TextStyle(fontSize: 9.5, color: Colors.orange.shade800),
             ),
           ),
