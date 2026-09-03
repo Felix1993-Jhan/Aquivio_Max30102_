@@ -34,7 +34,7 @@ typedef HrvStats = ({
   int pairs,
   int totalPairs,
   double pnn50, // 相鄰對中 |差|>50ms 的比例(%);只算時間相鄰對,副交感指標
-  double hrvScore, // ln(RMSSD)×20 → clamp 0~100;「跟自己比」的親切分數(Elite HRV 風格)
+  double hrvScore, // ln(RMSSD)×20 → clamp 0~[hrvScoreMax];「跟自己比」的親切分數(Elite HRV 風格)
 });
 
 class Max30102HrvCalculator {
@@ -52,6 +52,19 @@ class Max30102HrvCalculator {
   // 少了它,「2.5×MAD」其實只等於 ≈1.69σ —— 連完全正常的資料都會被砍掉約 9%,
   // 而且「心跳越穩 → MAD 越小 → 門檻越緊 → 砍越兇」,自打嘴巴。
   static const double madScale = 1.4826;
+  /// [HrvStats.hrvScore] 的上限。
+  ///
+  /// 原本是 100(分數的慣例),但實測會撞到:RMSSD 到 148ms 就滿分,
+  /// 而深慢呼吸下的高變異真的量得到 130~230ms —— 那時分數卡在 100,
+  /// 分不出「很好」與「極高」。
+  ///
+  /// 放寬到 150 後對應到 RMSSD ≈ 1808ms,實務上等於不再設限;
+  /// 下限的 0 保留(RMSSD < 1ms 時 ln 會變負,那是壞資料,不該顯示負分)。
+  ///
+  /// ⚠️ 分數超過 100 時**不再是「滿分 100」的語意**,呈現層若有進度條/
+  ///    百分比之類的視覺,要自己處理溢出。
+  static const double hrvScoreMax = 150;
+
   // 門檻下限 = 中位數 × 此比例。clean 的定位改為「只擋真漏拍/切拍,不砍真拍的中等擺動」:
   //   0.5 → 保留 [0.5×, 1.5×] 中位數以內的拍;超出才視為漏拍(≈2×)/切拍(≈0.5×)剔除。
   //   為何不能用 0.15(舊值):安靜時 MAD 只有 40ms,2.5×1.4826×MAD≈148ms → 帶寬只 ±148,
@@ -233,8 +246,10 @@ class Max30102HrvCalculator {
     }
     final rmssd = pairs > 0 ? math.sqrt(sucSq / pairs) : 0.0;
     final pnn50 = pairs > 0 ? nn50 / pairs * 100 : 0.0;
-    // ln(RMSSD)×20 → 0~100 分。RMSSD 對數常態、取 ln 才穩;僅供「跟自己比」。
-    final hrvScore = rmssd > 0 ? (math.log(rmssd) * 20).clamp(0.0, 100.0) : 0.0;
+    // ln(RMSSD)×20 分。RMSSD 對數常態、取 ln 才穩;僅供「跟自己比」。
+    // 上限見 [hrvScoreMax](已從 100 放寬到 150,原本會被高變異撞到)。
+    final hrvScore =
+        rmssd > 0 ? (math.log(rmssd) * 20).clamp(0.0, hrvScoreMax) : 0.0;
     final sd1 = math.sqrt(0.5) * rmssd;
     final sd2v = 2 * sdnn * sdnn - sd1 * sd1;
     final sd2 = sd2v > 0 ? math.sqrt(sd2v) : 0.0;
