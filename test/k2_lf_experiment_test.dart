@@ -96,7 +96,7 @@ void main() {
     expect(exp.result, isNull, reason: '中止的實驗不該產出結果');
   });
 
-  test('錄滿 2 分鐘 → 產出基準 + 10 個滑動窗', () {
+  test('錄滿 2 分鐘 → 產出基準 + 10 個滑動窗(只有 30 秒那一組)', () {
     final all = series(125); // 多錄一點,確保餵得滿 120 秒
     final exp = K2LfExperiment()..start(0);
     playback(exp, all, seconds: 125);
@@ -105,17 +105,53 @@ void main() {
     expect(exp.abortReason, isNull);
 
     final r = exp.result!;
+    expect(r.groups, hasLength(1),
+        reason: '2 分鐘錄製切不出足夠的 2 分鐘窗(只有 1 個,等於跟自己比)');
+    final g = r.primary;
+    expect(g.windowSeconds, 30);
     // s = 0,10,...,90 → 10 個窗
-    expect(r.windows, hasLength(10));
-    expect(r.windows.first.startSec, 0);
-    expect(r.windows.last.endSec, 120);
+    expect(g.windows, hasLength(10));
+    expect(g.windows.first.startSec, 0);
+    expect(g.windows.last.endSec, 120);
 
     // 基準是 2 分鐘 → LF 可用;每個 30 秒窗 → LF 不可用
     expect(r.baseline.lfUsable, isTrue);
-    for (final w in r.windows) {
+    for (final w in g.windows) {
       expect(w.spec.lfUsable, isFalse,
           reason: '30 秒窗的 LF 一律不可信 —— 這正是實驗要證明的事');
       expect(w.spec.spanSeconds, closeTo(30, 2));
+    }
+  });
+
+  test('★ 錄滿 5 分鐘 → 同時切 30 秒窗與 2 分鐘窗,都跟 5 分鐘基準比', () {
+    final all = series(310);
+    final exp = K2LfExperiment()
+      ..targetSeconds = 300
+      ..start(0);
+    playback(exp, all, seconds: 310);
+
+    final r = exp.result!;
+    expect(r.targetSeconds, 300);
+    expect(r.groups, hasLength(2), reason: '5 分鐘容得下兩種窗長');
+
+    // 30 秒窗:s = 0,10,...,270 → 28 個
+    final g30 = r.groups[0];
+    expect(g30.windowSeconds, 30);
+    expect(g30.windows, hasLength(28));
+
+    // 2 分鐘窗:s = 0,30,...,180 → 7 個(滑動,不是切斷成 2.5 段)
+    final g120 = r.groups[1];
+    expect(g120.windowSeconds, 120);
+    expect(g120.windows, hasLength(7));
+    expect(g120.windows.last.endSec, 300);
+
+    // 2 分鐘窗的 LF 算可用、30 秒窗不可用 —— 這一組存在的意義就是
+    // 回答「拿 2 分鐘當基準本身準不準」
+    for (final w in g120.windows) {
+      expect(w.spec.lfUsable, isTrue);
+    }
+    for (final w in g30.windows) {
+      expect(w.spec.lfUsable, isFalse);
     }
   });
 
@@ -123,12 +159,12 @@ void main() {
     final all = series(125);
     final exp = K2LfExperiment()..start(0);
     playback(exp, all, seconds: 125);
-    final r = exp.result!;
+    final g = exp.result!.primary;
 
-    expect(r.medianAbsDevPct, isNotNull);
-    expect(r.minAbsDevPct!, lessThanOrEqualTo(r.medianAbsDevPct!));
-    expect(r.medianAbsDevPct!, lessThanOrEqualTo(r.maxAbsDevPct!));
-    expect(r.windowsWithin20pct, inInclusiveRange(0, r.windows.length));
+    expect(g.medianAbsDevPct, isNotNull);
+    expect(g.minAbsDevPct!, lessThanOrEqualTo(g.medianAbsDevPct!));
+    expect(g.medianAbsDevPct!, lessThanOrEqualTo(g.maxAbsDevPct!));
+    expect(g.within20, inInclusiveRange(0, g.windows.length));
   });
 
   test('取消 → 停止且不產結果', () {

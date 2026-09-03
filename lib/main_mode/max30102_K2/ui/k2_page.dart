@@ -10,6 +10,8 @@
 // 波形圖 / RR趨勢 / Poincaré 下一步再加。
 // ============================================================================
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 
@@ -971,10 +973,28 @@ class _K2PageState extends State<K2Page> {
                         fontSize: 12, fontWeight: FontWeight.bold)),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('同一段錄 2 分鐘,切成 30 秒窗跟全長比',
+                  child: Text(
+                      exp.targetSeconds >= 300
+                          ? '同一段錄 5 分鐘(國際標準長度),切成 30 秒窗與 2 分鐘窗跟全長比'
+                          : '同一段錄 2 分鐘,切成 30 秒窗跟全長比',
                       style: TextStyle(
                           fontSize: 10.5, color: Colors.grey.shade600)),
                 ),
+                // 錄製長度:錄製中不給改(改了進度條的分母會跳)。
+                for (final s in K2LfExperiment.durationOptions)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: ChoiceChip(
+                      label: Text('${s ~/ 60} 分鐘',
+                          style: const TextStyle(fontSize: 11)),
+                      selected: exp.targetSeconds == s,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: exp.running
+                          ? null
+                          : (_) => setState(() => exp.targetSeconds = s),
+                    ),
+                  ),
+                const SizedBox(width: 8),
                 _lfExperimentAction(exp),
               ],
             ),
@@ -983,7 +1003,7 @@ class _K2PageState extends State<K2Page> {
               LinearProgressIndicator(value: exp.progress, minHeight: 6),
               const SizedBox(height: 4),
               Text(
-                '${exp.elapsedSeconds} / ${K2LfExperiment.targetSeconds} 秒'
+                '${exp.elapsedSeconds} / ${exp.targetSeconds} 秒'
                 '  ·  已收 ${exp.collectedBeats} 拍'
                 '  ·  手指請保持不動,中途離開會中止實驗',
                 style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
@@ -1058,6 +1078,7 @@ class _K2PageState extends State<K2Page> {
         Row(children: [
           cell('#', 26, align: TextAlign.left),
           cell('時間', 52),
+          cell('長度', 46),
           cell('基準LF/HF', 74),
           cell('偏差中位數', 76),
           cell('偏差範圍', 76),
@@ -1075,6 +1096,9 @@ class _K2PageState extends State<K2Page> {
                   '${r.time.minute.toString().padLeft(2, '0')}',
                   52,
                   color: Colors.grey.shade600),
+              // 不同錄製長度的結果不能混著比 —— 標出來免得看串行
+              cell('${r.targetSeconds ~/ 60} 分', 46,
+                  color: Colors.blueGrey.shade400),
               cell(r.baselineLfHf.toStringAsFixed(2), 74, bold: true),
               cell('${r.medianAbsDevPct?.toStringAsFixed(0) ?? '—'}%', 76,
                   bold: true,
@@ -1223,7 +1247,54 @@ class _K2PageState extends State<K2Page> {
           ),
         );
 
-    final half = (r.windows.length + 1) ~/ 2;
+    /// 一組窗:標題 + 表格(自動分欄,每欄最多 10 列)+ 該組的結論。
+    Widget groupBlock(LfWindowGroup g) {
+      final n = g.windows.length;
+      final cols = math.max(2, (n / 10).ceil());
+      final rows = (n / cols).ceil();
+      final median = g.medianAbsDevPct ?? 0;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 8),
+          Text(
+            '${g.windowSeconds} 秒窗 ($n 個,每 ${g.stepSeconds} 秒滑動一次)',
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (int cIdx = 0; cIdx < cols; cIdx++) ...[
+                if (cIdx > 0) const SizedBox(width: 24),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final w in g.windows.skip(cIdx * rows).take(rows))
+                      windowRow(w),
+                  ],
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          Wrap(children: [
+            stat('偏差中位數', '${g.medianAbsDevPct?.toStringAsFixed(0) ?? '—'}%',
+                color: median <= 20
+                    ? Colors.green.shade700
+                    : (median <= 50
+                        ? Colors.orange.shade800
+                        : Colors.red.shade700)),
+            stat(
+                '偏差範圍',
+                '${g.minAbsDevPct?.toStringAsFixed(0) ?? '—'}'
+                    '~${g.maxAbsDevPct?.toStringAsFixed(0) ?? '—'}%'),
+            stat('±20% 內', '${g.within20}/$n'),
+          ]),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1234,39 +1305,21 @@ class _K2PageState extends State<K2Page> {
           stat('LF', '${b.lf.toStringAsFixed(0)} ms²'),
           stat('HF', '${b.hf.toStringAsFixed(0)} ms²'),
         ]),
-        const SizedBox(height: 8),
-        Text('30 秒窗 (${r.windows.length} 個,每 10 秒滑動一次)',
-            style:
-                const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 4),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final w in r.windows.take(half)) windowRow(w),
-              ],
+        for (int i = 0; i < r.groups.length; i++) ...[
+          if (i > 0) const Divider(height: 14),
+          groupBlock(r.groups[i]),
+        ],
+        // 錄 5 分鐘時會有 2 分鐘那一組 —— 它回答的是「我們前面一直拿來當基準
+        // 的 2 分鐘,本身夠不夠格當基準」。這句話點出該怎麼讀那組數字。
+        if (r.groups.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              '2 分鐘窗那一組的偏差 = 「拿 2 分鐘當基準」本身的誤差有多大。'
+              '若它也偏得多,代表先前用 2 分鐘當基準的那幾次實驗,尺本身就不準。',
+              style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
             ),
-            const SizedBox(width: 24),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final w in r.windows.skip(half)) windowRow(w),
-              ],
-            ),
-          ],
-        ),
-        const Divider(height: 16),
-        Wrap(children: [
-          stat('偏差中位數',
-              '${r.medianAbsDevPct?.toStringAsFixed(0) ?? '—'}%',
-              color: Colors.red.shade700),
-          stat('偏差範圍',
-              '${r.minAbsDevPct?.toStringAsFixed(0) ?? '—'}'
-                  '~${r.maxAbsDevPct?.toStringAsFixed(0) ?? '—'}%'),
-          stat('±20% 內', '${r.windowsWithin20pct}/${r.windows.length}'),
-        ]),
+          ),
       ],
     );
   }

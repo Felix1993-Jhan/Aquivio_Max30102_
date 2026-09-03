@@ -40,35 +40,31 @@ typedef LfWindow = ({
   double lfNuDevPct,
 });
 
-/// 實驗結果。
-class LfExperimentResult {
-  /// 完整錄製長度算出來的頻譜 —— **基準**。
-  final HrvSpectrum baseline;
-
-  /// 各個 30 秒窗(滑動,每 [K2LfExperiment.windowStepSeconds] 秒一個)。
+/// 同一個窗長切出來的一組窗 + 它們的統計。
+///
+/// 錄 5 分鐘時會有兩組:30 秒(產品實際用的長度)與 2 分鐘 ——
+/// 後者是為了回答「我們一直拿來當基準的 2 分鐘,本身夠不夠格當基準」。
+class LfWindowGroup {
+  final int windowSeconds;
+  final int stepSeconds;
   final List<LfWindow> windows;
 
-  final double durationSec;
-  final int totalBeats;
-
-  const LfExperimentResult({
-    required this.baseline,
+  const LfWindowGroup({
+    required this.windowSeconds,
+    required this.stepSeconds,
     required this.windows,
-    required this.durationSec,
-    required this.totalBeats,
   });
 
-  /// 各窗 LF/HF 偏差的絕對值,由小到大。
-  List<double> get _absDevs {
-    final v = [for (final w in windows) w.lfHfDevPct.abs()]..sort();
-    return v;
-  }
+  List<double> get _absDevs =>
+      [for (final w in windows) w.lfHfDevPct.abs()]..sort();
 
-  /// 偏差絕對值的中位數(%)。這是「30 秒版典型上會差多少」的單一數字答案。
+  /// 偏差絕對值的中位數(%)。「這個窗長典型上會差多少」的單一數字答案。
+  ///
+  /// 用中位數而非平均:實測過手抖那次有一個窗偏差 818%,平均會被它整個帶走,
+  /// 中位數不會(那次的中位數 58%,與其他次一致)。
   double? get medianAbsDevPct {
     final v = _absDevs;
-    if (v.isEmpty) return null;
-    return v[v.length ~/ 2];
+    return v.isEmpty ? null : v[v.length ~/ 2];
   }
 
   double? get maxAbsDevPct => _absDevs.isEmpty ? null : _absDevs.last;
@@ -77,10 +73,33 @@ class LfExperimentResult {
   /// 落在基準 ±20% 以內的窗有幾個。
   ///
   /// 20% 這條線是**判讀輔助,不是學術標準** —— 它只是提供一個直覺:
-  /// 如果多數窗都在這個範圍內,30 秒版或許有當代理指標的價值;
+  /// 如果多數窗都在這個範圍內,這個窗長或許有當代理指標的價值;
   /// 如果散得到處都是,那就是在量雜訊。
-  int get windowsWithin20pct =>
-      windows.where((w) => w.lfHfDevPct.abs() <= 20).length;
+  int get within20 => windows.where((w) => w.lfHfDevPct.abs() <= 20).length;
+}
+
+/// 實驗結果。
+class LfExperimentResult {
+  /// 完整錄製長度算出來的頻譜 —— **基準**。
+  final HrvSpectrum baseline;
+
+  /// 各窗長分組(至少一組:30 秒)。
+  final List<LfWindowGroup> groups;
+
+  final double durationSec;
+  final int totalBeats;
+  final int targetSeconds;
+
+  const LfExperimentResult({
+    required this.baseline,
+    required this.groups,
+    required this.durationSec,
+    required this.totalBeats,
+    required this.targetSeconds,
+  });
+
+  /// 30 秒那一組 —— 產品實際用的長度,歷次摘要記的就是它。
+  LfWindowGroup get primary => groups.first;
 }
 
 /// 一次錄製的摘要,存進歷次清單用。
@@ -91,6 +110,9 @@ class LfExperimentResult {
 typedef LfRunSummary = ({
   int index,
   DateTime time,
+
+  /// 這次錄了幾秒(120 或 300)—— 不同長度的結果不能混在一起比。
+  int targetSeconds,
   double baselineLfHf,
   double baselineLf,
   double baselineHf,
@@ -104,16 +126,23 @@ typedef LfRunSummary = ({
 });
 
 class K2LfExperiment extends ChangeNotifier {
-  /// 錄製目標長度(秒)。2 分鐘 —— 0.04Hz 走 4.8 圈,勉強站得住。
-  /// 國際標準其實是 5 分鐘,這裡取 2 分鐘是「還能要求使用者忍受」的下限。
-  static const int targetSeconds = 120;
+  /// 可選的錄製長度(秒)。
+  ///   120 = 2 分鐘,0.04Hz 走 4.8 圈,勉強站得住,還能要求使用者忍受。
+  ///   300 = 5 分鐘,**國際標準(Task Force 1996)的短時記錄長度**。
+  static const List<int> durationOptions = [120, 300];
 
-  /// 對照窗長 = 我們產品實際用的長度。
-  static const int windowSeconds = 30;
+  /// 目前選定的錄製長度。錄製中不可改(start 之後才鎖定)。
+  int targetSeconds = 120;
 
-  /// 滑動步進。取 10 秒 → 2 分鐘可以切出 10 個窗,
-  /// 看得到的是**分布**而不只是 4 個孤立的點。
-  static const int windowStepSeconds = 10;
+  /// 要比對的窗長清單:(窗長秒, 滑動步進秒)。
+  ///
+  /// 30 秒 = 產品實際用的長度,永遠會算。
+  /// 120 秒 = 我們前面一直拿來當基準的長度 —— 錄 5 分鐘時順便切它,
+  ///          就能回答「2 分鐘本身夠不夠格當基準」這個問題。
+  static const List<(int, int)> windowSpecs = [(30, 10), (120, 30)];
+
+  /// 一個窗長至少要切得出這麼多個窗才有比較的意義,否則跳過。
+  static const int _minWindowsPerGroup = 4;
 
   static const int _fs = Max30102Config.samplingRateHz;
 
@@ -249,49 +278,73 @@ class K2LfExperiment extends ChangeNotifier {
       return;
     }
 
-    final windows = <LfWindow>[];
-    for (int s = 0; s + windowSeconds <= targetSeconds; s += windowStepSeconds) {
-      final lo = _baseAbs + s * _fs;
-      final hi = _baseAbs + (s + windowSeconds) * _fs;
-      final sub = [
-        for (final p in _pts)
-          if (p.startAbs >= lo && p.endAbs <= hi) p,
-      ];
-      final spec = Max30102VitalsMetrics.spectrum(sub);
-      if (spec == null) continue; // 這個窗拍數不夠(訊號斷過)→ 跳過,不硬算
+    double dev(double v, double base) =>
+        base != 0 ? (v - base) / base * 100 : 0;
 
-      double dev(double v, double base) =>
-          base != 0 ? (v - base) / base * 100 : 0;
+    // 每個窗長切一組。滑動而非切斷 —— 5 分鐘用 30 秒窗可以切出 28 個、
+    // 用 2 分鐘窗可以切出 7 個,看得到的是**分布**而不是幾個孤立的點。
+    final groups = <LfWindowGroup>[];
+    for (final (winSec, stepSec) in windowSpecs) {
+      if (winSec > targetSeconds) continue;
+      final windows = <LfWindow>[];
+      for (int s = 0; s + winSec <= targetSeconds; s += stepSec) {
+        final lo = _baseAbs + s * _fs;
+        final hi = _baseAbs + (s + winSec) * _fs;
+        final sub = [
+          for (final p in _pts)
+            if (p.startAbs >= lo && p.endAbs <= hi) p,
+        ];
+        final spec = Max30102VitalsMetrics.spectrum(sub);
+        if (spec == null) continue; // 這個窗拍數不夠(訊號斷過)→ 跳過,不硬算
 
-      windows.add((
-        startSec: s.toDouble(),
-        endSec: (s + windowSeconds).toDouble(),
-        spec: spec,
-        lfHfDevPct: dev(spec.lfHf, baseline.lfHf),
-        lfNuDevPct: dev(spec.lfNu, baseline.lfNu),
-      ));
+        windows.add((
+          startSec: s.toDouble(),
+          endSec: (s + winSec).toDouble(),
+          spec: spec,
+          lfHfDevPct: dev(spec.lfHf, baseline.lfHf),
+          lfNuDevPct: dev(spec.lfNu, baseline.lfNu),
+        ));
+      }
+      // 切不出足夠的窗就不列(例如錄 2 分鐘時的 2 分鐘窗只有 1 個,
+      // 那等於拿基準跟自己比,沒有意義)。
+      if (windows.length >= _minWindowsPerGroup) {
+        groups.add(LfWindowGroup(
+          windowSeconds: winSec,
+          stepSeconds: stepSec,
+          windows: windows,
+        ));
+      }
+    }
+    if (groups.isEmpty) {
+      _abortReason = 'insufficient';
+      notifyListeners();
+      return;
     }
 
     final res = LfExperimentResult(
       baseline: baseline,
-      windows: windows,
+      groups: groups,
       durationSec: baseline.spanSeconds,
       totalBeats: _pts.length + 1,
+      targetSeconds: targetSeconds,
     );
     _result = res;
+    // 歷次摘要記的是 30 秒那一組 —— 那是產品實際用的長度。
+    final g = res.primary;
     _history.add((
       index: _history.length + 1,
       time: DateTime.now(),
+      targetSeconds: targetSeconds,
       baselineLfHf: baseline.lfHf,
       baselineLf: baseline.lf,
       baselineHf: baseline.hf,
       spanSec: baseline.spanSeconds,
       beats: res.totalBeats,
-      medianAbsDevPct: res.medianAbsDevPct,
-      minAbsDevPct: res.minAbsDevPct,
-      maxAbsDevPct: res.maxAbsDevPct,
-      within20: res.windowsWithin20pct,
-      windowCount: windows.length,
+      medianAbsDevPct: g.medianAbsDevPct,
+      minAbsDevPct: g.minAbsDevPct,
+      maxAbsDevPct: g.maxAbsDevPct,
+      within20: g.within20,
+      windowCount: g.windows.length,
     ));
     notifyListeners();
   }
