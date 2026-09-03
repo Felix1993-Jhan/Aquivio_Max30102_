@@ -19,7 +19,9 @@ import '../k2_config.dart';
 import '../k2_hrv_calculator.dart';
 import '../k2_protocol.dart';
 import '../k2_setting_limits.dart';
+import '../k2_vitals_metrics.dart';
 import 'k2_hrv_chart.dart';
+import 'k2_lf_experiment.dart';
 import 'k2_serial_adapter.dart';
 import 'k2_snapshot.dart';
 import 'k2_wave_chart.dart';
@@ -517,6 +519,17 @@ class _K2PageState extends State<K2Page> {
     final shortPts = _adapter.pointsRecentSeconds(_shortSec);
     final shortHrv = _adapter.hrvRecentSeconds(_shortSec);
     final shortRr = [for (final p in shortPts) p.rr];
+    // 軟體端(Strapi)要的衍生欄位 —— 用**同一批** shortPts/shortHrv 算,
+    // 保證畫面上的 SDNN 跟 pns/stress 那些是同一段資料導出來的。
+    // 每秒算一次:Lomb-Scargle 約 250 個頻率 × 35 拍、FFT 4096 點,都可忽略。
+    final metrics = Max30102VitalsMetrics.compute(
+      pts: shortPts,
+      hv: shortHrv,
+      sqiOk: c?.sqiOk ?? false,
+      settling: c?.settling ?? false,
+      bpm: v?.bpm,
+      ir: _adapter.waveIr,
+    );
     final waveSamples = _shortSec * 100; // fs=100Hz;波形與短期 HRV 同一個視窗
     // 「N 秒前」參考線:比目前視窗小的那幾檔(視窗 30s → 畫 10s/20s 線,
     //  最左緣本身就是 30s,不另外畫)。波形圖與 RR 趨勢圖用同一組 → 兩張圖對得起來。
@@ -673,6 +686,21 @@ class _K2PageState extends State<K2Page> {
                 const SizedBox(height: 4),
                 // 短期不顯示拍數/對數:拍數上面已有、對數因近似成連續而恆為 N/N
                 _kvList(shortHrv, shortRr.length, showCounts: false),
+                const Divider(height: 18),
+                Text('軟體端衍生 (Strapi)',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                _strapiPanel(metrics),
+                const Divider(height: 18),
+                Text('LF 窗長對照實驗',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold)),
+                Text('同一段錄 2 分鐘,切成 30 秒窗跟全長比',
+                    style:
+                        TextStyle(fontSize: 9.5, color: Colors.grey.shade600)),
+                const SizedBox(height: 6),
+                _lfExperimentPanel(),
               ]),
               const SizedBox(width: 8),
               // ── 綠:右側(上波形 / 下 RR趨勢+Poincaré)──
@@ -741,27 +769,51 @@ class _K2PageState extends State<K2Page> {
         ),
       );
 
+  /// 側欄的一列:左標籤、右數值。
+  ///
+  /// [api] 是這個值在整合方介面(aquivio-strapi / aquivio-station)裡的欄位名,
+  /// 用小灰字標在標籤後面。給的話畫面上會長成 `SDNN (sdnn)` —— 對接時
+  /// 不用再回頭查對照表。沒有對應欄位就不要給。
+  Widget _kv(String k, String v, {Color? color, String? api}) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Flexible(
+              child: RichText(
+                overflow: TextOverflow.ellipsis,
+                text: TextSpan(
+                  style:
+                      TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                  children: [
+                    TextSpan(text: k),
+                    if (api != null)
+                      TextSpan(
+                        text: '  ($api)',
+                        style: TextStyle(
+                            fontSize: 9.5,
+                            color: Colors.blueGrey.shade300,
+                            fontFamily: 'monospace'),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(v,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'monospace',
+                  color: color,
+                )),
+          ],
+        ),
+      );
+
   /// HRV 統計:**垂直列**(左標籤右數值),放進側欄用。
   /// [showCounts]:短期(UI 切窗)→ false;長期(核心算)→ true。
   Widget _kvList(HrvStats? hv, int beats, {bool showCounts = true}) {
-    Widget kv(String k, String v, {Color? color}) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(k,
-                  style:
-                      TextStyle(fontSize: 11, color: Colors.grey.shade700)),
-              Text(v,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'monospace',
-                    color: color,
-                  )),
-            ],
-          ),
-        );
     if (hv == null) {
       return Text(trParams('k2_hrv_insufficient', {'beats': beats}),
           style: TextStyle(fontSize: 11, color: Colors.grey.shade500));
@@ -769,18 +821,22 @@ class _K2PageState extends State<K2Page> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        kv(tr('k2_hrv_score'), hv.hrvScore.toStringAsFixed(0),
+        _kv(tr('k2_hrv_score'), hv.hrvScore.toStringAsFixed(0),
             color: Colors.purple),
-        kv('SDNN', '${hv.sdnn.toStringAsFixed(1)} ms'),
-        kv('RMSSD', '${hv.rmssd.toStringAsFixed(1)} ms'),
-        kv('pNN50', '${hv.pnn50.toStringAsFixed(0)} %'),
-        kv('SD1', hv.sd1.toStringAsFixed(1)),
-        kv('SD2', hv.sd2.toStringAsFixed(1)),
-        kv(tr('k2_mean_rr'), '${hv.meanRr.toStringAsFixed(0)} ms'),
-        kv(tr('k2_mean_hr'), '${hv.meanHr.toStringAsFixed(0)} bpm'),
+        // api: 整合方(aquivio-strapi / aquivio-station)介面裡的欄位名。
+        // 標在這裡是為了讓「我們的名字」與「他們的名字」一眼對得起來 ——
+        // 沒標 api 的欄位代表對方介面沒有要,不是我們漏給。
+        _kv('SDNN', '${hv.sdnn.toStringAsFixed(1)} ms', api: 'sdnn'),
+        _kv('RMSSD', '${hv.rmssd.toStringAsFixed(1)} ms', api: 'rmssd'),
+        _kv('pNN50', '${hv.pnn50.toStringAsFixed(0)} %'),
+        _kv('SD1', hv.sd1.toStringAsFixed(1)),
+        _kv('SD2', hv.sd2.toStringAsFixed(1)),
+        _kv(tr('k2_mean_rr'), '${hv.meanRr.toStringAsFixed(0)} ms'),
+        _kv(tr('k2_mean_hr'), '${hv.meanHr.toStringAsFixed(0)} bpm',
+            api: 'mean_hr'),
         if (showCounts) ...[
-          kv(tr('k2_beats_total'), '${hv.beats} / 300'),
-          kv(
+          _kv(tr('k2_beats_total'), '${hv.beats} / 300'),
+          _kv(
             tr('k2_valid_pairs'),
             '${hv.pairs}/${hv.totalPairs}'
                 '${hv.totalPairs > hv.pairs ? trParams('k2_skipped', {
@@ -790,6 +846,213 @@ class _K2PageState extends State<K2Page> {
           ),
         ],
       ],
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // 軟體端(Strapi)衍生指標
+  // ══════════════════════════════════════════════════════════════
+
+  /// 整合方介面要、但核心不直接產出的那些欄位。
+  ///
+  /// 全部由 [Max30102VitalsMetrics] 從同一批 RR 算出來 —— 這裡只負責顯示,
+  /// 不做任何計算,免得畫面上的數字跟之後 server 導出的對不起來。
+  Widget _strapiPanel(VitalsMetrics m) {
+    String f(double? v, {int digits = 2}) =>
+        v == null ? '—' : v.toStringAsFixed(digits);
+
+    final spec = m.spectrum;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _kv('ln(RMSSD)', f(m.lnRmssd), api: 'ln_rmssd'),
+        _kv('副交感', f(m.pns), api: 'pns'),
+        _kv('交感', f(m.sns)),
+        // 對方的 ans 定義源自 LF/HF,我們這個是時域替代值 → 標成灰色,
+        // 並且 toStrapiJson 不會把它填進 ans(見 k2_vitals_metrics 的註解)。
+        _kv('自律平衡*', f(m.ansTimeDomain), color: Colors.blueGrey),
+        _kv('壓力指數', f(m.stress, digits: 1), api: 'stress'),
+        _kv('可信度', m.confidence ?? '—', api: 'confidence'),
+        _kv('SQI', '${m.sqi}', api: 'sqi'),
+        _kv('訊噪比', m.snrDb == null ? '—' : '${f(m.snrDb, digits: 1)} dB',
+            api: 'snr_db'),
+        // LF/HF 在 30 秒窗一定是 null。顯示原始值(灰)讓人看得到「它算得出來,
+        // 只是不可信」,而不是一個看不出原因的空白。
+        _kv(
+          'LF/HF',
+          spec == null
+              ? '—'
+              : (spec.lfUsable
+                  ? f(spec.lfHf)
+                  : '${f(spec.lfHf)} ⚠'),
+          api: 'lf_hf',
+          color: (spec?.lfUsable ?? false) ? null : Colors.grey.shade400,
+        ),
+        if (spec != null && !spec.lfUsable)
+          Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 2),
+            child: Text(
+              '⚠ LF 只走 ${spec.lfCycles.toStringAsFixed(1)} 圈'
+              '(需 ≥4.4)→ 對外送 null',
+              style: TextStyle(fontSize: 9.5, color: Colors.orange.shade800),
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            '* 自律平衡是時域替代值(SNS−PNS),與攝影機端\n'
+            '  LF/HF 導出的 ans 定義不同,不可互比',
+            style: TextStyle(fontSize: 9, color: Colors.grey.shade500),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // LF 窗長對照實驗
+  // ══════════════════════════════════════════════════════════════
+
+  /// 2 分鐘錄一段 → 用完整長度算基準,再切成 30 秒窗跟基準比。
+  ///
+  /// 為什麼不是「量兩次」:兩次之間人的呼吸與狀態都變了,測到的差異
+  /// 分不清是窗長造成的還是生理變化造成的。同一段切窗才是對照。
+  Widget _lfExperimentPanel() {
+    final exp = _adapter.lfExperiment;
+    return ListenableBuilder(
+      listenable: exp,
+      builder: (context, _) {
+        final r = exp.result;
+
+        if (exp.running) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              LinearProgressIndicator(value: exp.progress, minHeight: 6),
+              const SizedBox(height: 4),
+              Text(
+                '${exp.elapsedSeconds} / ${K2LfExperiment.targetSeconds} 秒'
+                '  ·  ${exp.collectedBeats} 拍',
+                style: TextStyle(fontSize: 10.5, color: Colors.grey.shade700),
+              ),
+              Text('手指請保持不動,中途離開會中止',
+                  style:
+                      TextStyle(fontSize: 9.5, color: Colors.orange.shade800)),
+              const SizedBox(height: 4),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: exp.cancel,
+                  child: const Text('取消', style: TextStyle(fontSize: 11)),
+                ),
+              ),
+            ],
+          );
+        }
+
+        if (r == null) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (exp.abortReason != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    switch (exp.abortReason!) {
+                      'reset' => '⚠ 手指離開,核心已歸零 → 實驗中止\n'
+                          '  (兩段時間軸不能接起來)',
+                      'cancelled' => '已取消',
+                      'insufficient' => '⚠ 拍數不足,算不出頻譜',
+                      _ => '已停止',
+                    },
+                    style: TextStyle(
+                        fontSize: 9.5, color: Colors.orange.shade800),
+                  ),
+                ),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonal(
+                  onPressed: () =>
+                      exp.start(_adapter.core.totalSamples),
+                  child: const Text('開始 2 分鐘錄製',
+                      style: TextStyle(fontSize: 11)),
+                ),
+              ),
+            ],
+          );
+        }
+
+        // ── 有結果 ────────────────────────────────────────────────
+        final b = r.baseline;
+        Color devColor(double d) {
+          final a = d.abs();
+          if (a <= 20) return Colors.green.shade700;
+          if (a <= 50) return Colors.orange.shade800;
+          return Colors.red.shade700;
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('基準 ${b.spanSeconds.toStringAsFixed(0)}s · ${b.beats} 拍',
+                style: const TextStyle(
+                    fontSize: 10.5, fontWeight: FontWeight.bold)),
+            _kv('LF/HF', b.lfHf.toStringAsFixed(2)),
+            _kv('LF', '${b.lf.toStringAsFixed(0)} ms²'),
+            _kv('HF', '${b.hf.toStringAsFixed(0)} ms²'),
+            const Divider(height: 12),
+            Text('30 秒窗 (${r.windows.length} 個)',
+                style: const TextStyle(
+                    fontSize: 10.5, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 2),
+            for (final w in r.windows)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 1),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('${w.startSec.toInt()}-${w.endSec.toInt()}s',
+                        style: TextStyle(
+                            fontSize: 9.5, color: Colors.grey.shade600)),
+                    Text(w.spec.lfHf.toStringAsFixed(2),
+                        style: const TextStyle(
+                            fontSize: 10, fontFamily: 'monospace')),
+                    SizedBox(
+                      width: 52,
+                      child: Text(
+                        '${w.lfHfDevPct >= 0 ? '+' : ''}'
+                        '${w.lfHfDevPct.toStringAsFixed(0)}%',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.bold,
+                          color: devColor(w.lfHfDevPct),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const Divider(height: 12),
+            _kv('偏差中位數',
+                '${r.medianAbsDevPct?.toStringAsFixed(0) ?? '—'}%'),
+            _kv('偏差範圍',
+                '${r.minAbsDevPct?.toStringAsFixed(0) ?? '—'}'
+                    '~${r.maxAbsDevPct?.toStringAsFixed(0) ?? '—'}%'),
+            _kv('±20% 內', '${r.windowsWithin20pct}/${r.windows.length}'),
+            const SizedBox(height: 6),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: exp.clear,
+                child: const Text('清除,再測一次',
+                    style: TextStyle(fontSize: 11)),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 

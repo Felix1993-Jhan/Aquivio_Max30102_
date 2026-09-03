@@ -24,6 +24,7 @@ import '../k2_config.dart';
 import '../k2_core.dart';
 import '../k2_hrv_calculator.dart';
 import '../k2_protocol.dart';
+import 'k2_lf_experiment.dart';
 import 'k2_snapshot.dart';
 
 class K2SerialAdapter extends ChangeNotifier {
@@ -112,6 +113,13 @@ class K2SerialAdapter extends ChangeNotifier {
   /// `waveIr[0]` 的絕對位置。由核心給的 firstAbs 維護,裁掉幾筆就往前推幾筆。
   /// 有了它,谷/RR 的絕對位置才能換算成波形陣列索引。
   int waveBase = 0;
+
+  /// LF 窗長對照實驗(2 分鐘錄製 → 切成 30 秒窗比對)。
+  ///
+  /// 自己是 ChangeNotifier,畫面用 ListenableBuilder 單獨聽它 ——
+  /// 錄製進度的更新頻率跟整頁不同,不要綁在一起。
+  /// 每一輪核心算完就餵一次(見 [_onPacket]);沒開始錄的時候 feed 是 no-op。
+  final K2LfExperiment lfExperiment = K2LfExperiment();
 
   /// 收發日誌(最新在最後)。
   final List<String> logs = [];
@@ -272,6 +280,10 @@ class K2SerialAdapter extends ChangeNotifier {
     if (r.computed != null) {
       final c = r.computed!;
       latest = c;
+      // LF 實驗:錄製中才會真的收,沒在錄就直接返回。
+      // 傳 core.totalSamples 讓它自己算進度,順便偵測核心歸零
+      // (免洗模式手指離開 → 索引倒退 → 實驗必須中止,不能把兩段接起來)。
+      lfExperiment.feed(c.rrPoints, core.totalSamples);
       // 只有「有手指、過了沉澱期、真的算出東西」才更新保留值。
       // 沉澱期的結果是全 null,拿它當保留值等於一放手指就把畫面清空。
       if (c.fingerPresent && !c.settling && c.rrPoints.isNotEmpty) {
@@ -436,6 +448,7 @@ class K2SerialAdapter extends ChangeNotifier {
   void dispose() {
     stop();
     sampleVersionNotifier.dispose();
+    lfExperiment.dispose();
     super.dispose();
   }
 }
