@@ -37,6 +37,14 @@ class K2Snapshot {
   final double? spo2;
   final bool fingerPresent;
 
+  /// 存檔當下的訊號品質閘門與沉澱狀態。
+  ///
+  /// **舊快照沒有這兩個欄位 → null。** 它們是 `confidence` / `sqi` 的必要輸入,
+  /// 所以舊檔開起來那兩格會是「—」而不是猜一個值。缺資訊就誠實留白,
+  /// 不要拿 false 當預設 —— 那會讓舊快照看起來像品質不良。
+  final bool? sqiOk;
+  final bool? settling;
+
   const K2Snapshot({
     required this.path,
     required this.tsMillis,
@@ -49,6 +57,8 @@ class K2Snapshot {
     required this.bpm,
     required this.spo2,
     required this.fingerPresent,
+    this.sqiOk,
+    this.settling,
   });
 
   DateTime get time => DateTime.fromMillisecondsSinceEpoch(tsMillis);
@@ -86,6 +96,10 @@ class K2Snapshot {
       bpm: (j['bpm'] as num?)?.toDouble(),
       spo2: (j['spo2'] as num?)?.toDouble(),
       fingerPresent: j['fingerPresent'] == true,
+      // 舊檔沒有這兩個 key → 保持 null(不要用 `== true`,那會把「沒有」
+      // 變成 false,舊快照就會全部顯示成品質不良)
+      sqiOk: j['sqiOk'] as bool?,
+      settling: j['settling'] as bool?,
     );
   }
 }

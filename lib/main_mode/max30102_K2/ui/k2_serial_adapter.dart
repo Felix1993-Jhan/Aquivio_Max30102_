@@ -390,6 +390,10 @@ class K2SerialAdapter extends ChangeNotifier {
       'bpm': c?.bpm,
       'spo2': c?.spo2,
       'fingerPresent': c?.fingerPresent ?? false,
+      // 給檢視器重算 confidence / sqi 用 —— 那兩個從 rr/ir 推不出來,
+      // 只能存當下的狀態。舊快照沒有,讀取時會是 null(顯示「—」)。
+      'sqiOk': c?.sqiOk ?? false,
+      'settling': c?.settling ?? false,
       if (hv != null)
         'shortHrv': {
           'sdnn': hv.sdnn,

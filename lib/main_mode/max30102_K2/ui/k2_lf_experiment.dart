@@ -196,6 +196,16 @@ class K2LfExperiment extends ChangeNotifier {
   /// 已收集的拍(唯讀)。給畫面畫 tachogram / 驗證用。
   List<HrvRrPoint> get points => List.unmodifiable(_pts);
 
+  /// **錄製途中**用目前累積到的拍算出來的頻譜(每輪更新一次)。
+  ///
+  /// 用途是讓人看得到「窗長變長時 LF/HF 怎麼變」—— 尤其是 [HrvSpectrum.lfCycles]
+  /// 爬過 4 的那一刻,`lfUsable` 會從 false 翻成 true。那個過程本身就是實驗
+  /// 要展示的東西:同一段資料,只是看得更久,結論就不一樣。
+  ///
+  /// 錄完後請改看 [result]（那是最終基準,兩者在錄製結束時等值）。
+  HrvSpectrum? get liveSpectrum => _live;
+  HrvSpectrum? _live;
+
   /// 0.0 ~ 1.0。
   double get progress =>
       (_elapsedSamples / (targetSeconds * _fs)).clamp(0.0, 1.0);
@@ -209,6 +219,7 @@ class K2LfExperiment extends ChangeNotifier {
     _elapsedSamples = 0;
     _abortReason = null;
     _result = null;
+    _live = null;
     notifyListeners();
   }
 
@@ -265,6 +276,10 @@ class K2LfExperiment extends ChangeNotifier {
       _finish();
       return;
     }
+
+    // 途中的即時頻譜。約每秒算一次,Lomb-Scargle 掃 200 個頻率 × 最多 350 拍,
+    // 桌面上可以忽略不計。拍數不足會回 null,不用另外擋。
+    _live = Max30102VitalsMetrics.spectrum(_pts);
     notifyListeners();
   }
 

@@ -1,5 +1,9 @@
 # MAX30102 Vitals Service — Integration Guide
 
+> **Current version `0.0.0.3`** — check which build you have with
+> `./max30102_server --version` or the `version` field in `/health`.
+
+
 > For the integrating team (React + Koa).
 > You don't need to know Dart, and you don't need to build anything —
 > the binary runs as-is.
@@ -189,7 +193,7 @@ Everything returns JSON.
 
 | Endpoint | Method | Purpose | Key response fields |
 |---|---|---|---|
-| [`/health`](#health) | GET | Is the service alive, current mode, serial status | `ok` `mode` `source` |
+| [`/health`](#health) | GET | Is the service alive, current mode, serial status | `ok` `version` `mode` `source` |
 | [`/vitals`](#vitals) | GET | **★ Most used** — heart rate, SpO₂, HRV | `bpm` `spo2` `hrv` `fingerPresent` `settling` [`strapi`](#strapi) |
 | [`/waveform`](#waveform) | GET | Last N seconds of waveform (raw + smoothed) | `ir` `red` `irTrim` `redTrim` `firstAbs` |
 | [`/stream`](#stream) | WS | **★ Recommended** — live push, ~1/sec | same as `/vitals` |
@@ -291,6 +295,7 @@ curl http://localhost:8770/health
 ```json
 {
   "ok": true,
+  "version": "0.0.0.3",
   "mode": "serial",
   "uptimeMs": 60123,
   "totalSamples": 6000,
@@ -372,34 +377,67 @@ const v: VitalsResult = (await res.json()).strapi;
 
 ```json
 "strapi": {
-  "mean_hr": 70.13,
-  "sdnn": 39.79,
-  "rmssd": 48.65,
-  "ln_rmssd": 3.885,
-  "lf_hf": null,
+  "mean_hr": 70.41,
+  "sdnn": 36.81,
+  "rmssd": 40.19,
+  "ln_rmssd": 3.694,
+  "lf_hf": 0.5347,
   "sqi": 1,
-  "snr_db": 13.96,
+  "snr_db": 7.23,
   "confidence": "good",
-  "pns": 0.029,
-  "ans": null,
-  "stress": 15.59,
-  "activity": null,
+  "pns": 66.90,
+  "ans": 27.42,
+  "stress": 30.83,
+  "activity": 13.02,
 
-  "lf": 19.4,
-  "hf": 1558.1,
-  "lf_hf_raw": 0.0124,
+  "lf": 0.4240,
+  "hf": 0.7931,
+  "lf_ms2": 414.08,
+  "hf_ms2": 774.49,
+  "vlf_ms2": 166.16,
   "lf_reliable": false,
   "hf_reliable": true,
-  "lf_cycles": 1.16,
-  "window_sec": 29.09,
-  "ans_time_domain": 1.481,
-  "sns": 1.511
+  "lf_cycles": 1.125,
+  "hf_cycles": 4.218,
+  "window_sec": 28.12,
+
+  "pns_z": -0.352,
+  "sns_z": 1.138,
+  "ans_time_domain": 1.490,
+  "stress_baevsky": 12.01,
+  "confidence_by_beats": "good"
 }
 ```
 
 The first group is the 12 fields your `VitalsResult` declares — **none of them
 is ever omitted; a missing value is `null`, never `undefined`**. The second
 group is extra, carried by the interface's `[key: string]: unknown`.
+
+#### Formulas and units match `aquivio-vitals`
+
+`pns` / `ans` / `stress` / `activity` / `confidence` follow
+`aquivio-vitals`'s `core.py::derived_scores()` and `hrv_confidence()`
+line for line:
+
+```
+pns      = clip((log10(rmssd) − log10(10)) / (log10(80) − log10(10)), 0, 1) × 100
+ans      = clip(0.5 + log2(lf_hf) / 4,                                 0, 1) × 100
+stress   = clip(0.6 × (100−pns)/100 + 0.4 × ans/100,                   0, 1) × 100
+activity = clip((mean_hr − 60) / 80,                                   0, 1) × 100
+confidence: snr_db ≥ 6 → good, ≥ 1 → rough, otherwise very rough
+```
+
+**Verified** by running both implementations on the same real capture:
+
+| | aquivio-vitals | This service |
+|---|---|---|
+| `rmssd` / `sdnn` / `mean_hr` | 40.1948 / 36.8067 / 70.4125 | **identical** |
+| `pns` / `activity` | 66.9003 / 13.0156 | **identical** |
+| `lf_hf` | 0.6342 | 0.5347 (−16%) |
+| `ans` / `stress` | 33.57 / 33.29 | 27.42 / 30.83 |
+
+The time-domain values match exactly; the frequency-domain difference comes from
+a different estimator — see below.
 
 #### Why we didn't just rename the outer fields
 
@@ -415,14 +453,53 @@ So both live side by side. Duplicated fields such as `sdnn` are derived from
 **the same `HrvStats` object**, not computed twice — there's a test pinning
 `strapi.sdnn == hrv.sdnn` so the two can never drift apart.
 
-#### Two fields that are always `null`
+#### Units of `lf` / `hf`
 
-**`lf_hf`** — these values are computed over a **30-second window**, and the
-lower edge of the LF band (0.04 Hz) has a 25-second period, so 30 seconds
-contains barely 1.2 cycles of it (see `lf_cycles`).
+`aquivio-vitals`'s `freq_domain()` takes RR in seconds, cubic-spline
+interpolates to 4 Hz, runs `welch(fs=4, nfft=4096)` and then **sums the PSD bins
+without multiplying by df**. So its value is band power (s²) ÷ df, where
+`df = fs/nfft = 4/4096` — a factor of `1.024e-3` away from our ms².
 
-Measured, by slicing one continuous recording into different window lengths and
-comparing against a 5-minute baseline:
+| Field | Unit |
+|---|---|
+| `lf` / `hf` | **their convention** — directly comparable with the camera side |
+| `lf_ms2` / `hf_ms2` / `vlf_ms2` | **ms²**, our raw values |
+
+Same name with a different unit is more dangerous than a missing field, so the
+two are named apart. `lf_hf` is a ratio, so the scaling cancels and it is
+directly comparable either way.
+
+#### The frequency-domain estimator differs (~15%)
+
+| | aquivio-vitals | This service |
+|---|---|---|
+| Time axis | `cumsum(rr)` — RRs chained end to end | RRs' **actual absolute positions** |
+| Resampling | cubic spline to 4 Hz | **none** |
+| Estimator | Welch (segment averaging) | Lomb-Scargle (least-squares fit) |
+
+We chose Lomb-Scargle because it makes fewer assumptions and, on synthetic
+signals where the true ratio is known analytically, lands **closer to the truth**:
+
+| Synthetic signal | True `lf_hf` | aquivio-vitals | This service |
+|---|---|---|---|
+| LF25 / HF25 | 1.000 | 0.9774 (−2.3%) | **0.9813 (−1.9%)** |
+| LF35 / HF18 | 3.781 | 4.0901 (+8.2%) | **3.8708 (+2.4%)** |
+| LF15 / HF30 | 0.250 | 0.2208 (−11.7%) | **0.2329 (−6.8%)** |
+| LF30 / HF20 | 2.250 | 2.4419 (+8.5%) | **2.2460 (−0.2%)** |
+
+All four are closer. Welch's segment averaging compresses the dynamic range, and
+interpolation invents data points that were never sampled.
+
+⚠️ **When the RR series has gaps** (beats dropped by the quality gate) both
+estimators degrade, and which one lands closer depends on where the gaps fall —
+there is no general result.
+
+#### How far to trust `lf_hf` at a 30-second window
+
+The lower edge of the LF band (0.04 Hz) has a 25-second period, so a 30-second
+window contains **barely 1.1 cycles** of it (see `lf_cycles`). Measured, by
+slicing one continuous recording into different window lengths and comparing
+against a 5-minute baseline:
 
 | Window | Median deviation | Within ±20% |
 |---|---|---|
@@ -433,17 +510,15 @@ And it **drifts continuously** rather than fluctuating around a stable value —
 within a single 5-minute recording the 2-minute windows moved monotonically from
 −39% to +63%. So a longer measurement would not fix it.
 
-`lf_hf` therefore returns `null`. **The raw numbers are not hidden**: `lf`, `hf`
-and `lf_hf_raw` are all provided, along with `lf_reliable` / `lf_cycles` /
-`window_sec` so you can judge for yourself.
+**The value is still sent.** The camera side uses a 30-second window too (see its
+`docs/VITALS.md`: *"The window is 30s (not 60s) across the station and the SDK"*),
+so returning `null` here would only make the same field behave differently on the
+two devices. Reliability is reported alongside instead, via `lf_reliable` /
+`lf_cycles` / `hf_cycles` / `window_sec` — **honesty through labelling, not through
+withholding numbers.**
 
-**`ans`** — your `ans` is derived from LF/HF. We do have a **time-domain**
-substitute (`SNS − PNS`, computable in 30 seconds), but it has a **different
-definition and a different scale**, so putting it in `ans` would make the same
-field name mean different things on the two devices. It is exposed under the
-separate name `ans_time_domain` instead. If you'd like us to populate `ans` with
-it, let us know first so we can confirm your downstream — especially the LLM
-prompt — can accept the change of definition.
+HF is unaffected: its lower edge (0.15 Hz) has a 6.7-second period, so a
+30-second window holds about 4.2 cycles and `hf_reliable` is normally `true`.
 
 #### Suggested substitute: `rmssd`
 
@@ -453,20 +528,34 @@ interval series, which is a high-pass filter, so it measures essentially the sam
 thing. Unlike HF, RMSSD **is validated at 30-second windows** in the literature.
 
 So if what you need is a relaxation / recovery signal, `rmssd` or `ln_rmssd`
-gives you that today. What we can't give you is the sympathetic half — and that
-is the half LF was never really measuring.
+gives you that today. Note that `pns` is itself a log rescaling of `rmssd`, so
+the two carry the same information.
 
 #### Extra fields
 
 | Field | Meaning |
 |---|---|
-| `lf` / `hf` | Absolute band power (ms²). The ratio discards information — a rising `lf_hf` can mean LF went up *or* HF went down, and only the absolute values tell you which |
-| `lf_hf_raw` | The raw ratio, without the reliability filter |
+| `lf` / `hf` | Band power in **aquivio-vitals' unit**. The ratio discards information — a rising `lf_hf` can mean LF went up *or* HF went down, and only the absolute values tell you which |
+| `lf_ms2` / `hf_ms2` / `vlf_ms2` | The same three bands in **ms²** (our raw values). The three sum to ≈ `sdnn²` |
 | `lf_reliable` / `hf_reliable` | Whether that band is trustworthy at this window length |
-| `lf_cycles` | How many full cycles of the LF lower edge (0.04 Hz) fit in this window. Below 4.4 it isn't trustworthy |
-| `window_sec` | How many seconds these values actually span (typically 28–29) |
-| `ans_time_domain` | Time-domain autonomic balance = `sns − pns` |
-| `sns` | Sympathetic index (time domain: mean HR + stress index + SD2) |
+| `lf_cycles` / `hf_cycles` | How many full cycles of that band's lower edge fit in this window. **Below 4 it isn't trustworthy** |
+| `window_sec` | How many seconds these values actually span (typically 28–29 for a 30-second window) |
+
+The following are **our own interpretation**, on a different scale from the
+0–100 scores above and **not comparable with them**. They are Kubios-style
+z-scores, useful when you want a statistically grounded reading:
+
+| Field | Meaning |
+|---|---|
+| `pns_z` | Parasympathetic index (z-score: mean RR + RMSSD + SD1) |
+| `sns_z` | Sympathetic index (z-score: mean HR + Baevsky stress index + SD2) |
+| `ans_time_domain` | Time-domain autonomic balance = `sns_z − pns_z` |
+| `stress_baevsky` | √(Baevsky stress index); 7–12 is a typical resting range |
+| `confidence_by_beats` | Confidence from beat count + SQI (the `confidence` field above uses SNR) |
+
+> ⚠️ These z-scores are **not** calibrated against Kubios' normative database —
+> they use published reference values for healthy adults. **The direction is
+> meaningful; the absolute values will not line up with Kubios.**
 
 ---
 

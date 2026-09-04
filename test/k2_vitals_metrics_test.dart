@@ -234,7 +234,66 @@ void main() {
     });
   });
 
-  group('★ toStrapiJson 的誠實性規則', () {
+  group('★ 整合方(aquivio-vitals)公式對齊', () {
+    // 這幾條是逐字對照 aquivio-vitals 的 core.py::derived_scores() 寫的。
+    // 對方的 prompt(deepseek.ts)把這些欄位印成 `X/100`,判斷門檻也是照
+    // 那個尺度校準的,所以數值必須一致 —— 差一個尺度,LLM 的判讀就整個反了。
+
+    test('pns = RMSSD 的對數縮放:10ms→0、80ms→100', () {
+      expect(Max30102VitalsMetrics.pnsScore(10), closeTo(0, 0.01));
+      expect(Max30102VitalsMetrics.pnsScore(80), closeTo(100, 0.01));
+      // 官方範例:rmssd 52 → pns 79
+      expect(Max30102VitalsMetrics.pnsScore(52), closeTo(79.3, 0.2));
+      // 超出兩端要夾住,不能給負值或 >100
+      expect(Max30102VitalsMetrics.pnsScore(5), 0);
+      expect(Max30102VitalsMetrics.pnsScore(200), 100);
+    });
+
+    test('ans = LF/HF 的 log2 縮放:0.25→0、1→50、4→100', () {
+      expect(Max30102VitalsMetrics.ansScore(0.25), closeTo(0, 0.01));
+      expect(Max30102VitalsMetrics.ansScore(1.0), closeTo(50, 0.01));
+      expect(Max30102VitalsMetrics.ansScore(4.0), closeTo(100, 0.01));
+      // **越大越偏交感** —— 方向不能反
+      expect(Max30102VitalsMetrics.ansScore(2.0)!,
+          greaterThan(Max30102VitalsMetrics.ansScore(0.5)!));
+    });
+
+    test('stress = 0.6×(100−pns) + 0.4×ans,任一為 null 就 null', () {
+      // 官方範例:pns 79.3 + ans 59.5 → stress 36
+      expect(Max30102VitalsMetrics.stressScore(79.3, 59.5), closeTo(36.2, 0.2));
+      expect(Max30102VitalsMetrics.stressScore(null, 50), isNull);
+      expect(Max30102VitalsMetrics.stressScore(50, null), isNull,
+          reason: 'ans 算不出來時他們也不出 stress,行為要一致');
+    });
+
+    test('activity = (心率−60)/80', () {
+      expect(Max30102VitalsMetrics.activityScore(60), 0);
+      expect(Max30102VitalsMetrics.activityScore(140), 100);
+      expect(Max30102VitalsMetrics.activityScore(84), closeTo(30, 0.01));
+      expect(Max30102VitalsMetrics.activityScore(50), 0, reason: '低於基準夾成 0');
+    });
+
+    test('confidence 改看 SNR:≥6 good、≥1 rough、其餘 very rough', () {
+      expect(Max30102VitalsMetrics.confidenceFromSnr(8.0), 'good');
+      expect(Max30102VitalsMetrics.confidenceFromSnr(6.0), 'good');
+      expect(Max30102VitalsMetrics.confidenceFromSnr(3.0), 'rough');
+      expect(Max30102VitalsMetrics.confidenceFromSnr(1.0), 'rough');
+      expect(Max30102VitalsMetrics.confidenceFromSnr(0.5), 'very rough');
+      expect(Max30102VitalsMetrics.confidenceFromSnr(null), isNull);
+    });
+
+    test('lf/hf 的單位換算:他們 = 我們(ms²) × 1.024e-3', () {
+      final s = Max30102VitalsMetrics.spectrum(
+        synth(durationSec: 120, freq: 0.10),
+      )!;
+      expect(s.lfAquivio, closeTo(s.lf * 1.024e-3, 1e-9));
+      expect(s.hfAquivio, closeTo(s.hf * 1.024e-3, 1e-9));
+      // 比值不受縮放影響 —— 這正是 lf_hf 可以直接互比的原因
+      expect(s.lfAquivio / s.hfAquivio, closeTo(s.lfHf, 1e-9));
+    });
+  });
+
+  group('★ toStrapiJson 的欄位契約', () {
     VitalsMetrics build(double seconds) {
       final pts = synth(durationSec: seconds, freq: 0.10);
       return Max30102VitalsMetrics.compute(
@@ -246,25 +305,49 @@ void main() {
       );
     }
 
-    test('30 秒:lf_hf 必須是 null,不能給假數字', () {
+    test('★ 30 秒也照送 lf_hf,但附上可信度', () {
       final j = build(30).toStrapiJson();
-      expect(j['lf_hf'], isNull, reason: '30 秒測不到 LF,寧可缺欄位');
-      expect(j['sdnn'], isNotNull, reason: '但時域的量照給');
-      expect(j['rmssd'], isNotNull);
-      expect(j['ln_rmssd'], isNotNull);
-      expect(j['pns'], isNotNull);
+      // 攝影機端(aquivio-vitals)同樣是 30 秒視窗且照樣送 —— 我們送 null
+      // 只會讓同一個欄位在兩台裝置上行為不一致。
+      expect(j['lf_hf'], isNotNull, reason: '數字照送,誠實靠標註不靠藏');
+      expect(j['lf_reliable'], isFalse, reason: '但要講明它不可信');
+      expect((j['lf_cycles'] as double), lessThan(4.0));
+      expect(j['window_sec'], isNotNull);
     });
 
-    test('2 分鐘:lf_hf 有值', () {
-      expect(build(120).toStrapiJson()['lf_hf'], isNotNull);
+    test('2 分鐘:lf_reliable 轉為 true', () {
+      final j = build(120).toStrapiJson();
+      expect(j['lf_hf'], isNotNull);
+      expect(j['lf_reliable'], isTrue);
     });
 
-    test('ans 恆為 null —— 定義與對方不同,未經同意不塞進去', () {
-      expect(build(30).toStrapiJson()['ans'], isNull);
-      expect(build(120).toStrapiJson()['ans'], isNull,
-          reason: '就算視窗夠長也不填:我們的是時域替代值,定義不一樣');
-      expect(build(120).ansTimeDomain, isNotNull,
-          reason: '但值本身要算得出來,給 UI/實驗用');
+    test('★ ans 現在有值,且照 aquivio 公式由 lf_hf 導出', () {
+      final m = build(120);
+      final j = m.toStrapiJson();
+      expect(j['ans'], isNotNull);
+      expect(j['ans'],
+          closeTo(Max30102VitalsMetrics.ansScore(m.lfHf)!, 1e-9));
+      // 我們自己那套時域值改放在不同名字下,不會撞名
+      expect(j['ans_time_domain'], isNotNull);
+      expect(j['ans'], isNot(equals(j['ans_time_domain'])));
+    });
+
+    test('★ lf/hf 用他們的單位,我們的 ms² 另外標名', () {
+      final j = build(120).toStrapiJson();
+      expect(j['lf'], isNotNull);
+      expect(j['lf_ms2'], isNotNull);
+      expect(j['lf'], closeTo((j['lf_ms2'] as double) * 1.024e-3, 1e-9),
+          reason: '同名欄位必須是同一個單位,否則比 null 還危險');
+      expect((j['lf_ms2'] as double), greaterThan(j['lf'] as double));
+    });
+
+    test('四個 0~100 分數都在範圍內', () {
+      final j = build(120).toStrapiJson();
+      for (final k in ['pns', 'ans', 'stress', 'activity']) {
+        final v = j[k] as double?;
+        expect(v, isNotNull, reason: '$k 應該算得出來');
+        expect(v!, inInclusiveRange(0, 100), reason: '$k 必須夾在 0~100');
+      }
     });
 
     test('sqi 是 1/0 的二元值', () {

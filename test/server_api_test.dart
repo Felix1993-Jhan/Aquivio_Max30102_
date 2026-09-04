@@ -18,6 +18,8 @@ import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_vitals_metrics.dart';
+
 import '../bin/max30102_server.dart';
 
 /// 假的「主動來源」—— 行為對齊 SerialSource 的關鍵特徵:不接受 HTTP 餵料。
@@ -305,37 +307,54 @@ void main() {
           closeTo(math.log(hrv['rmssd'] as double), 1e-9));
     });
 
-    test('★ 誠實性規則:30 秒窗的 lf_hf 是 null,但原始值與可信度照給', () {
+    test('★ 30 秒窗照送 lf_hf,可信度另外標明', () {
       final s = feedSynthetic().vitalsJson()['strapi'] as Map<String, dynamic>;
 
-      expect(s['lf_hf'], isNull, reason: '30 秒測不到 LF,不送看似合理的假數字');
-      expect(s['lf_reliable'], isFalse);
-      // 但原始值要給 —— 上層想用就用得到,同時看得到它不可信
-      expect(s['lf_hf_raw'], isNotNull, reason: '算得出來的值不藏');
-      expect(s['lf'], isNotNull);
-      expect(s['hf'], isNotNull);
-      expect(s['lf_cycles'] as double, lessThan(4.4),
-          reason: '30 秒窗約 1.2 圈,遠低於可信門檻');
+      // 攝影機端(aquivio-vitals)同樣是 30 秒視窗且照樣送。我們送 null
+      // 只會讓同一個欄位在兩台裝置上行為不一致,下游分不出
+      // 「沒有這個能力」和「刻意保留」。
+      expect(s['lf_hf'], isNotNull, reason: '數字照送,誠實靠標註不靠藏');
+      expect(s['lf_reliable'], isFalse, reason: '但要講明它不可信');
+      expect(s['lf_cycles'] as double, lessThan(4.0),
+          reason: '30 秒窗約 1.2 圈,遠低於門檻');
       expect(s['hf_reliable'], isTrue, reason: 'HF 在 30 秒是勉強可用的那一半');
+      expect(s['window_sec'], isNotNull);
     });
 
-    test('★ ans 恆為 null,時域替代值放在另一個名字下', () {
+    test('★ lf/hf 用整合方的單位,我們的 ms² 另外標名', () {
       final s = feedSynthetic().vitalsJson()['strapi'] as Map<String, dynamic>;
 
-      expect(s['ans'], isNull,
-          reason: '對方的 ans 源自 LF/HF,塞時域值進去等於偷換定義');
-      expect(s['ans_time_domain'], isNotNull, reason: '但值本身要給,只是換名字');
-      expect(s['sns'], isNotNull);
-      // 時域版 = SNS − PNS
-      expect(s['ans_time_domain'] as double,
-          closeTo((s['sns'] as double) - (s['pns'] as double), 1e-9));
+      // 同名欄位必須是同一個單位 —— 單位不同的同名欄位比 null 還危險
+      expect(s['lf'], closeTo((s['lf_ms2'] as double) * 1.024e-3, 1e-9));
+      expect(s['hf'], closeTo((s['hf_ms2'] as double) * 1.024e-3, 1e-9));
+      expect(s['vlf_ms2'], isNotNull);
     });
 
-    test('Parseval:lf + hf 不可能超過 sdnn²', () {
+    test('★ 四個 0~100 分數照 aquivio 公式,且都在範圍內', () {
+      final v = feedSynthetic().vitalsJson();
+      final s = v['strapi'] as Map<String, dynamic>;
+      final rmssd = (v['hrv'] as Map<String, dynamic>)['rmssd'] as double;
+      final meanHr = (v['hrv'] as Map<String, dynamic>)['meanHr'] as double;
+
+      for (final k in ['pns', 'ans', 'stress', 'activity']) {
+        expect(s[k], isNotNull, reason: '$k 應該算得出來');
+        expect(s[k] as double, inInclusiveRange(0, 100), reason: '$k 要夾在 0~100');
+      }
+      // pns 就是 RMSSD 的對數縮放、activity 就是心率 —— 不是別的東西
+      expect(s['pns'] as double,
+          closeTo(Max30102VitalsMetrics.pnsScore(rmssd)!, 1e-9));
+      expect(s['activity'] as double,
+          closeTo(Max30102VitalsMetrics.activityScore(meanHr)!, 1e-9));
+      // 我們自己那套 z-score 放在不同名字下,不會撞名
+      expect(s['pns_z'], isNotNull);
+      expect(s['pns'], isNot(equals(s['pns_z'])));
+    });
+
+    test('Parseval:lf_ms2 + hf_ms2 不可能超過 sdnn²', () {
       final v = feedSynthetic().vitalsJson();
       final s = v['strapi'] as Map<String, dynamic>;
       final sdnn = (v['hrv'] as Map<String, dynamic>)['sdnn'] as double;
-      final band = (s['lf'] as double) + (s['hf'] as double);
+      final band = (s['lf_ms2'] as double) + (s['hf_ms2'] as double);
       expect(band, lessThanOrEqualTo(sdnn * sdnn * 1.02),
           reason: '三個頻帶加起來等於變異數,LF+HF 只是其中兩段');
     });

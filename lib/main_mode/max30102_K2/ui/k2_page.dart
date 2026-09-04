@@ -354,6 +354,148 @@ class _K2PageState extends State<K2Page> {
               ],
             ),
           ),
+          // ── 軟體端衍生:從快照的 rr / ir 現場重算 ────────────────────
+          //
+          // **不存進快照,每次開檔重算。** 這樣有三個好處:
+          //   ① 舊快照(存檔時還沒有這些欄位)照樣看得到
+          //   ② 演算法之後改了,舊快照會反映新結果 —— 這正是回頭檢查
+          //      「換了公式之後那次量測會變怎樣」的用途
+          //   ③ 快照格式不用動
+          // 原料快照裡本來就有:rrPoints(帶起訖谷)、ir 波形、bpm。
+          const SizedBox(height: 8),
+          _snapshotStrapiPanel(s, shortHv),
+        ],
+      ),
+    );
+  }
+
+  /// 快照的「軟體端衍生」區塊(全寬,從快照資料現場重算)。
+  Widget _snapshotStrapiPanel(K2Snapshot s, HrvStats? hv) {
+    // sqiOk / settling 是舊快照沒有的欄位 —— 缺了就不能算 confidence / sqi。
+    final qualityKnown = s.sqiOk != null;
+    final m = Max30102VitalsMetrics.compute(
+      pts: s.rrPoints,
+      hv: hv,
+      sqiOk: s.sqiOk ?? false,
+      settling: s.settling ?? false,
+      bpm: s.bpm,
+      ir: s.ir,
+    );
+    final spec = m.spectrum;
+
+    String f(double? v, {int d = 2}) =>
+        v == null ? '—' : v.toStringAsFixed(d);
+
+    Widget stat(String k, String v, {Color? color, String? api}) => Padding(
+          padding: const EdgeInsets.only(right: 18, bottom: 2),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(k,
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+            if (api != null)
+              Text(' ($api)',
+                  style: TextStyle(
+                      fontSize: 9,
+                      color: Colors.blueGrey.shade300,
+                      fontFamily: 'monospace')),
+            const SizedBox(width: 4),
+            Text(v,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'monospace',
+                    color: color)),
+          ]),
+        );
+
+    final lfColor = (spec?.lfUsable ?? false) ? null : Colors.grey.shade400;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Text('軟體端衍生 (Strapi)',
+                style:
+                    TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+            const SizedBox(width: 8),
+            Text('開檔時從快照的 RR 與波形重算',
+                style: TextStyle(fontSize: 9.5, color: Colors.grey.shade600)),
+          ]),
+          const SizedBox(height: 6),
+          // 送出去的那一套(對齊 aquivio-vitals 的公式與單位)
+          Wrap(children: [
+            stat('ln(RMSSD)', f(m.lnRmssd), api: 'ln_rmssd'),
+            stat('副交感', f(m.pnsScore, d: 1), api: 'pns'),
+            stat('自律平衡', f(m.ansScore, d: 1), api: 'ans'),
+            stat('壓力', f(m.stressScore, d: 1), api: 'stress'),
+            stat('活動量', f(m.activityScore, d: 1), api: 'activity'),
+            stat('可信度', m.confidenceBySnr ?? '—', api: 'confidence'),
+            stat('訊噪比', m.snrDb == null ? '—' : '${f(m.snrDb, d: 1)} dB',
+                api: 'snr_db'),
+            // sqi 的輸入(sqiOk)舊快照沒存 → 算不出來就誠實留白
+            stat('SQI', qualityKnown ? '${m.sqi}' : '—',
+                api: 'sqi', color: qualityKnown ? null : Colors.grey.shade400),
+          ]),
+          Wrap(children: [
+            stat('LF', spec == null ? '—' : spec.lfAquivio.toStringAsFixed(3),
+                api: 'lf', color: lfColor),
+            stat('HF', spec == null ? '—' : spec.hfAquivio.toStringAsFixed(3),
+                api: 'hf',
+                color:
+                    (spec?.hfUsable ?? false) ? null : Colors.grey.shade400),
+            stat(
+                'LF/HF',
+                spec == null
+                    ? '—'
+                    : (spec.lfUsable ? f(spec.lfHf) : '${f(spec.lfHf)} ⚠'),
+                api: 'lf_hf',
+                color: lfColor),
+            if (spec != null)
+              stat('LF 圈數',
+                  '${spec.lfCycles.toStringAsFixed(1)} / 需 ≥'
+                      '${HrvSpectrum.minBandCycles.toStringAsFixed(0)}',
+                  color: lfColor),
+          ]),
+          // 我們自己的判讀 —— 同一批 RR,不同尺度,不送出去
+          const Divider(height: 12),
+          Row(children: [
+            Text('我們自己的判讀',
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blueGrey.shade600)),
+            const SizedBox(width: 6),
+            Text('不送出 · Kubios 式 z-score,與上面尺度不同',
+                style: TextStyle(fontSize: 9, color: Colors.grey.shade500)),
+          ]),
+          const SizedBox(height: 4),
+          Wrap(children: [
+            stat('副交感 z', f(m.pns)),
+            stat('交感 z', f(m.sns)),
+            stat('自律平衡', f(m.ansTimeDomain)),
+            stat('壓力(Baevsky)', f(m.stress, d: 1)),
+            stat('可信度(拍數)',
+                qualityKnown ? (m.confidence ?? '—') : '—',
+                color: qualityKnown ? null : Colors.grey.shade400),
+            stat('LF', spec == null ? '—' : '${spec.lf.toStringAsFixed(0)} ms²'),
+            stat('HF', spec == null ? '—' : '${spec.hf.toStringAsFixed(0)} ms²'),
+          ]),
+          if (!qualityKnown)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                '⚠ 這張快照存檔時還沒有記錄 SQI 與沉澱狀態,'
+                '所以 SQI 與「可信度(拍數)」無法重建(顯示「—」而不是猜一個值)。'
+                '上面的可信度看 SNR,不受影響。',
+                style: TextStyle(fontSize: 9, color: Colors.orange.shade700),
+              ),
+            ),
         ],
       ),
     );
@@ -523,6 +665,7 @@ class _K2PageState extends State<K2Page> {
   Widget _sec1Controls() {
     final shortPts = _adapter.pointsRecentSeconds(_shortSec);
     return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
       children: [
         Text(tr('k2_window'),
             style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
@@ -887,10 +1030,14 @@ class _K2PageState extends State<K2Page> {
   // 軟體端(Strapi)衍生指標
   // ══════════════════════════════════════════════════════════════
 
-  /// 整合方介面要、但核心不直接產出的那些欄位。
+  /// 整合方介面要的欄位 + 我們自己的判讀。**同一批 RR,兩種尺度。**
   ///
-  /// 全部由 [Max30102VitalsMetrics] 從同一批 RR 算出來 —— 這裡只負責顯示,
-  /// 不做任何計算,免得畫面上的數字跟之後 server 導出的對不起來。
+  /// 上半是實際送出去的(對齊 aquivio-vitals 的公式與單位);
+  /// 下半是我們自己的 Kubios 式 z-score,不送出去,但判讀比較有依據。
+  /// 兩套並排是刻意的 —— 之前只顯示我們那套,結果「看得到的」與
+  /// 「送出去的」不一致,查問題時很容易誤判。
+  ///
+  /// 全部由 [Max30102VitalsMetrics] 從同一批 RR 算出來,這裡只負責顯示。
   Widget _strapiPanel(VitalsMetrics m) {
     String f(double? v, {int digits = 2}) =>
         v == null ? '—' : v.toStringAsFixed(digits);
@@ -900,13 +1047,14 @@ class _K2PageState extends State<K2Page> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _kv('ln(RMSSD)', f(m.lnRmssd), api: 'ln_rmssd'),
-        _kv('副交感', f(m.pns), api: 'pns'),
-        _kv('交感', f(m.sns)),
-        // 對方的 ans 定義源自 LF/HF,我們這個是時域替代值 → 標成灰色,
-        // 並且 toStrapiJson 不會把它填進 ans(見 k2_vitals_metrics 的註解)。
-        _kv('自律平衡*', f(m.ansTimeDomain), color: Colors.blueGrey),
-        _kv('壓力指數', f(m.stress, digits: 1), api: 'stress'),
-        _kv('可信度', m.confidence ?? '—', api: 'confidence'),
+        // ── 以下四個是 aquivio-vitals 的公式,0~100 分 ──────────────
+        //    pns 就是 RMSSD、ans 就是 LF/HF、stress 是前兩者的組合、
+        //    activity 就是心率。它們沒有引入新資訊,只是換尺度。
+        _kv('副交感', f(m.pnsScore, digits: 1), api: 'pns'),
+        _kv('自律平衡', f(m.ansScore, digits: 1), api: 'ans'),
+        _kv('壓力', f(m.stressScore, digits: 1), api: 'stress'),
+        _kv('活動量', f(m.activityScore, digits: 1), api: 'activity'),
+        _kv('可信度', m.confidenceBySnr ?? '—', api: 'confidence'),
         _kv('SQI', '${m.sqi}', api: 'sqi'),
         _kv('訊噪比', m.snrDb == null ? '—' : '${f(m.snrDb, digits: 1)} dB',
             api: 'snr_db'),
@@ -919,14 +1067,19 @@ class _K2PageState extends State<K2Page> {
         // 顏色編碼帶著判讀:HF 在 30 秒窗是**勉強可用**的(0.15Hz 週期只有
         // 6.7 秒,30 秒有 4.5 圈),LF 則完全不可用(0.04Hz 只走 1.2 圈)。
         // 所以 LF 與比值會被灰掉,HF 維持正常色 —— 灰不灰直接對應可不可信。
+        // LF / HF 用**整合方的單位**(= 我們的 ms² × 1.024e-3),因為送出去的
+        // 就是這個值。ms² 的原始值放在下面「我們自己的判讀」那一區,
+        // 兩者名字不同、單位標明,不會混。
         _kv(
           'LF',
-          spec == null ? '—' : '${spec.lf.toStringAsFixed(0)} ms²',
+          spec == null ? '—' : spec.lfAquivio.toStringAsFixed(3),
+          api: 'lf',
           color: (spec?.lfUsable ?? false) ? null : Colors.grey.shade400,
         ),
         _kv(
           'HF',
-          spec == null ? '—' : '${spec.hf.toStringAsFixed(0)} ms²',
+          spec == null ? '—' : spec.hfAquivio.toStringAsFixed(3),
+          api: 'hf',
           color: (spec?.hfUsable ?? false) ? null : Colors.grey.shade400,
         ),
         // LF/HF 在 30 秒窗一定是 null。顯示原始值(灰)讓人看得到「它算得出來,
@@ -946,18 +1099,42 @@ class _K2PageState extends State<K2Page> {
             padding: const EdgeInsets.only(top: 2, bottom: 2),
             child: Text(
               '⚠ LF 只走 ${spec.lfCycles.toStringAsFixed(1)} 圈'
-              '(需 ≥${HrvSpectrum.minBandCycles.toStringAsFixed(0)})'
-              '→ LF 與比值不可信,對外送 null。\n'
-              '  HF 有 ${spec.hfCycles.toStringAsFixed(1)} 圈,'
-              '是勉強可用的那一半(灰字=不可信)',
-              style: TextStyle(fontSize: 9.5, color: Colors.orange.shade800),
+              '(需 ≥${HrvSpectrum.minBandCycles.toStringAsFixed(0)})。'
+              'HF 有 ${spec.hfCycles.toStringAsFixed(1)} 圈,是可用的那一半。\n'
+              '  數字照送(攝影機端也是 30 秒),可信度另以 lf_reliable 標明',
+              style: TextStyle(fontSize: 9, color: Colors.orange.shade800),
             ),
           ),
+
+        // ── 我們自己的判讀:同一批 RR,Kubios 式 z-score ──────────────
+        //
+        // 不送出去。上面那套是整合方的啟發式縮放(pns 就是 RMSSD、
+        // ans 就是 LF/HF),這一套有常模依據,適合我們自己判斷。
+        // 兩套並排,才看得出「送出去的」與「我們認為的」差在哪。
+        const Divider(height: 14),
+        Row(children: [
+          Text('我們自己的判讀',
+              style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blueGrey.shade600)),
+          const SizedBox(width: 6),
+          Text('不送出',
+              style: TextStyle(fontSize: 9, color: Colors.grey.shade500)),
+        ]),
+        const SizedBox(height: 2),
+        _kv('副交感 z', f(m.pns)),
+        _kv('交感 z', f(m.sns)),
+        _kv('自律平衡', f(m.ansTimeDomain)),
+        _kv('壓力(Baevsky)', f(m.stress, digits: 1)),
+        _kv('可信度(拍數)', m.confidence ?? '—'),
+        _kv('LF', spec == null ? '—' : '${spec.lf.toStringAsFixed(0)} ms²'),
+        _kv('HF', spec == null ? '—' : '${spec.hf.toStringAsFixed(0)} ms²'),
         Padding(
           padding: const EdgeInsets.only(top: 4),
           child: Text(
-            '* 自律平衡是時域替代值(SNS−PNS),與攝影機端\n'
-            '  LF/HF 導出的 ans 定義不同,不可互比',
+            '上半是實際送出去的(對齊 aquivio-vitals 的公式與單位);\n'
+            '下半是同一批 RR 的 Kubios 式 z-score,兩者尺度不同,不可互比。',
             style: TextStyle(fontSize: 9, color: Colors.grey.shade500),
           ),
         ),
@@ -1030,6 +1207,10 @@ class _K2PageState extends State<K2Page> {
                 '  ·  手指請保持不動,中途離開會中止實驗',
                 style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
               ),
+              // 途中的即時頻譜 —— 看得到「窗長變長時 LF/HF 怎麼變」,
+              // 尤其是圈數爬過 4 的那一刻可信度會翻轉。那個過程本身就是
+              // 這個實驗要展示的東西。
+              if (exp.liveSpectrum != null) _lfLiveRow(exp.liveSpectrum!),
             ],
             if (!exp.running && exp.abortReason != null)
               Padding(
@@ -1170,6 +1351,48 @@ class _K2PageState extends State<K2Page> {
           ),
         ],
       ],
+    );
+  }
+
+  /// 錄製途中的即時頻譜列。
+  ///
+  /// 重點是 LF 的圈數 —— 錄製開始時只有一兩圈(灰、✗),隨著窗長變長爬升,
+  /// 過 4 之後翻成可信(綠、✓)。**同一段資料,只是看得更久,結論就不一樣**,
+  /// 這正是整個實驗要說明的事,所以讓它在畫面上發生一次比看結果表更有感。
+  Widget _lfLiveRow(HrvSpectrum s) {
+    Widget item(String k, String v, {Color? color}) => Padding(
+          padding: const EdgeInsets.only(right: 18),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('$k ',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+            Text(v,
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'monospace',
+                    color: color)),
+          ]),
+        );
+
+    final ok = s.lfUsable;
+    final okColor = ok ? Colors.green.shade700 : Colors.grey.shade500;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          item('目前累積', '${s.spanSeconds.toStringAsFixed(0)}s'),
+          item('LF/HF', s.lfHf.toStringAsFixed(2), color: okColor),
+          item('LF', '${s.lf.toStringAsFixed(0)} ms²', color: okColor),
+          item('HF', '${s.hf.toStringAsFixed(0)} ms²'),
+          item(
+            'LF 圈數',
+            '${s.lfCycles.toStringAsFixed(1)} '
+                '${ok ? "✓ 可信" : "✗ 需 ≥${HrvSpectrum.minBandCycles.toStringAsFixed(0)}"}',
+            color: okColor,
+          ),
+        ],
+      ),
     );
   }
 

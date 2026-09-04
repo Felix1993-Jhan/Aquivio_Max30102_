@@ -120,6 +120,27 @@ class HrvSpectrum {
 
   /// HF 下緣(0.15Hz)在這段窗裡走了幾個完整週期。與 [lfCycles] 對照用。
   double get hfCycles => spanSeconds * HrvBands.hfLow;
+
+  // ── 整合方(aquivio-vitals)的單位換算 ──────────────────────────────
+  //
+  // 他們的 hrv.py freq_domain():
+  //     rr(秒) → CubicSpline 內插到 4Hz → welch(fs=4, nfft=4096)
+  //     lf = pxx[(f>=0.04)&(f<0.15)].sum()      ← **直接加總 bin,沒乘 df**
+  //
+  // 所以他們的數字 = 頻帶功率(s²) ÷ df,而我們是頻帶功率(ms²):
+  //     df    = fs / nfft = 4 / 4096 = 0.0009766 Hz
+  //     他們  = 我們(ms²) ÷ 1e6 × (1/df) = 我們 × 1.024e-3
+  //
+  // ⚠️ 這是**單位與正規化慣例的換算**,不是重寫 Welch。兩個估計器
+  //    (Welch vs Lomb-Scargle)對同一段訊號的估計本來就會有差,
+  //    這裡只保證數量級與語意一致。[lfHf] 是比值,縮放約分掉,不受影響。
+  static const double _aquivioScale = 1024.0 / 1e6;
+
+  /// LF 功率,換算成整合方 `lf` 欄位的單位。原始 ms² 值請看 [lf]。
+  double get lfAquivio => lf * _aquivioScale;
+
+  /// HF 功率,換算成整合方 `hf` 欄位的單位。原始 ms² 值請看 [hf]。
+  double get hfAquivio => hf * _aquivioScale;
 }
 
 /// 頻帶邊界(Task Force 1996 標準)。
@@ -366,8 +387,86 @@ class Max30102VitalsMetrics {
   ///    它的價值在於:30 秒就算得出來,而 LF/HF 不行。
   static double ansTimeDomain(HrvStats hv, double? si) => sns(hv, si) - pns(hv);
 
+  // ══════════════════════════════════════════════════════════════════
+  // 三之二、整合方(aquivio-vitals)的 0~100 分數
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 以下四個公式**逐字對應** aquivio-vitals 的 `core.py::derived_scores()`。
+  // 我們原本用的是 Kubios 式的 z-score(見上面的 [pns] / [sns]),那在
+  // 統計上比較講究,但**整合方的 prompt 是照他們這套校準的** ——
+  // deepseek.ts 把這幾個欄位印成 `X/100`,而且判斷門檻(`LF/HF > 1.5`、
+  // `high stress`、`low PNS`)都是對著這個尺度寫的。
+  //
+  // 所以對外送這一套,自己面板留 Kubios 那一套。兩者都保留、各有用途:
+  //   · 這一套 → 跟攝影機端數值可互換
+  //   · Kubios 那套 → 有常模依據,適合我們自己判讀
+  //
+  // ⚠️ 他們的 docstring 自己標明:
+  //    "These mappings are heuristic (consumer-device style), not clinical."
+  //    這幾個分數只是既有指標的重新縮放,沒有引入任何新資訊:
+  //      pns      就是 RMSSD
+  //      ans      就是 LF/HF
+  //      stress   就是前兩者的線性組合
+  //      activity 就是心率
+
+  /// 整合方的 `pns`(畫面上叫 "Recovery")—— **就是 RMSSD 的對數縮放**。
+  ///
+  /// `RMSSD 10ms → 0 分`、`80ms → 100 分`,超出兩端夾住。
+  static double? pnsScore(double? rmssd) {
+    if (rmssd == null || rmssd <= 0) return null;
+    final v = (math.log(rmssd) / math.ln10 - 1.0) /
+        (math.log(80) / math.ln10 - 1.0);
+    return v.clamp(0.0, 1.0) * 100.0;
+  }
+
+  /// 整合方的 `ans` —— **就是 LF/HF 取 log2 後縮放**。
+  ///
+  /// `LF/HF 0.25 → 0`、`1.0 → 50`(中性)、`4.0 → 100`。
+  /// **越大代表越偏交感**(緊張)。
+  static double? ansScore(double? lfHf) {
+    if (lfHf == null || lfHf <= 0) return null;
+    final v = 0.5 + (math.log(lfHf) / math.ln2) / 4.0;
+    return v.clamp(0.0, 1.0) * 100.0;
+  }
+
+  /// 整合方的 `stress` —— **前兩者的加權混合**,不是 Baevsky 壓力指數。
+  ///
+  /// `0.6 × (100−pns)/100 + 0.4 × ans/100`。
+  /// 兩個輸入任一為 null 就回 null(與他們的 `if pns and ans` 一致)。
+  static double? stressScore(double? pnsScore, double? ansScore) {
+    if (pnsScore == null || ansScore == null) return null;
+    final v = 0.6 * (100 - pnsScore) / 100 + 0.4 * ansScore / 100;
+    return v.clamp(0.0, 1.0) * 100.0;
+  }
+
+  /// 整合方的 `activity` —— **就是心率超出靜息基準多少**。
+  ///
+  /// `(mean_hr − 60) / 80`,夾在 0~1 再 ×100。
+  static double? activityScore(double? meanHr) {
+    if (meanHr == null) return null;
+    return ((meanHr - 60.0) / 80.0).clamp(0.0, 1.0) * 100.0;
+  }
+
+  /// 整合方的 `confidence` —— **只看 SNR,與拍數無關**。
+  ///
+  /// 對應 aquivio-vitals 的 `hrv_confidence()`:
+  /// `≥6.0 dB → good`、`≥1.0 dB → rough`、其餘 `very rough`。
+  ///
+  /// 他們選 6 dB 的理由寫在 core.py 的註解裡:低於約 6 dB 時
+  /// RMSSD 的雜訊底線會超過典型靜息 HRV(實測:1.5 dB 時真值 19ms
+  /// 會膨脹到約 60ms)。
+  static const double snrGoodDb = 6.0;
+  static const double snrRoughDb = 1.0;
+
+  static String? confidenceFromSnr(double? snrDb) {
+    if (snrDb == null) return null;
+    if (snrDb >= snrGoodDb) return 'good';
+    if (snrDb >= snrRoughDb) return 'rough';
+    return 'very rough';
+  }
+
   // ──────────────────────────────────────────────────────────────
-  // 四、confidence —— 對方介面的 `confidence`
+  // 四、confidence(我們自己的版本)
   // ──────────────────────────────────────────────────────────────
 
   /// 量測可信度 → 對方介面的 `'good' | 'rough' | 'very rough'`。
@@ -596,13 +695,46 @@ class VitalsMetrics {
     return (r != null && r > 0) ? math.log(r) : null;
   }
 
-  /// → `lf_hf`。**視窗不足時回 null**,不回一個假的數字。
-  /// 想看原始值(即使不可信)請直接讀 [spectrum]。
-  double? get lfHf {
-    final s = spectrum;
-    if (s == null || !s.lfUsable) return null;
-    return s.lfHf;
-  }
+  /// → `lf_hf`。
+  ///
+  /// ⚠️ **這裡照送,不再因為視窗不足而回 null。**
+  ///
+  /// 原本的規則是「30 秒測不到 LF 就送 null」。後來確認**攝影機端
+  /// (aquivio-vitals)也是 30 秒視窗**(見他們 docs/VITALS.md:
+  /// "The window is 30s (not 60s) across the station and the SDK"),
+  /// 而且他們照樣把 lf_hf 算出來送。
+  ///
+  /// 我們送 null 而他們送數字,只會讓同一個欄位在兩台裝置上行為不一致,
+  /// 下游反而更難處理 —— 分不出「沒有這個能力」和「刻意保留」。
+  ///
+  /// 改成照送,但**可信度資訊一起送**([HrvSpectrum.lfUsable] /
+  /// [HrvSpectrum.lfCycles] 會出現在 `lf_reliable` / `lf_cycles`),
+  /// 讓上層自己判斷。誠實靠標註,不靠藏數字。
+  double? get lfHf => spectrum?.lfHf;
+
+  // ── 整合方 0~100 分數(逐字對應 aquivio-vitals 的 derived_scores)──
+  //
+  // ⚠️ 與上面的 [pns] / [sns] / [ansTimeDomain] **不是同一組東西**。
+  //    那組是 Kubios 式 z-score(有常模依據,適合我們自己判讀);
+  //    這組是整合方的啟發式縮放(與攝影機端數值可互換)。
+
+  /// → `pns`(0~100,他們畫面上叫 "Recovery")
+  double? get pnsScore => Max30102VitalsMetrics.pnsScore(hrv?.rmssd);
+
+  /// → `ans`(0~100,越大越偏交感)
+  double? get ansScore => Max30102VitalsMetrics.ansScore(lfHf);
+
+  /// → `stress`(0~100)。ans 為 null 時跟著 null,與他們的行為一致。
+  double? get stressScore =>
+      Max30102VitalsMetrics.stressScore(pnsScore, ansScore);
+
+  /// → `activity`(0~100)
+  double? get activityScore =>
+      Max30102VitalsMetrics.activityScore(hrv?.meanHr);
+
+  /// → `confidence`。改用 SNR 門檻,與整合方一致(見 [confidenceFromSnr])。
+  String? get confidenceBySnr =>
+      Max30102VitalsMetrics.confidenceFromSnr(snrDb);
 
   /// → `sqi`。對方的型別是 number,我們的是二元閘門 → 1 / 0。
   ///
@@ -610,34 +742,61 @@ class VitalsMetrics {
   ///    只活在 Max30102Sqi 內部。要給連續值得先改交接核心。
   int get sqi => sqiOk ? 1 : 0;
 
-  /// 照對方介面的欄位名打包(給之後接 /vitals 用)。
+  /// 照對方介面(`aquivio-station` 的 `VitalsResult`)的欄位名與**單位**打包。
   ///
-  /// 兩個欄位**刻意恆為 null**,不是漏做:
+  /// 每一個欄位都對齊 `aquivio-vitals` 的實作,所以數值與攝影機端可互換:
+  ///   · `pns` / `ans` / `stress` / `activity` —— 逐字照他們的 derived_scores()
+  ///   · `confidence` —— 照他們的 SNR 門檻(6.0 / 1.0 dB)
+  ///   · `lf` / `hf` —— **換算成他們的單位**(見 [HrvSpectrum.lfAquivio]);
+  ///     我們原本的 ms² 值另外放在 `lf_ms2` / `hf_ms2`
   ///
-  /// · `lf_hf` —— 視窗不足時([HrvSpectrum.lfUsable] 為 false)不出數字。
-  ///   30 秒窗永遠落在這一類。寧可缺欄位,也不要送一個看起來合理、
-  ///   實際上什麼都沒量到的數字過去。
-  ///
-  /// · `ans` —— 對方的 `ans` 定義是「LF/HF 導出的自律神經平衡」。我們有的是
-  ///   [ansTimeDomain](時域 SNS−PNS),那是**另一個定義**、另一個尺度,
-  ///   兩台裝置的數字不可互比。未經整合方同意就把它塞進這個欄位,
-  ///   等於偷換定義 —— 所以這裡留 null,時域替代值請直接讀 [ansTimeDomain]。
-  Map<String, dynamic> toStrapiJson() => {
-        'mean_hr': meanHr,
-        'sdnn': sdnn,
-        'rmssd': rmssd,
-        'ln_rmssd': lnRmssd,
-        'lf_hf': lfHf,
-        'sqi': sqi,
-        'snr_db': snrDb,
-        'confidence': confidence,
-        'pns': pns,
-        'ans': null,
-        'stress': stress,
-        // 我們沒有對應的量(不確定它在攝影機端的語意)。但**key 一定要在** ——
-        // 對方的 VitalsResult 把 activity 宣告成 `number | null` 而非 optional,
-        // 少了這個 key,TypeScript 那側取到的是 undefined 而不是 null,
-        // 型別就對不上了。缺值用 null 表達,不用「不出現」表達。
-        'activity': null,
-      };
+  /// 宣告的 12 個欄位**一個都不會缺**,沒有值就是 null —— 對方把 `activity`
+  /// 之類宣告成 `number | null` 而非 optional,少了 key 那側會拿到
+  /// `undefined` 而不是 `null`,型別就對不上。缺值用 null 表達。
+  Map<String, dynamic> toStrapiJson() {
+    final s = spectrum;
+    return {
+      // ── VitalsResult 宣告的 12 個欄位 ────────────────────────────
+      'mean_hr': meanHr,
+      'sdnn': sdnn,
+      'rmssd': rmssd,
+      'ln_rmssd': lnRmssd,
+      'lf_hf': lfHf,
+      'sqi': sqi,
+      'snr_db': snrDb,
+      'confidence': confidenceBySnr,
+      'pns': pnsScore,
+      'ans': ansScore,
+      'stress': stressScore,
+      'activity': activityScore,
+
+      // ── 額外欄位(靠介面的 `[key: string]: unknown` 帶過去)────────
+      //
+      // lf / hf 用**他們的單位**,才不會同名不同義。
+      'lf': s?.lfAquivio,
+      'hf': s?.hfAquivio,
+      // 我們自己的原始值,**明確標單位**。兩者差 1.024e-3 的換算因子,
+      // 想回推或跟我們的畫面對帳就用這兩個。
+      'lf_ms2': s?.lf,
+      'hf_ms2': s?.hf,
+      'vlf_ms2': s?.vlf,
+
+      // 誠實性資訊:數字照送,但可不可信一起講清楚。
+      // 30 秒窗的 LF 只涵蓋 0.04Hz 的約 1.1 個週期 —— 攝影機端同樣是
+      // 30 秒,所以這不是我們獨有的限制,而是兩邊共同的。
+      'lf_reliable': s?.lfUsable ?? false,
+      'hf_reliable': s?.hfUsable ?? false,
+      'lf_cycles': s?.lfCycles,
+      'hf_cycles': s?.hfCycles,
+      'window_sec': s?.spanSeconds,
+
+      // 我們自己那套(Kubios 式 z-score)—— 與上面的 0~100 分數**不同尺度**,
+      // 名字刻意分開,不會誤用。有常模依據,適合需要統計解讀時參考。
+      'pns_z': pns,
+      'sns_z': sns,
+      'ans_time_domain': ansTimeDomain,
+      'stress_baevsky': stress,
+      'confidence_by_beats': confidence,
+    };
+  }
 }

@@ -1,5 +1,8 @@
 # MAX30102 量測服務 — 使用說明
 
+> **目前版本 `0.0.0.3`** — 用 `./max30102_server --version` 或 `/health` 的 `version` 欄位確認手上是哪一版。
+
+
 > 這份文件是給**串接方（React + Koa）**看的。
 > 你不需要懂 Dart，也不需要編譯任何東西——拿到執行檔就能用。
 >
@@ -183,7 +186,7 @@ export LIBSERIALPORT_PATH=/usr/lib/x86_64-linux-gnu/libserialport.so.0.1.1
 
 | 端點 | 方法 | 用途 | 主要回傳欄位 |
 |---|---|---|---|
-| [`/health`](#health) | GET | 服務活著嗎、目前模式、串口狀態 | `ok` `mode` `source` |
+| [`/health`](#health) | GET | 服務活著嗎、目前模式、串口狀態 | `ok` `version` `mode` `source` |
 | [`/vitals`](#vitals) | GET | **★ 最常用** — 心率、血氧、HRV | `bpm` `spo2` `hrv` `fingerPresent` `settling` [`strapi`](#strapi) |
 | [`/waveform`](#waveform) | GET | 近 N 秒波形（原始 + 平滑兩組） | `ir` `red` `irTrim` `redTrim` `firstAbs` |
 | [`/stream`](#stream) | WS | **★ 建議用** — 即時推播，約每秒一次 | 同 `/vitals` |
@@ -281,6 +284,7 @@ curl http://localhost:8770/health
 ```json
 {
   "ok": true,
+  "version": "0.0.0.3",
   "mode": "serial",
   "uptimeMs": 60123,
   "totalSamples": 6000,
@@ -362,33 +366,64 @@ const v: VitalsResult = (await res.json()).strapi;
 
 ```json
 "strapi": {
-  "mean_hr": 70.13,
-  "sdnn": 39.79,
-  "rmssd": 48.65,
-  "ln_rmssd": 3.885,
-  "lf_hf": null,
+  "mean_hr": 70.41,
+  "sdnn": 36.81,
+  "rmssd": 40.19,
+  "ln_rmssd": 3.694,
+  "lf_hf": 0.5347,
   "sqi": 1,
-  "snr_db": 13.96,
+  "snr_db": 7.23,
   "confidence": "good",
-  "pns": 0.029,
-  "ans": null,
-  "stress": 15.59,
-  "activity": null,
+  "pns": 66.90,
+  "ans": 27.42,
+  "stress": 30.83,
+  "activity": 13.02,
 
-  "lf": 19.4,
-  "hf": 1558.1,
-  "lf_hf_raw": 0.0124,
+  "lf": 0.4240,
+  "hf": 0.7931,
+  "lf_ms2": 414.08,
+  "hf_ms2": 774.49,
+  "vlf_ms2": 166.16,
   "lf_reliable": false,
   "hf_reliable": true,
-  "lf_cycles": 1.16,
-  "window_sec": 29.09,
-  "ans_time_domain": 1.481,
-  "sns": 1.511
+  "lf_cycles": 1.125,
+  "hf_cycles": 4.218,
+  "window_sec": 28.12,
+
+  "pns_z": -0.352,
+  "sns_z": 1.138,
+  "ans_time_domain": 1.490,
+  "stress_baevsky": 12.01,
+  "confidence_by_beats": "good"
 }
 ```
 
 上排是 `VitalsResult` 宣告的 12 個欄位（**一個都不會缺，沒有值就是 `null`**）；
 下排是額外附帶的，靠介面的 `[key: string]: unknown` 塞進去。
+
+#### 公式與單位都對齊 `aquivio-vitals`
+
+`pns` / `ans` / `stress` / `activity` / `confidence` 逐字對應
+`aquivio-vitals` 的 `core.py::derived_scores()` 與 `hrv_confidence()`：
+
+```
+pns      = clip((log10(rmssd) − log10(10)) / (log10(80) − log10(10)), 0, 1) × 100
+ans      = clip(0.5 + log2(lf_hf) / 4,                                 0, 1) × 100
+stress   = clip(0.6 × (100−pns)/100 + 0.4 × ans/100,                   0, 1) × 100
+activity = clip((mean_hr − 60) / 80,                                   0, 1) × 100
+confidence: snr_db ≥ 6 → good、≥ 1 → rough、其餘 very rough
+```
+
+**實測比對**（同一份真機快照，兩邊各自跑自己的程式）：
+
+| | aquivio-vitals | 本服務 |
+|---|---|---|
+| `rmssd` / `sdnn` / `mean_hr` | 40.1948 / 36.8067 / 70.4125 | **完全相同** |
+| `pns` / `activity` | 66.9003 / 13.0156 | **完全相同** |
+| `lf_hf` | 0.6342 | 0.5347（−16%） |
+| `ans` / `stress` | 33.57 / 33.29 | 27.42 / 30.83 |
+
+時域完全一致；頻域有差是因為**估計器不同**，見下。
 
 #### 為什麼不直接把外層欄位改名
 
@@ -402,12 +437,50 @@ const v: VitalsResult = (await res.json()).strapi;
 所以兩區並存。`sdnn` 之類重複的欄位是**同一份 `HrvStats` 導出的**，
 不是各算一次——測試有釘死這條（`strapi.sdnn` 必須等於 `hrv.sdnn`）。
 
-#### 兩個永遠是 `null` 的欄位
+#### `lf` / `hf` 的單位
 
-**`lf_hf`** —— 這裡的數值是用**30 秒視窗**算的，而 LF 頻帶下緣 0.04 Hz
-週期就有 25 秒，30 秒只裝得下約 1.2 個週期（見 `lf_cycles`）。
+`aquivio-vitals` 的 `freq_domain()` 是：RR（秒）→ cubic spline 內插到 4 Hz
+→ `welch(fs=4, nfft=4096)` → **直接加總 PSD bin（沒乘 df）**。
 
-實測（同一段錄製切成不同窗長，對 5 分鐘基準）：
+所以他們的值 = 頻帶功率(s²) ÷ df，其中 `df = fs/nfft = 4/4096`。
+與我們的 ms² 差一個 `1.024e-3` 的換算因子。
+
+| 欄位 | 單位 |
+|---|---|
+| `lf` / `hf` | **他們的慣例**（可直接與攝影機端比較） |
+| `lf_ms2` / `hf_ms2` / `vlf_ms2` | **ms²**，我們的原始值 |
+
+同名不同單位比缺欄位更危險，所以兩者分開命名。`lf_hf` 是比值，
+縮放會約分掉，兩邊可直接互比。
+
+#### 頻域估計器不同（差約 15%）
+
+| | aquivio-vitals | 本服務 |
+|---|---|---|
+| 時間軸 | `cumsum(rr)` 把 RR 首尾相接 | RR 的**實際絕對位置** |
+| 重取樣 | cubic spline 內插到 4 Hz | **不重取樣** |
+| 估計 | Welch（分段平均） | Lomb-Scargle（最小平方擬合） |
+
+我們選 Lomb-Scargle 的理由是它假設較少、也**較接近已知真值**。用振幅
+已知的合成訊號（真值可以直接算出來）驗證：
+
+| 合成訊號 | 真實 `lf_hf` | aquivio-vitals | 本服務 |
+|---|---|---|---|
+| LF25 / HF25 | 1.000 | 0.9774（−2.3%） | **0.9813（−1.9%）** |
+| LF35 / HF18 | 3.781 | 4.0901（+8.2%） | **3.8708（+2.4%）** |
+| LF15 / HF30 | 0.250 | 0.2208（−11.7%） | **0.2329（−6.8%）** |
+| LF30 / HF20 | 2.250 | 2.4419（+8.5%） | **2.2460（−0.2%）** |
+
+四組都比較接近真值。差異來源是 Welch 的分段平均會壓縮動態範圍，
+而內插會製造原本不存在的資料點。
+
+⚠️ **RR 序列有斷層時（訊號品質不佳被濾掉的拍）兩者都會退化**，
+誰比較接近真值取決於斷層的分布，沒有一般性結論。
+
+#### 30 秒視窗下 `lf_hf` 的可信度
+
+LF 頻帶下緣 0.04 Hz 週期就有 25 秒，**30 秒只裝得下約 1.1 個週期**
+（見 `lf_cycles`）。實測（同一段錄製切成不同窗長，對 5 分鐘基準）：
 
 | 窗長 | 偏差中位數 | 落在 ±20% 內 |
 |---|---|---|
@@ -417,20 +490,21 @@ const v: VitalsResult = (await res.json()).strapi;
 而且它是**持續漂移**而非上下抖動——單一段 5 分鐘錄製裡，2 分鐘窗的偏差
 從 −39% 單調爬到 +63%。所以拉長量測時間也解決不了。
 
-`lf_hf` 因此固定回 `null`。**但原始值沒有藏**：`lf`、`hf`、`lf_hf_raw`
-照給，另附 `lf_reliable` / `lf_cycles` / `window_sec` 讓你自己判斷。
+**數值仍然照送**（攝影機端同樣是 30 秒視窗，見他們的 `docs/VITALS.md`：
+*"The window is 30s (not 60s) across the station and the SDK"*），
+可信度另以 `lf_reliable` / `lf_cycles` / `hf_cycles` / `window_sec` 標明。
+**誠實靠標註，不靠藏數字。**
 
-**`ans`** —— 你的 `ans` 定義源自 LF/HF。我們有一個**時域**的替代值
-（`SNS − PNS`，30 秒算得出來），但**定義與尺度都不同**，塞進 `ans` 會讓
-兩台裝置的同名欄位語意衝突。所以放在 `ans_time_domain` 這個另外的名字下。
-要改用它請先跟我們講一聲，我們再一起確認下游（特別是 LLM prompt）
-能接受定義變更。
+HF 不受影響：下緣 0.15 Hz 週期只有 6.7 秒，30 秒約有 4.2 個週期，
+`hf_reliable` 通常是 `true`。
 
-#### 建議的替代：`rmssd`
+#### 建議：需要「放鬆／恢復」訊號時用 `rmssd`
 
 `LF/HF` 裡機制真正站得住的那一半是 **HF（副交感）**，而 `rmssd` 與 HF 的
 相關性通常 **> 0.9**（RMSSD 是一階差分，本質上就是高通濾波器），
 而且**在 30 秒視窗下經過文獻驗證**。
+
+注意 `pns` 本身就是 `rmssd` 的對數縮放，所以兩者帶的是同一份資訊。
 
 所以如果你要的是「放鬆／恢復程度」的訊號，用 `rmssd` 或 `ln_rmssd`，
 今天就能用。給不了的是交感那一半——而那一半 LF 本來就沒有真的量到。
@@ -439,13 +513,25 @@ const v: VitalsResult = (await res.json()).strapi;
 
 | 欄位 | 意義 |
 |---|---|
-| `lf` / `hf` | 兩個頻帶的絕對功率（ms²）。比值會把資訊丟掉——`lf_hf` 變大可能是 LF 漲、也可能是 HF 掉，看絕對值才分得出來 |
-| `lf_hf_raw` | 未經可信度過濾的原始比值 |
+| `lf` / `hf` | 兩個頻帶的功率，**單位同 aquivio-vitals**。比值會把資訊丟掉——`lf_hf` 變大可能是 LF 漲、也可能是 HF 掉，看絕對值才分得出來 |
+| `lf_ms2` / `hf_ms2` / `vlf_ms2` | 同樣三個頻帶，但**單位是 ms²**（我們的原始值）。三者相加 ≈ `sdnn²` |
 | `lf_reliable` / `hf_reliable` | 該頻帶在這段窗長下可不可信 |
-| `lf_cycles` | LF 下緣（0.04 Hz）在這段窗裡走了幾個完整週期。< 4.4 就不可信 |
-| `window_sec` | 這些數值實際涵蓋幾秒（約 28~29） |
-| `ans_time_domain` | 時域版自律平衡 = `sns − pns` |
-| `sns` | 交感指數（時域：平均心率 + 壓力指數 + SD2） |
+| `lf_cycles` / `hf_cycles` | 該頻帶下緣在這段窗裡走了幾個完整週期。**< 4 就不可信** |
+| `window_sec` | 這些數值實際涵蓋幾秒（30 秒視窗實測約 28~29） |
+
+以下是我們自己的判讀，**與上面的 0~100 分數尺度不同、不可互比**。
+它們有常模依據（Kubios 風格的 z-score），適合需要統計解讀時參考：
+
+| 欄位 | 意義 |
+|---|---|
+| `pns_z` | 副交感指數（z-score：平均 RR + RMSSD + SD1） |
+| `sns_z` | 交感指數（z-score：平均心率 + Baevsky 壓力指數 + SD2） |
+| `ans_time_domain` | 時域版自律平衡 = `sns_z − pns_z` |
+| `stress_baevsky` | √(Baevsky 壓力指數)，靜息常態約 7~12 |
+| `confidence_by_beats` | 依拍數 + SQI 判定的可信度（上面的 `confidence` 是依 SNR） |
+
+> ⚠️ 這些 z-score 沒有用 Kubios 的常模資料庫校準，用的是文獻上健康成年人的
+> 參考值。**方向可信，絕對值不會與 Kubios 對齊。**
 
 > 各欄位的完整算法、常模來源與限制，見 `docs/VITALS_FIELDS.zh-TW.md`。
 

@@ -233,33 +233,10 @@ class K2Engine {
       bpm: c?.bpm,
       ir: _waveIr,
     );
-    final spec = m.spectrum;
-    return {
-      ...m.toStrapiJson(),
-      // ── 以下是 VitalsResult 沒宣告、但介面有 `[key: string]: unknown`
-      //    所以塞得進去的補充欄位 ──────────────────────────────────
-      //
-      // `lf_hf` 本身在窗長不足時是 null(見 k2_vitals_metrics 的誠實性規則)。
-      // 但實測資料本身是算得出來的,所以連同**可信度**一起送:上層想用就
-      // 用得到,同時看得到它可不可信,不必自己去猜。
-      'lf': spec?.lf,
-      'hf': spec?.hf,
-      'lf_hf_raw': spec?.lfHf, // 未經可信度過濾的原始比值
-      'lf_reliable': spec?.lfUsable ?? false,
-      'hf_reliable': spec?.hfUsable ?? false,
-      // 各頻帶下緣在這段窗裡走了幾個完整週期。< 4 就不可信
-      // (門檻 Max30102VitalsMetrics 那側是從頻率導出的,不是湊的)。
-      // 30 秒窗:LF 約 1.2 圈、HF 約 4.3 圈 —— HF 剛好在線上,
-      // 所以 hf_reliable 偶爾會是 false,看連續值比看布林準。
-      'lf_cycles': spec?.lfCycles,
-      'hf_cycles': spec?.hfCycles,
-      'window_sec': spec?.spanSeconds,
-      // 時域版的自律平衡(SNS−PNS)。**刻意不放進 `ans`** ——
-      // 對方的 ans 源自 LF/HF,定義與尺度都不同,塞進去等於偷換定義。
-      // 放在另一個名字下,要用的人必須先看到這個名字、知道它是別的東西。
-      'ans_time_domain': m.ansTimeDomain,
-      'sns': m.sns,
-    };
+    // 欄位、單位與可信度資訊全部由 toStrapiJson() 決定 —— server 不再自己
+    // 補欄位。之前這裡加過 lf / hf / lf_reliable 等等,結果與核心那邊重複,
+    // 兩處都要改才不會漂移。現在只有一個地方定義那份契約。
+    return m.toStrapiJson();
   }
 
   /// 近一段波形。[seconds] 為 null → 給出全部保留的長度。
@@ -666,8 +643,11 @@ class ApiServer {
     final server = await HttpServer.bind(
         InternetAddress.anyIPv4, opts.port, shared: false);
     _http = server;
-    _log('🌐 HTTP 監聽 0.0.0.0:${opts.port}(目前模式:$mode)',
-        'HTTP listening on 0.0.0.0:${opts.port} (mode: $mode)');
+    _log(
+        '🌐 HTTP 監聽 0.0.0.0:${opts.port}(目前模式:$mode,'
+            'v$kServerVersion)',
+        'HTTP listening on 0.0.0.0:${opts.port} '
+            '(mode: $mode, v$kServerVersion)');
     server.listen(_handle,
         onError: (Object e) {
       final (zh, en) = _biError('⚠ HTTP 錯誤', 'HTTP error', e);
@@ -699,6 +679,7 @@ class ApiServer {
         case 'GET /health':
           await _json(req, {
             'ok': true,
+            'version': kServerVersion,
             'mode': mode,
             'uptimeMs': DateTime.now().difference(_startedAt).inMilliseconds,
             'totalSamples': engine.totalSamples,
@@ -1141,8 +1122,20 @@ class ServerOptions {
   }
 }
 
+/// 服務版本 —— **內部編號**,只用來分辨手上這支執行檔是哪一版。
+///
+/// 之前交出去的執行檔沒有任何版本標示,對方回報問題時得靠 `strings` 去猜
+/// 他手上是不是最新的。所以現在:啟動日誌印一次、`/health` 帶一份、
+/// `--version` 直接問得到。
+///
+/// 沿革:
+///   0.0.0.1  最初版(心率 / 血氧 / HRV / 波形 / 晶片控制)
+///   0.0.0.2  新增 `strapi` 區塊
+///   0.0.0.3  `strapi` 區塊的公式、單位與 confidence 對齊 aquivio-vitals
+const String kServerVersion = '0.0.0.3';
+
 const String _usage = '''
-max30102_server — MAX30102 K2 無頭伺服器 / headless vitals service
+max30102_server v$kServerVersion — MAX30102 K2 無頭伺服器 / headless vitals service
 
 用法 / Usage:
   max30102_server [選項 / options]
@@ -1181,6 +1174,9 @@ max30102_server — MAX30102 K2 無頭伺服器 / headless vitals service
   --help
       顯示這份說明 / show this help
 
+  --version
+      只印出版本號 / print the version and exit
+
 環境變數(優先度低於命令列)/ Environment variables (lower precedence than CLI):
   K2_MODE  K2_SERIAL  K2_BAUD  K2_PORT  K2_BOARD  K2_INTERVAL
   K2_WAVE_SECONDS  K2_RESET_ON_FINGER_OFF
@@ -1207,6 +1203,10 @@ API:
 // ════════════════════════════════════════════════════════════════════════════
 
 Future<void> main(List<String> args) async {
+  if (args.contains('--version') || args.contains('-v')) {
+    stdout.writeln(kServerVersion);
+    return;
+  }
   if (args.contains('--help') || args.contains('-h')) {
     stdout.write(_usage);
     return;
