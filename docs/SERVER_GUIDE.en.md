@@ -1,6 +1,6 @@
 # MAX30102 Vitals Service — Integration Guide
 
-> **Current version `0.0.0.3`** — check which build you have with
+> **Current version `0.0.0.4`** — check which build you have with
 > `./max30102_server --version` or the `version` field in `/health`.
 
 
@@ -295,7 +295,7 @@ curl http://localhost:8770/health
 ```json
 {
   "ok": true,
-  "version": "0.0.0.3",
+  "version": "0.0.0.4",
   "mode": "serial",
   "uptimeMs": 60123,
   "totalSamples": 6000,
@@ -383,7 +383,7 @@ const v: VitalsResult = (await res.json()).strapi;
   "ln_rmssd": 3.694,
   "lf_hf": 0.5347,
   "sqi": 1,
-  "snr_db": 7.23,
+  "snr_db": 8.89,
   "confidence": "good",
   "pns": 66.90,
   "ans": 27.42,
@@ -400,12 +400,13 @@ const v: VitalsResult = (await res.json()).strapi;
   "lf_cycles": 1.125,
   "hf_cycles": 4.218,
   "window_sec": 28.12,
+  "confidence_video": "good",
 
-  "pns_z": -0.352,
-  "sns_z": 1.138,
-  "ans_time_domain": 1.490,
-  "stress_baevsky": 12.01,
-  "confidence_by_beats": "good"
+  "pns_max30102": -0.352,
+  "sns_max30102": 1.138,
+  "ans_max30102": 1.490,
+  "stress_max30102": 12.01,
+  "confidence_max30102": "good"
 }
 ```
 
@@ -438,6 +439,24 @@ confidence: snr_db ≥ 6 → good, ≥ 1 → rough, otherwise very rough
 
 The time-domain values match exactly; the frequency-domain difference comes from
 a different estimator — see below.
+
+
+#### Field suffixes: whose definition produced this number
+
+The same physiological quantity comes out on **completely different scales**
+depending on which algorithm produced it. The suffix tells you which:
+
+| Suffix | Follows | Example (same reading) |
+|---|---|---|
+| none / `_video` | **aquivio-vitals** (the camera pipeline) | `pns` 66.9 (0–100 score) |
+| `_max30102` | **ours** (Kubios z-score / Baevsky / beat count) | `pns_max30102` −0.35 (z-score, 0 = population mean) |
+
+`confidence` is declared in your `VitalsResult` so the name can't change; an
+explicit alias `confidence_video` carries **the same value** if you prefer the
+labelled name.
+
+⚠️ **The two are not comparable.** 66.9 and −0.35 come from the same person and
+the same RR series — they just answer different questions.
 
 #### Why we didn't just rename the outer fields
 
@@ -547,11 +566,11 @@ z-scores, useful when you want a statistically grounded reading:
 
 | Field | Meaning |
 |---|---|
-| `pns_z` | Parasympathetic index (z-score: mean RR + RMSSD + SD1) |
-| `sns_z` | Sympathetic index (z-score: mean HR + Baevsky stress index + SD2) |
-| `ans_time_domain` | Time-domain autonomic balance = `sns_z − pns_z` |
-| `stress_baevsky` | √(Baevsky stress index); 7–12 is a typical resting range |
-| `confidence_by_beats` | Confidence from beat count + SQI (the `confidence` field above uses SNR) |
+| `pns_max30102` | Parasympathetic index (z-score: mean RR + RMSSD + SD1) |
+| `sns_max30102` | Sympathetic index (z-score: mean HR + Baevsky stress index + SD2) |
+| `ans_max30102` | Time-domain autonomic balance = `sns_z − pns_z` |
+| `stress_max30102` | √(Baevsky stress index); 7–12 is a typical resting range |
+| `confidence_max30102` | Confidence from beat count + SQI (the `confidence` field above uses SNR) |
 
 > ⚠️ These z-scores are **not** calibrated against Kubios' normative database —
 > they use published reference values for healthy adults. **The direction is

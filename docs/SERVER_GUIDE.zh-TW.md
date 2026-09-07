@@ -1,6 +1,6 @@
 # MAX30102 量測服務 — 使用說明
 
-> **目前版本 `0.0.0.3`** — 用 `./max30102_server --version` 或 `/health` 的 `version` 欄位確認手上是哪一版。
+> **目前版本 `0.0.0.4`** — 用 `./max30102_server --version` 或 `/health` 的 `version` 欄位確認手上是哪一版。
 
 
 > 這份文件是給**串接方（React + Koa）**看的。
@@ -284,7 +284,7 @@ curl http://localhost:8770/health
 ```json
 {
   "ok": true,
-  "version": "0.0.0.3",
+  "version": "0.0.0.4",
   "mode": "serial",
   "uptimeMs": 60123,
   "totalSamples": 6000,
@@ -372,7 +372,7 @@ const v: VitalsResult = (await res.json()).strapi;
   "ln_rmssd": 3.694,
   "lf_hf": 0.5347,
   "sqi": 1,
-  "snr_db": 7.23,
+  "snr_db": 8.89,
   "confidence": "good",
   "pns": 66.90,
   "ans": 27.42,
@@ -389,12 +389,13 @@ const v: VitalsResult = (await res.json()).strapi;
   "lf_cycles": 1.125,
   "hf_cycles": 4.218,
   "window_sec": 28.12,
+  "confidence_video": "good",
 
-  "pns_z": -0.352,
-  "sns_z": 1.138,
-  "ans_time_domain": 1.490,
-  "stress_baevsky": 12.01,
-  "confidence_by_beats": "good"
+  "pns_max30102": -0.352,
+  "sns_max30102": 1.138,
+  "ans_max30102": 1.490,
+  "stress_max30102": 12.01,
+  "confidence_max30102": "good"
 }
 ```
 
@@ -424,6 +425,21 @@ confidence: snr_db ≥ 6 → good、≥ 1 → rough、其餘 very rough
 | `ans` / `stress` | 33.57 / 33.29 | 27.42 / 30.83 |
 
 時域完全一致；頻域有差是因為**估計器不同**，見下。
+
+
+#### 欄位後綴:這個數字是照誰的標準算的
+
+同一個生理量,兩套演算法會給出**尺度完全不同**的數字。後綴就是用來分辨的：
+
+| 後綴 | 依照 | 例(同一次量測) |
+|---|---|---|
+| 無後綴 / `_video` | **aquivio-vitals**(攝影機那套) | `pns` 66.9（0~100 分）|
+| `_max30102` | **我們自己的**（Kubios z-score / Baevsky / 拍數）| `pns_max30102` −0.35（z-score，0 = 常模平均）|
+
+`confidence` 是你們 `VitalsResult` 宣告的欄位，名字不能動，所以另外給一個
+`confidence_video` 的明確別名（**同一個值**），要哪個名字都拿得到。
+
+⚠️ **兩套不可互比。** 66.9 和 −0.35 是同一個人、同一批 RR，只是問法不同。
 
 #### 為什麼不直接把外層欄位改名
 
@@ -524,11 +540,11 @@ HF 不受影響：下緣 0.15 Hz 週期只有 6.7 秒，30 秒約有 4.2 個週�
 
 | 欄位 | 意義 |
 |---|---|
-| `pns_z` | 副交感指數（z-score：平均 RR + RMSSD + SD1） |
-| `sns_z` | 交感指數（z-score：平均心率 + Baevsky 壓力指數 + SD2） |
-| `ans_time_domain` | 時域版自律平衡 = `sns_z − pns_z` |
-| `stress_baevsky` | √(Baevsky 壓力指數)，靜息常態約 7~12 |
-| `confidence_by_beats` | 依拍數 + SQI 判定的可信度（上面的 `confidence` 是依 SNR） |
+| `pns_max30102` | 副交感指數（z-score：平均 RR + RMSSD + SD1） |
+| `sns_max30102` | 交感指數（z-score：平均心率 + Baevsky 壓力指數 + SD2） |
+| `ans_max30102` | 時域版自律平衡 = `sns_z − pns_z` |
+| `stress_max30102` | √(Baevsky 壓力指數)，靜息常態約 7~12 |
+| `confidence_max30102` | 依拍數 + SQI 判定的可信度（上面的 `confidence` 是依 SNR） |
 
 > ⚠️ 這些 z-score 沒有用 Kubios 的常模資料庫校準，用的是文獻上健康成年人的
 > 參考值。**方向可信，絕對值不會與 Kubios 對齊。**

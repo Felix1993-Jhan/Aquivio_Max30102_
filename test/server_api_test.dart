@@ -346,8 +346,8 @@ void main() {
       expect(s['activity'] as double,
           closeTo(Max30102VitalsMetrics.activityScore(meanHr)!, 1e-9));
       // 我們自己那套 z-score 放在不同名字下,不會撞名
-      expect(s['pns_z'], isNotNull);
-      expect(s['pns'], isNot(equals(s['pns_z'])));
+      expect(s['pns_max30102'], isNotNull);
+      expect(s['pns'], isNot(equals(s['pns_max30102'])));
     });
 
     test('Parseval:lf_ms2 + hf_ms2 不可能超過 sdnn²', () {

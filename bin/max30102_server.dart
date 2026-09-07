@@ -1132,7 +1132,9 @@ class ServerOptions {
 ///   0.0.0.1  最初版(心率 / 血氧 / HRV / 波形 / 晶片控制)
 ///   0.0.0.2  新增 `strapi` 區塊
 ///   0.0.0.3  `strapi` 區塊的公式、單位與 confidence 對齊 aquivio-vitals
-const String kServerVersion = '0.0.0.3';
+///   0.0.0.4  SNR 頻帶定義補齊(snr_db 數值變動);兩套判讀加上
+///            `_video` / `_max30102` 後綴,分清楚每個數字照誰的標準算
+const String kServerVersion = '0.0.0.4';
 
 const String _usage = '''
 max30102_server v$kServerVersion — MAX30102 K2 無頭伺服器 / headless vitals service

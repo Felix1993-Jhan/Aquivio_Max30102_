@@ -814,6 +814,9 @@ class VitalsMetrics {
       'lf_hf': lfHf,
       'sqi': sqi,
       'snr_db': snrDb,
+      // `confidence` 是對方 VitalsResult 宣告的欄位,名字不能動。
+      // 但光看名字分不出它是照誰的標準算的,所以下面另外給一個
+      // `confidence_video` 的明確別名(同一個值)。
       'confidence': confidenceBySnr,
       'pns': pnsScore,
       'ans': ansScore,
@@ -834,19 +837,29 @@ class VitalsMetrics {
       // 誠實性資訊:數字照送,但可不可信一起講清楚。
       // 30 秒窗的 LF 只涵蓋 0.04Hz 的約 1.1 個週期 —— 攝影機端同樣是
       // 30 秒,所以這不是我們獨有的限制,而是兩邊共同的。
+      // 與上面的 `confidence` 同值,只是名字講明了出處(SNR 門檻 6/1 dB,
+      // 照 aquivio-vitals 的 hrv_confidence())。對方要哪個名字都拿得到。
+      'confidence_video': confidenceBySnr,
       'lf_reliable': s?.lfUsable ?? false,
       'hf_reliable': s?.hfUsable ?? false,
       'lf_cycles': s?.lfCycles,
       'hf_cycles': s?.hfCycles,
       'window_sec': s?.spanSeconds,
 
-      // 我們自己那套(Kubios 式 z-score)—— 與上面的 0~100 分數**不同尺度**,
-      // 名字刻意分開,不會誤用。有常模依據,適合需要統計解讀時參考。
-      'pns_z': pns,
-      'sns_z': sns,
-      'ans_time_domain': ansTimeDomain,
-      'stress_baevsky': stress,
-      'confidence_by_beats': confidence,
+      // ── 我們自己的判讀 —— 後綴 `_max30102` ────────────────────────
+      //
+      // 命名規則:**後綴標明這個數字是照誰的標準算的**。
+      //   · 無後綴 / `_video` → 照 aquivio-vitals(攝影機那套)的公式
+      //   · `_max30102`       → 我們自己的(Kubios z-score / Baevsky / 拍數)
+      //
+      // 兩套**尺度完全不同,不可互比**。例如同一次量測:
+      //   pns 66.9(0~100 分)  vs  pns_max30102 −0.35(z-score,0=常模平均)
+      // 沒有後綴就分不出「這個 66.9 是誰的定義」,而兩邊都叫 pns。
+      'pns_max30102': pns,
+      'sns_max30102': sns,
+      'ans_max30102': ansTimeDomain,
+      'stress_max30102': stress,
+      'confidence_max30102': confidence,
     };
   }
 }

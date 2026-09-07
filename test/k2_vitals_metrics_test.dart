@@ -357,8 +357,8 @@ void main() {
       expect(j['ans'],
           closeTo(Max30102VitalsMetrics.ansScore(m.lfHf)!, 1e-9));
       // 我們自己那套時域值改放在不同名字下,不會撞名
-      expect(j['ans_time_domain'], isNotNull);
-      expect(j['ans'], isNot(equals(j['ans_time_domain'])));
+      expect(j['ans_max30102'], isNotNull);
+      expect(j['ans'], isNot(equals(j['ans_max30102'])));
     });
 
     test('★ lf/hf 用他們的單位,我們的 ms² 另外標名', () {
