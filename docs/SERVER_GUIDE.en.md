@@ -1,6 +1,6 @@
 # MAX30102 Vitals Service — Integration Guide
 
-> **Current version `0.0.0.4`** — check which build you have with
+> **Current version `0.0.0.5`** — check which build you have with
 > `./max30102_server --version` or the `version` field in `/health`.
 > The changelog lives in `bin/server_version.dart`.
 
@@ -197,7 +197,7 @@ Everything returns JSON.
 | [`/health`](#health) | GET | Is the service alive, current mode, serial status | `ok` `version` `mode` `source` |
 | [`/vitals`](#vitals) | GET | **★ Most used** — heart rate, SpO₂, HRV | `bpm` `spo2` `hrv` `fingerPresent` `settling` [`strapi`](#strapi) |
 | [`/waveform`](#waveform) | GET | Last N seconds of waveform (raw + smoothed) | `ir` `red` `irTrim` `redTrim` `firstAbs` |
-| [`/stream`](#stream) | WS | **★ Recommended** — live push, ~1/sec | same as `/vitals` |
+| [`/stream`](#stream) | WS | **★ Recommended** — live push, ~1/sec | same as `/vitals` + `wave` (incremental IR) |
 | [`/feed`](#feed) | POST | Push raw data (**feed mode only**) | `accepted` `computed` `totalSamples` |
 | [`/mode`](#mode) | POST | Switch between serial / feed mode | `mode` `source` |
 | [`/chip`](#chip) | GET | MCU and MAX30102 status (serial mode only) | `mcu` `chip` `inSync` |
@@ -296,7 +296,7 @@ curl http://localhost:8770/health
 ```json
 {
   "ok": true,
-  "version": "0.0.0.4",
+  "version": "0.0.0.5",
   "mode": "serial",
   "uptimeMs": 60123,
   "totalSamples": 6000,
@@ -340,6 +340,13 @@ If the USB device is unplugged the service **stays up**, but these two fields wi
 > ⚠️ **`GET /vitals` and the WebSocket `/stream` return the same payload.**
 > The socket pushes a snapshot on connect and then one after every computation
 > (roughly once per second). Everything below applies to both.
+>
+> **The one exception is `wave`** (since v0.0.0.5): `/stream` adds a
+> [`wave` block](#stream) on top of these fields, `/vitals` does not. `wave` is
+> **incremental**, which needs per-connection state ("where did you get to") —
+> HTTP polling has no connection to hang that on, so ten requests would hand you
+> ten fragments that don't join up. For waveform over HTTP use
+> [`/waveform`](#waveform).
 
 | Field | Meaning |
 |---|---|
@@ -625,9 +632,9 @@ when you actually need to redraw a chart — with a small `seconds` value.
 <a id="stream"></a>
 ### `WS /stream` — live push ★ recommended
 
-The service pushes a payload identical to `/vitals` every time it computes a new
-result (roughly once per second). **You receive a snapshot immediately on connect**,
-so there's no wait for the first frame.
+Every time it computes a new result (roughly once per second) the service pushes
+**every field `/vitals` has, plus a `wave` block**. **You receive a snapshot
+immediately on connect**, so there's no wait for the first frame.
 
 ```js
 const ws = new WebSocket('ws://localhost:8770/stream');
@@ -636,6 +643,79 @@ ws.on('message', (raw) => {
   console.log(v.bpm, v.spo2, v.hrv?.rmssd);
 });
 ```
+
+#### The `wave` block — for drawing the waveform (since v0.0.0.5)
+
+```json
+"wave": {
+  "firstAbs": 1520,
+  "fs": 100,
+  "count": 100,
+  "irTrim": [89123.4, 89140.2, ...]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `firstAbs` | Absolute **sample index** of `irTrim[0]`. ⚠️ Not a timestamp — seconds = `firstAbs / fs` |
+| `fs` | Sample rate (100 Hz) |
+| `count` | How many samples this frame carries (= `irTrim.length`) |
+| `irTrim` | Trim-smoothed IR, **incremental**: only what is new since your last frame |
+
+**Why IR only, and trim only**
+
+- **IR** — the heartbeat is computed from this channel. Finger detection reads the
+  IR DC level and trough detection runs on IR; RED is only used for the SpO2 ratio.
+  Drawing IR means drawing the line the algorithm itself sees, so the troughs on
+  your chart are the beats we counted.
+- **trim** — a sliding trimmed mean (spike removal). **Our own computation already
+  runs on trim**; the spikes visible in the raw signal are exactly what we classify
+  as noise and refuse to trust. Sending trim is not cosmetic, it is consistent with
+  the numbers.
+
+For RED or raw values use [`GET /waveform`](#waveform), which still returns all
+four series.
+
+**⚠️ Two things you must handle before wiring this up**
+
+**① When `firstAbs` doesn't line up, clear and re-seat. Do not splice.**
+
+```js
+let next = null;   // where the next sample should land
+ws.on('message', (raw) => {
+  const { wave } = JSON.parse(raw);
+  if (next !== null && wave.firstAbs !== next) chart.clear();  // gap → re-seat
+  chart.append(wave.irTrim);
+  next = wave.firstAbs + wave.count;
+});
+```
+
+Three situations produce a gap, and **every one of them is a real discontinuity**:
+
+- **A new person** (single-session mode): once the finger is confirmed removed the
+  index resets, so `firstAbs` drops back to near 0. This is deliberate — the index
+  belongs to *this measurement*, not to server uptime.
+- **Settling**: for the first ~3.5 s after a finger lands the core **discards
+  samples** (the detection threshold is crossed halfway down, and the ramp after it
+  must not be kept). When settling ends it emits **200 samples at once**, so that
+  frame is unusually large.
+- **You fell behind**: the buffer only retains `--wave-seconds` (30 by default).
+  Anything older is gone, so we resend from the **oldest sample still held** and
+  `firstAbs` will be *ahead* of your cursor.
+
+Splicing anyway offsets the waveform against `troughAbs` — **and it fails
+silently**: the chart still draws, the beats just no longer line up.
+
+**② This is PPG, not ECG.**
+
+The MAX30102 measures **blood volume changes with each pulse**
+(photoplethysmography), not the electrical activity of the heart muscle. The period
+is the same (one peak per beat) but **the shape is not**: there is no P wave, no QRS
+complex, no T wave — just a smooth rounded peak, sometimes with a visible dicrotic
+notch. PPG also lags ECG, since the pulse wave has to travel from the heart to the
+fingertip.
+
+It draws nicely, but labelling it "ECG" in the UI would be wrong.
 
 ---
 

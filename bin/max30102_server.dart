@@ -183,6 +183,12 @@ class K2Engine {
   ///    一份現況,之後每算完一次推一份。所以改這裡兩個端點會自動同步,
   ///    不會有一邊漏改。
   ///
+  ///    **唯一的例外是 `wave`**(v0.0.0.5 起):`/stream` 會在這份輸出之外再蓋
+  ///    一個 `wave` 區塊,`/vitals` 沒有。理由是 `wave` 給的是**增量**(自這個
+  ///    訂閱者上次收到之後的新樣本),那需要「上次收到哪裡」這個**每連線一份**
+  ///    的狀態 —— HTTP 輪詢沒有連線可依附,問十次就會拿到十份不相接的碎片。
+  ///    要用 HTTP 拿波形請走 `GET /waveform`,那邊是「近 N 秒」的絕對切片。
+  ///
   /// 回應分兩區:
   ///   · 頂層 + `hrv` —— **我們自己的欄位**,名稱與型別照核心的語意。
   ///   · `strapi` —— **整合方介面的形狀**(aquivio-station 的 `VitalsResult`),
@@ -269,6 +275,40 @@ class K2Engine {
       'red': _waveRed.sublist(from),
       'irTrim': round1(_waveIrTrim),
       'redTrim': round1(_waveRedTrim),
+    };
+  }
+
+  /// WS `/stream` 用的**增量**波形:只給 IR 的截尾平滑值。
+  ///
+  /// 為什麼是「IR + trim」這個組合,而不是四條線都送:
+  ///   · **IR** —— 心跳本身就是從這一路算出來的。手指偵測看 IR DC,谷點偵測
+  ///     (`irTroughs`)跑在 IR 上,RED 只在算 SpO2 的 ratio 時才用到。畫 IR
+  ///     等於畫「演算法看到的那條線」,畫面上的谷就是我們數的拍。
+  ///   · **trim** —— 截尾滑動平均(去突波)。核心的主計算本來就跑在 trim 上
+  ///     (見 k2_algorithm「殺掉尖刺型假谷」),raw 上那些尖刺是我們**判定為
+  ///     雜訊而不採信**的東西。送 trim 不是美化,是與計算一致。
+  /// 想要 RED 或 raw 就走 `GET /waveform`,那邊四條線照舊全給。
+  ///
+  /// [fromAbs] = 呼叫端**上次收到的下一筆**絕對位置;null = 沒收過。
+  /// 遊標落在保留範圍外時**整段重送**,不硬接 —— 有兩種情況會這樣:
+  ///   · 免洗歸零(下一位使用者)→ base 掉回 0,遊標比 nextAbs 還大
+  ///   · 訂閱者太久沒收 / 剛接上 → 要的樣本已經被 `_waveCap` 裁掉了
+  /// 兩種都是「接不上」,硬接會讓波形與 `troughAbs` 錯開,而且錯得很安靜。
+  Map<String, dynamic> waveSinceJson(int? fromAbs) {
+    final nextAbs = _waveBase + _waveIrTrim.length;
+    final from = (fromAbs == null || fromAbs < _waveBase || fromAbs > nextAbs)
+        ? _waveBase
+        : fromAbs;
+    // 一位小數就夠 —— IR 讀值是 ~90000 的量級(與 waveformJson 同樣的理由)。
+    final slice = [
+      for (final x in _waveIrTrim.sublist(from - _waveBase))
+        (x * 10).roundToDouble() / 10,
+    ];
+    return {
+      'firstAbs': from,
+      'fs': kFs,
+      'count': slice.length,
+      'irTrim': slice,
     };
   }
 
@@ -1016,16 +1056,26 @@ class ApiServer {
   Future<void> _handleStream(HttpRequest req) async {
     final ws = await WebSocketTransformer.upgrade(req);
     _log('🔌 WS 訂閱者接上(/stream)', 'WS subscriber connected (/stream)');
+
+    // ⚠️ 遊標是**每個訂閱者一份**,不能提到 K2Engine 去共用 —— 兩個訂閱者接上的
+    //    時間不同,共用一份的話先接上的那個會把樣本「領走」,後接上的只收得到
+    //    殘缺片段,而且不會報錯。
+    int? cursor;
+    void push(Map<String, dynamic> v) {
+      // 順序有意義:`_vitals.add()` 是在波形累積**之後**才發的(見 feedPacket),
+      // 所以這裡讀到的緩衝已經含這一輪的新樣本。
+      final w = engine.waveSinceJson(cursor);
+      cursor = (w['firstAbs'] as int) + (w['count'] as int);
+      try {
+        ws.add(jsonEncode({...v, 'wave': w}));
+      } catch (_) {}
+    }
+
     // 一接上先給一份現況,對方不必等下一次計算才有畫面。
-    ws.add(jsonEncode(engine.vitalsJson()));
-    final sub = engine.vitalsStream.listen(
-      (v) {
-        try {
-          ws.add(jsonEncode(v));
-        } catch (_) {}
-      },
-      onError: (Object _) {},
-    );
+    // 此時 cursor 還是 null → 波形會把保留緩衝(預設 30 秒)整段給出去,
+    // 圖表一連上就有東西可畫,不必空等一秒。
+    push(engine.vitalsJson());
+    final sub = engine.vitalsStream.listen(push, onError: (Object _) {});
     ws.done.whenComplete(() {
       sub.cancel();
       _log('🔌 WS 訂閱者離線', 'WS subscriber disconnected');
@@ -1180,7 +1230,10 @@ API:
   POST /feed                  餵原始 MCU bytes(僅 feed 模式)
                               push raw MCU bytes (feed mode only)
   POST /mode                  切換進料模式 / switch input mode
-  WS   /stream                每算出新結果就推播 / push on every new result
+  WS   /stream                每算出新結果就推播(約 1 秒一次),內容 = /vitals
+                              再加一個 wave 區塊(IR 截尾平滑的增量樣本)
+                              push on every new result (~1/s): /vitals plus a
+                              `wave` block of incremental trim-smoothed IR
   GET  /chip                  MCU 與 MAX30102 在線狀態(僅 serial 模式)
                               MCU and MAX30102 status (serial mode only)
   POST /chip/init             初始化晶片(RE-INIT) / initialise the chip

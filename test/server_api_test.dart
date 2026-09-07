@@ -230,54 +230,57 @@ void main() {
     expect(r.body['fingerPresent'], isFalse);
   });
 
+  // ── 合成 PPG 的共用工具 ─────────────────────────────────────────────
+  //
+  // 下面兩組(strapi 區塊 / WS wave 區塊)都直接把合成 PPG 餵進 K2Engine
+  // 而不走 HTTP:要湊滿 HRV 的暖機拍數需要 30 秒以上的波形,走 HTTP 得打
+  // 幾百次請求,在行程內餵快得多,而且驗的是同一條計算鏈。
+
+  /// 組一個合法的 QUERY_FIFO 回應封包(擴充板 0x31)。
+  List<int> packetOf(List<(int red, int ir)> samples) {
+    final b = <int>[0x40, 0x71, 0x31, 0x09, 0x00, samples.length * 6];
+    for (final (red, ir) in samples) {
+      b.addAll([red & 0xFF, (red >> 8) & 0xFF, (red >> 16) & 0xFF]);
+      b.addAll([ir & 0xFF, (ir >> 8) & 0xFF, (ir >> 16) & 0xFF]);
+    }
+    var sum = 0;
+    for (final v in b) {
+      sum += v;
+    }
+    b.add((0x100 - (sum & 0xFF)) & 0xFF);
+    return b;
+  }
+
+  /// 餵 [seconds] 秒的合成 PPG:70bpm 的脈搏,再疊一個 0.25Hz 的呼吸調變
+  /// 讓 RR 有變異(否則每拍間距完全相同,RMSSD 會是 0,測不出東西)。
+  /// IR 的 DC 設在 100000,遠高於手指偵測門檻 50000。
+  K2Engine feedSynthetic({int seconds = 60, int waveSeconds = 30}) {
+    final e = K2Engine(waveSeconds: waveSeconds);
+    const fs = 100;
+    const f0 = 70 / 60; // 70 bpm
+    double phase = 0;
+    final buf = <(int, int)>[];
+    for (int i = 0; i < fs * seconds; i++) {
+      final t = i / fs;
+      // 呼吸調變 → RR 隨之起伏(落在 HF 帶)
+      final f = f0 * (1 + 0.06 * math.sin(2 * math.pi * 0.25 * t));
+      phase += 2 * math.pi * f / fs;
+      final s = math.sin(phase);
+      buf.add(((60000 + 900 * s).round(), (100000 + 2000 * s).round()));
+      if (buf.length == 20) {
+        e.feedPacket(packetOf(buf));
+        buf.clear();
+      }
+    }
+    return e;
+  }
+
   // ── strapi 區塊 ────────────────────────────────────────────────────
   //
-  // `/vitals` 與 `/stream` 吐的是同一個函式,所以這裡驗過等於兩個端點都驗過。
-  //
-  // 這一組直接把合成 PPG 餵進 K2Engine(不走 HTTP),原因是要湊滿 HRV 的
-  // 暖機拍數需要 30 秒以上的波形 —— 走 HTTP 要打幾百次請求,在行程內餵快得多,
-  // 而且驗的是同一條計算鏈。
+  // `/vitals` 與 `/stream` 的**除了 wave 以外**都是同一個函式的輸出,
+  // 所以這裡驗過等於兩個端點都驗過。`wave` 只有 `/stream` 有,另組驗。
 
   group('strapi 區塊', () {
-    /// 組一個合法的 QUERY_FIFO 回應封包(擴充板 0x31)。
-    List<int> packetOf(List<(int red, int ir)> samples) {
-      final b = <int>[0x40, 0x71, 0x31, 0x09, 0x00, samples.length * 6];
-      for (final (red, ir) in samples) {
-        b.addAll([red & 0xFF, (red >> 8) & 0xFF, (red >> 16) & 0xFF]);
-        b.addAll([ir & 0xFF, (ir >> 8) & 0xFF, (ir >> 16) & 0xFF]);
-      }
-      var sum = 0;
-      for (final v in b) {
-        sum += v;
-      }
-      b.add((0x100 - (sum & 0xFF)) & 0xFF);
-      return b;
-    }
-
-    /// 餵 [seconds] 秒的合成 PPG:70bpm 的脈搏,再疊一個 0.25Hz 的呼吸調變
-    /// 讓 RR 有變異(否則每拍間距完全相同,RMSSD 會是 0,測不出東西)。
-    /// IR 的 DC 設在 100000,遠高於手指偵測門檻 50000。
-    K2Engine feedSynthetic({int seconds = 60}) {
-      final e = K2Engine(waveSeconds: 30);
-      const fs = 100;
-      const f0 = 70 / 60; // 70 bpm
-      double phase = 0;
-      final buf = <(int, int)>[];
-      for (int i = 0; i < fs * seconds; i++) {
-        final t = i / fs;
-        // 呼吸調變 → RR 隨之起伏(落在 HF 帶)
-        final f = f0 * (1 + 0.06 * math.sin(2 * math.pi * 0.25 * t));
-        phase += 2 * math.pi * f / fs;
-        final s = math.sin(phase);
-        buf.add(((60000 + 900 * s).round(), (100000 + 2000 * s).round()));
-        if (buf.length == 20) {
-          e.feedPacket(packetOf(buf));
-          buf.clear();
-        }
-      }
-      return e;
-    }
-
     test('★ 合成 PPG 餵滿後,strapi 區塊真的算得出數值', () {
       final v = feedSynthetic().vitalsJson();
       final s = v['strapi'] as Map<String, dynamic>;
@@ -372,6 +375,74 @@ void main() {
       }
       expect(s['mean_hr'], isNull);
       expect(s['sqi'], 0, reason: 'sqi 是 1/0 的數字,沒訊號時是 0');
+    });
+  });
+
+  // ── WS /stream 的 wave 區塊 ────────────────────────────────────────
+  //
+  // wave 給的是**增量**(自上次推播之後的新樣本),所以錯的方式只有一種:
+  // 接不上而沒被發現。下面每一條都在守「接不上時要重送,不要硬接」。
+
+  group('WS /stream 的 wave 區塊', () {
+    test('★ 增量:連續兩次要首尾相接,不重疊也不跳號', () {
+      final e = feedSynthetic(seconds: 20, waveSeconds: 30);
+      final a = e.waveSinceJson(null);
+      final cursor = (a['firstAbs'] as int) + (a['count'] as int);
+
+      // 同一個遊標再問一次 —— 中間沒有新樣本,應該是空的
+      final b = e.waveSinceJson(cursor);
+      expect(b['count'], 0, reason: '沒有新樣本就不該重送舊的');
+      expect(b['firstAbs'], cursor, reason: 'firstAbs 指向下一筆會落在哪');
+
+      // 再餵一點,增量必須正好接在遊標上
+      e.feedPacket(packetOf(List.generate(20, (_) => (60000, 100000))));
+      final c = e.waveSinceJson(cursor);
+      expect(c['firstAbs'], cursor, reason: '接續處不可以有洞,也不可以重疊');
+      expect(c['count'], 20);
+      expect((c['irTrim'] as List).length, 20, reason: 'count 要與陣列真的等長');
+    });
+
+    test('★ 遊標比緩衝新(免洗歸零之後)→ 整段重送,不是回空的', () {
+      final e = feedSynthetic(seconds: 20, waveSeconds: 30);
+      // 假裝訂閱者記著一個未來的位置(歸零後 base 會掉回接近 0)
+      final far = e.totalSamples + 100000;
+      final w = e.waveSinceJson(far);
+      expect(w['count'], greaterThan(0),
+          reason: '接不上就要整段重送,回空的會讓對方永遠停在黑畫面');
+    });
+
+    test('★ 遊標比緩衝舊(樣本已被 waveCap 裁掉)→ 從現存最舊的重送', () {
+      // 保留 5 秒,但餵 20 秒 → 前面 15 秒已經被裁掉
+      final e = feedSynthetic(seconds: 20, waveSeconds: 5);
+      final w = e.waveSinceJson(0); // 要一筆早就不存在的
+      expect(w['firstAbs'], greaterThan(0),
+          reason: '不能假裝 0 還在 —— 那會讓波形與 troughAbs 錯開');
+      expect(w['count'], greaterThan(0));
+      expect(w['count'], lessThanOrEqualTo(5 * 100 + 1), reason: '不超過保留量');
+    });
+
+    test('WS 一接上就要收到 wave,且與 /vitals 的欄位並存', () async {
+      final ws = await WebSocket.connect('ws://127.0.0.1:$port/stream');
+      try {
+        final first = jsonDecode(await ws.first as String)
+            as Map<String, dynamic>;
+        expect(first.containsKey('strapi'), isTrue, reason: 'vitals 欄位照舊');
+        final w = first['wave'] as Map<String, dynamic>;
+        for (final k in ['firstAbs', 'fs', 'count', 'irTrim']) {
+          expect(w.containsKey(k), isTrue, reason: '缺少欄位 $k');
+        }
+        expect(w['fs'], 100, reason: '秒數 = firstAbs / fs,對方要靠它換算');
+        expect(w['irTrim'], isA<List<dynamic>>(),
+            reason: '沒資料時也要是空陣列,不是 null');
+      } finally {
+        await ws.close();
+      }
+    });
+
+    test('wave 只在 /stream,GET /vitals 不該有', () async {
+      final r = await send('GET', '/vitals');
+      expect(r.body.containsKey('wave'), isFalse,
+          reason: '增量需要「上次收到哪」的連線狀態,HTTP 輪詢給不出來');
     });
   });
 }

@@ -1,6 +1,6 @@
 # MAX30102 量測服務 — 使用說明
 
-> **目前版本 `0.0.0.4`** — 用 `./max30102_server --version` 或 `/health` 的 `version` 欄位確認手上是哪一版。
+> **目前版本 `0.0.0.5`** — 用 `./max30102_server --version` 或 `/health` 的 `version` 欄位確認手上是哪一版。
 > 版本沿革記在 `bin/server_version.dart`。
 
 
@@ -190,7 +190,7 @@ export LIBSERIALPORT_PATH=/usr/lib/x86_64-linux-gnu/libserialport.so.0.1.1
 | [`/health`](#health) | GET | 服務活著嗎、目前模式、串口狀態 | `ok` `version` `mode` `source` |
 | [`/vitals`](#vitals) | GET | **★ 最常用** — 心率、血氧、HRV | `bpm` `spo2` `hrv` `fingerPresent` `settling` [`strapi`](#strapi) |
 | [`/waveform`](#waveform) | GET | 近 N 秒波形（原始 + 平滑兩組） | `ir` `red` `irTrim` `redTrim` `firstAbs` |
-| [`/stream`](#stream) | WS | **★ 建議用** — 即時推播，約每秒一次 | 同 `/vitals` |
+| [`/stream`](#stream) | WS | **★ 建議用** — 即時推播，約每秒一次 | 同 `/vitals` + `wave`（IR 波形增量）|
 | [`/feed`](#feed) | POST | 餵原始資料（**僅 feed 模式**） | `accepted` `computed` `totalSamples` |
 | [`/mode`](#mode) | POST | 切換 serial / feed 模式 | `mode` `source` |
 | [`/chip`](#chip) | GET | MCU 與 MAX30102 在線狀態（僅 serial 模式） | `mcu` `chip` `inSync` |
@@ -285,7 +285,7 @@ curl http://localhost:8770/health
 ```json
 {
   "ok": true,
-  "version": "0.0.0.4",
+  "version": "0.0.0.5",
   "mode": "serial",
   "uptimeMs": 60123,
   "totalSamples": 6000,
@@ -329,6 +329,11 @@ USB 被拔掉時服務**不會死**，但這兩個欄位會反映出來。
 > ⚠️ **`GET /vitals` 與 WebSocket `/stream` 吐的是同一份資料。**
 > WS 一接上先推一份現況，之後每算完一次推一份（約每秒）。
 > 所以底下講的欄位在兩個端點都一樣。
+>
+> **唯一的例外是 `wave`**（v0.0.0.5 起）：`/stream` 會在這些欄位之外多一個
+> [`wave` 區塊](#stream)（波形），`/vitals` 沒有。因為 `wave` 給的是**增量**，
+> 那需要「你上次收到哪裡」這個每連線一份的狀態 —— HTTP 輪詢沒有連線可依附，
+> 問十次就會拿到十份不相接的碎片。用 HTTP 拿波形請走 [`/waveform`](#waveform)。
 
 | 欄位 | 意義 |
 |---|---|
@@ -597,8 +602,8 @@ HF 不受影響：下緣 0.15 Hz 週期只有 6.7 秒，30 秒約有 4.2 個週�
 <a id="stream"></a>
 ### `WS /stream` — 即時推播 ★ 建議用這個
 
-服務每算出一次結果就主動推一份（約每秒一次），格式與 `/vitals` 完全相同。
-**連上的瞬間會先收到一份現況**，不必等下一次計算。
+服務每算出一次結果就主動推一份（約每秒一次），內容是 **`/vitals` 的全部欄位，
+再加一個 `wave` 區塊**。**連上的瞬間會先收到一份現況**，不必等下一次計算。
 
 ```js
 const ws = new WebSocket('ws://localhost:8770/stream');
@@ -607,6 +612,68 @@ ws.on('message', (raw) => {
   console.log(v.bpm, v.spo2, v.hrv?.rmssd);
 });
 ```
+
+#### `wave` 區塊 — 畫波形用（v0.0.0.5 起）
+
+```json
+"wave": {
+  "firstAbs": 1520,
+  "fs": 100,
+  "count": 100,
+  "irTrim": [89123.4, 89140.2, ...]
+}
+```
+
+| 欄位 | 意義 |
+|---|---|
+| `firstAbs` | `irTrim[0]` 的**絕對樣本索引**。⚠️ 不是時間戳，秒數 = `firstAbs / fs` |
+| `fs` | 取樣率（100 Hz） |
+| `count` | 這次帶了幾筆（= `irTrim.length`） |
+| `irTrim` | IR 的截尾平滑值，**增量**：只有你上次收到之後的新樣本 |
+
+**為什麼只給 IR、只給 trim**
+
+- **IR** — 心跳本來就是從這一路算出來的。手指偵測看 IR 的 DC，谷點偵測也跑在 IR 上，
+  RED 只在算 SpO2 的比值時才用到。畫 IR 等於畫「演算法看到的那條線」，
+  你畫面上的谷就是我們數的拍。
+- **trim** — 截尾滑動平均（去突波）。**我們的主計算本來就跑在 trim 上**，
+  raw 上那些尖刺是我們判定為雜訊而不採信的東西。給 trim 不是美化，是與計算一致。
+
+要 RED 或原始值請走 [`GET /waveform`](#waveform)，那邊四條線照舊全給。
+
+**⚠️ 接上去之前一定要處理的兩件事**
+
+**① `firstAbs` 對不上就清空重畫，不要硬接。**
+
+```js
+let next = null;   // 下一筆應該落在哪
+ws.on('message', (raw) => {
+  const { wave } = JSON.parse(raw);
+  if (next !== null && wave.firstAbs !== next) chart.clear();  // 斷層 → 重接
+  chart.append(wave.irTrim);
+  next = wave.firstAbs + wave.count;
+});
+```
+
+會出現斷層的情況有三種，**每一種都是真的斷了**：
+
+- **換人**（免洗模式）：確認手指離開後，索引整個歸零，`firstAbs` 會掉回接近 0。
+  這是刻意的 —— 索引屬於「這一次量測」，不是伺服器的開機時間。
+- **沉澱期**：手指剛壓上去的前 ~3.5 秒核心會**丟棄樣本**（門檻是壓到一半就跨過的，
+  後面那段爬升不能收）。沉澱期一滿會**一次吐出 200 筆**，所以第一批特別大。
+- **你太久沒收**：緩衝只保留 `--wave-seconds`（預設 30 秒），更舊的已經被裁掉了。
+  這時我們會從**現存最舊的那筆**重送，`firstAbs` 會比你的遊標大。
+
+硬接的後果是波形索引與 `troughAbs` 錯開，**而且錯得很安靜** —— 圖照畫，只是拍對不上。
+
+**② 這是 PPG，不是 ECG。**
+
+MAX30102 量的是**血液容積隨脈搏的變化**（光體積變化描記），不是心肌的電活動。
+週期一樣（一拍一個峰），但**形狀完全不同**：沒有 P 波、QRS 複合波、T 波那些尖角，
+是平滑的鈍峰，有時看得到重搏切跡（dicrotic notch）。而且 PPG 比 ECG 晚一點 ——
+脈波要從心臟傳到手指。
+
+畫出來很漂亮，但 UI 上標「ECG」是標錯的。
 
 ---
 

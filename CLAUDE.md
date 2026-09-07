@@ -156,6 +156,18 @@ UI 這一側原本有的「長期 RR 池（`allPoints`，上限 300 拍）」**�
 
 核心在空轉期/沉澱期**會丟棄樣本**，`K2FeedResult.firstAbs` 不保證等於「上一批結尾 + 1」。`K2Engine.feedPacket()` 會比對，對不上就整段重接。**不要改成硬接** —— 那會讓波形索引與 `troughAbs` 錯開，而且錯得很安靜。
 
+### WS `/stream` 的 `wave` 區塊（v0.0.0.5 起）
+
+`/stream` 推的是 `vitalsJson()` **再加一個 `wave` 區塊**（IR 的截尾平滑值，增量）。這是 `/vitals` 與 `/stream` 唯一不同步的地方，`vitalsJson()` 的文件註解有寫明原因。
+
+三個容易踩的點：
+
+1. **遊標必須是「每個訂閱者一份」** —— 寫在 `_handleStream()` 的閉包裡，**不可以提到 `K2Engine` 去共用**。兩個訂閱者接上的時間不同，共用一份的話先接上的會把樣本「領走」，後接上的只收得到殘缺片段，而且不會報錯。
+2. **遊標失效時整段重送，不是回空的** —— 免洗歸零（遊標比 `nextAbs` 大）與緩衝被 `_waveCap` 裁掉（遊標比 `_waveBase` 小）都算失效。回空的會讓對方永遠停在黑畫面。
+3. **只給 IR + trim 是刻意的** —— 心跳本來就是從 IR 算的（手指偵測看 IR DC、`irTroughs` 跑在 IR 上），主計算也本來就跑在 trim 上。要 RED 或 raw 走 `GET /waveform`。
+
+實測一次 12 秒的量測會有**一次**斷層，就是沉澱期結束時那 200 筆一次吐出（`firstAbs` 從 0 跳到 140）。這不是 bug，是核心丟棄空轉期樣本的結果。
+
 ### 訊號處理跨平台
 
 `SIGTERM` 只有 POSIX 有，Windows 在 OS 層面沒有這個概念，且 `sigterm.watch()` 丟的是**非同步**例外（`try/catch` 攔不到，會 exit 255）。`_tryWatchSignal()` 因此必須在註冊前先判斷平台。Windows 與 Linux 都能執行，功能相同。
