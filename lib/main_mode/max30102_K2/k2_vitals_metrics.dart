@@ -837,8 +837,20 @@ class VitalsMetrics {
       // 誠實性資訊:數字照送,但可不可信一起講清楚。
       // 30 秒窗的 LF 只涵蓋 0.04Hz 的約 1.1 個週期 —— 攝影機端同樣是
       // 30 秒,所以這不是我們獨有的限制,而是兩邊共同的。
-      // 與上面的 `confidence` 同值,只是名字講明了出處(SNR 門檻 6/1 dB,
-      // 照 aquivio-vitals 的 hrv_confidence())。對方要哪個名字都拿得到。
+      // ⚠️ 與上面的 `confidence` **同一個值**,只是名字講明了出處。
+      //
+      // 「video」指的是**最早期用來測試的攝影機機台**(rPPG,aquivio-vitals)。
+      // 那台後來沒有再使用了,但整條軟體鏈(station → Strapi → LLM prompt)
+      // 的判斷門檻都是照它的尺度校準的 —— `deepseek.ts` 把這些欄位印成
+      // `X/100`,判斷規則寫的是 `LF/HF > 1.5`、`high stress`、`low PNS`。
+      //
+      // 所以這裡**刻意把我們的訊號換算成與它大致相當的判別值**,讓軟體端
+      // 不必為了換感測器而改判斷邏輯。算法照抄他們的 `hrv_confidence()`:
+      // SNR ≥ 6dB → good、≥ 1dB → rough、其餘 very rough。
+      //
+      // ⚠️ 「大致相當」不是「等價」:他們的門檻是對著 rPPG 訊號校準的,
+      //    我們是接觸式 PPG。tier 的語意一致,但沒有人驗證過同一個人
+      //    在兩台機器上會落在同一級。
       'confidence_video': confidenceBySnr,
       'lf_reliable': s?.lfUsable ?? false,
       'hf_reliable': s?.hfUsable ?? false,
@@ -846,20 +858,23 @@ class VitalsMetrics {
       'hf_cycles': s?.hfCycles,
       'window_sec': s?.spanSeconds,
 
-      // ── 我們自己的判讀 —— 後綴 `_max30102` ────────────────────────
+      // ── 我們自己的判讀 ────────────────────────────────────────────
       //
-      // 命名規則:**後綴標明這個數字是照誰的標準算的**。
-      //   · 無後綴 / `_video` → 照 aquivio-vitals(攝影機那套)的公式
-      //   · `_max30102`       → 我們自己的(Kubios z-score / Baevsky / 拍數)
+      // 不加 `_max30102` 後綴 —— 整個服務本來就是 MAX30102,標了是贅字。
+      // 改用**說明尺度**的後綴,名字本身就講清楚它是什麼:
+      //   `_z`         → z-score(0 = 常模平均,可能是負的)
+      //   `_baevsky`   → Baevsky 壓力指數的平方根(靜息常態約 7~12)
+      //   `_time_domain` / `_by_beats` → 算法出處
       //
-      // 兩套**尺度完全不同,不可互比**。例如同一次量測:
-      //   pns 66.9(0~100 分)  vs  pns_max30102 −0.35(z-score,0=常模平均)
-      // 沒有後綴就分不出「這個 66.9 是誰的定義」,而兩邊都叫 pns。
-      'pns_max30102': pns,
-      'sns_max30102': sns,
-      'ans_max30102': ansTimeDomain,
-      'stress_max30102': stress,
-      'confidence_max30102': confidence,
+      // ⚠️ 與上面那組 0~100 分**尺度完全不同,不可互比**。同一次量測:
+      //      pns   66.9   (0~100 分)
+      //      pns_z −0.35  (z-score,剛好等於常模平均)
+      //    −0.35 若被當成 0~100 讀,會變成「恢復力幾乎為零」—— 完全相反。
+      'pns_z': pns,
+      'sns_z': sns,
+      'ans_time_domain': ansTimeDomain,
+      'stress_baevsky': stress,
+      'confidence_by_beats': confidence,
     };
   }
 }

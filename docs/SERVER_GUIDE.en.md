@@ -403,11 +403,11 @@ const v: VitalsResult = (await res.json()).strapi;
   "window_sec": 28.12,
   "confidence_video": "good",
 
-  "pns_max30102": -0.352,
-  "sns_max30102": 1.138,
-  "ans_max30102": 1.490,
-  "stress_max30102": 12.01,
-  "confidence_max30102": "good"
+  "pns_z": -0.352,
+  "sns_z": 1.138,
+  "ans_time_domain": 1.490,
+  "stress_baevsky": 12.01,
+  "confidence_by_beats": "good"
 }
 ```
 
@@ -442,22 +442,34 @@ The time-domain values match exactly; the frequency-domain difference comes from
 a different estimator — see below.
 
 
-#### Field suffixes: whose definition produced this number
+#### What `confidence_video` is
 
-The same physiological quantity comes out on **completely different scales**
-depending on which algorithm produced it. The suffix tells you which:
+**The same value** as `confidence` — the name just makes the provenance explicit.
 
-| Suffix | Follows | Example (same reading) |
+"video" refers to the **camera rig this was originally tested against** (rPPG).
+That machine is no longer in use, but the whole software chain
+(station → Strapi → LLM prompt) is calibrated to its scale — `deepseek.ts`
+renders these fields as `X/100` and its rules read `LF/HF > 1.5`,
+`high stress`, `low PNS`.
+
+So this service **deliberately converts our signal into roughly equivalent
+judgement values**, so you don't have to change the decision logic just because
+the sensor changed.
+
+⚠️ **"Roughly equivalent" is not "identical"**: their thresholds were calibrated
+against rPPG, ours is contact PPG. The tier semantics match, but nobody has
+verified that the same person lands in the same tier on both machines.
+
+#### Two groups of values, on different scales
+
+| Group | Follows | Example (same reading) |
 |---|---|---|
-| none / `_video` | **aquivio-vitals** (the camera pipeline) | `pns` 66.9 (0–100 score) |
-| `_max30102` | **ours** (Kubios z-score / Baevsky / beat count) | `pns_max30102` −0.35 (z-score, 0 = population mean) |
+| `pns` `ans` `stress` `activity` `confidence` | **aquivio-vitals** formulas | `pns` 66.9 (0–100 score) |
+| `pns_z` `sns_z` `ans_time_domain` `stress_baevsky` `confidence_by_beats` | **ours** | `pns_z` −0.35 (z-score, 0 = population mean) |
 
-`confidence` is declared in your `VitalsResult` so the name can't change; an
-explicit alias `confidence_video` carries **the same value** if you prefer the
-labelled name.
-
-⚠️ **The two are not comparable.** 66.9 and −0.35 come from the same person and
-the same RR series — they just answer different questions.
+⚠️ **Not comparable.** 66.9 and −0.35 come from the same person and the same RR
+series — they just answer different questions. Reading −0.35 as if it were on a
+0–100 scale gives "almost no recovery capacity" — **the opposite** of the truth.
 
 #### Why we didn't just rename the outer fields
 
@@ -567,11 +579,11 @@ z-scores, useful when you want a statistically grounded reading:
 
 | Field | Meaning |
 |---|---|
-| `pns_max30102` | Parasympathetic index (z-score: mean RR + RMSSD + SD1) |
-| `sns_max30102` | Sympathetic index (z-score: mean HR + Baevsky stress index + SD2) |
-| `ans_max30102` | Time-domain autonomic balance = `sns_z − pns_z` |
-| `stress_max30102` | √(Baevsky stress index); 7–12 is a typical resting range |
-| `confidence_max30102` | Confidence from beat count + SQI (the `confidence` field above uses SNR) |
+| `pns_z` | Parasympathetic index (z-score: mean RR + RMSSD + SD1) |
+| `sns_z` | Sympathetic index (z-score: mean HR + Baevsky stress index + SD2) |
+| `ans_time_domain` | Time-domain autonomic balance = `sns_z − pns_z` |
+| `stress_baevsky` | √(Baevsky stress index); 7–12 is a typical resting range |
+| `confidence_by_beats` | Confidence from beat count + SQI (the `confidence` field above uses SNR) |
 
 > ⚠️ These z-scores are **not** calibrated against Kubios' normative database —
 > they use published reference values for healthy adults. **The direction is

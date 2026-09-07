@@ -392,11 +392,11 @@ const v: VitalsResult = (await res.json()).strapi;
   "window_sec": 28.12,
   "confidence_video": "good",
 
-  "pns_max30102": -0.352,
-  "sns_max30102": 1.138,
-  "ans_max30102": 1.490,
-  "stress_max30102": 12.01,
-  "confidence_max30102": "good"
+  "pns_z": -0.352,
+  "sns_z": 1.138,
+  "ans_time_domain": 1.490,
+  "stress_baevsky": 12.01,
+  "confidence_by_beats": "good"
 }
 ```
 
@@ -428,19 +428,30 @@ confidence: snr_db ≥ 6 → good、≥ 1 → rough、其餘 very rough
 時域完全一致；頻域有差是因為**估計器不同**，見下。
 
 
-#### 欄位後綴:這個數字是照誰的標準算的
+#### `confidence_video` 是什麼
 
-同一個生理量,兩套演算法會給出**尺度完全不同**的數字。後綴就是用來分辨的：
+與 `confidence` **同一個值**，只是名字講明了出處。
 
-| 後綴 | 依照 | 例(同一次量測) |
+「video」指的是**最早期用來測試的攝影機機台**（rPPG）。那台後來沒有再使用，
+但整條軟體鏈（station → Strapi → LLM prompt）的判斷門檻都是照它的尺度
+校準的——`deepseek.ts` 把這些欄位印成 `X/100`，判斷規則寫的是
+`LF/HF > 1.5`、`high stress`、`low PNS`。
+
+所以這裡**刻意把我們的訊號換算成與它大致相當的判別值**，讓你們不必為了
+換感測器而改判斷邏輯。
+
+⚠️ **「大致相當」不是「等價」**：他們的門檻對著 rPPG 訊號校準，我們是接觸式
+PPG。tier 的語意一致，但沒有人驗證過同一個人在兩台機器上會落在同一級。
+
+#### 兩組數值，尺度完全不同
+
+| 這一組 | 依照 | 例（同一次量測）|
 |---|---|---|
-| 無後綴 / `_video` | **aquivio-vitals**(攝影機那套) | `pns` 66.9（0~100 分）|
-| `_max30102` | **我們自己的**（Kubios z-score / Baevsky / 拍數）| `pns_max30102` −0.35（z-score，0 = 常模平均）|
+| `pns` `ans` `stress` `activity` `confidence` | **aquivio-vitals** 的公式 | `pns` 66.9（0~100 分）|
+| `pns_z` `sns_z` `ans_time_domain` `stress_baevsky` `confidence_by_beats` | **我們自己的** | `pns_z` −0.35（z-score，0 = 常模平均）|
 
-`confidence` 是你們 `VitalsResult` 宣告的欄位，名字不能動，所以另外給一個
-`confidence_video` 的明確別名（**同一個值**），要哪個名字都拿得到。
-
-⚠️ **兩套不可互比。** 66.9 和 −0.35 是同一個人、同一批 RR，只是問法不同。
+⚠️ **不可互比。** 66.9 和 −0.35 是同一個人、同一批 RR，只是問法不同。
+若把 −0.35 當成 0~100 讀，會變成「恢復力幾乎為零」——**完全相反**。
 
 #### 為什麼不直接把外層欄位改名
 
@@ -541,11 +552,11 @@ HF 不受影響：下緣 0.15 Hz 週期只有 6.7 秒，30 秒約有 4.2 個週�
 
 | 欄位 | 意義 |
 |---|---|
-| `pns_max30102` | 副交感指數（z-score：平均 RR + RMSSD + SD1） |
-| `sns_max30102` | 交感指數（z-score：平均心率 + Baevsky 壓力指數 + SD2） |
-| `ans_max30102` | 時域版自律平衡 = `sns_z − pns_z` |
-| `stress_max30102` | √(Baevsky 壓力指數)，靜息常態約 7~12 |
-| `confidence_max30102` | 依拍數 + SQI 判定的可信度（上面的 `confidence` 是依 SNR） |
+| `pns_z` | 副交感指數（z-score：平均 RR + RMSSD + SD1） |
+| `sns_z` | 交感指數（z-score：平均心率 + Baevsky 壓力指數 + SD2） |
+| `ans_time_domain` | 時域版自律平衡 = `sns_z − pns_z` |
+| `stress_baevsky` | √(Baevsky 壓力指數)，靜息常態約 7~12 |
+| `confidence_by_beats` | 依拍數 + SQI 判定的可信度（上面的 `confidence` 是依 SNR） |
 
 > ⚠️ 這些 z-score 沒有用 Kubios 的常模資料庫校準，用的是文獻上健康成年人的
 > 參考值。**方向可信，絕對值不會與 Kubios 對齊。**
