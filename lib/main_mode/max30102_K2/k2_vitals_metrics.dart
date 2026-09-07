@@ -458,6 +458,35 @@ class Max30102VitalsMetrics {
   static const double snrGoodDb = 6.0;
   static const double snrRoughDb = 1.0;
 
+  // ── SNR 的頻帶定義 —— **必須與門檻同源** ────────────────────────
+  //
+  // ⚠️ 先前只搬了門檻常數(6.0 / 1.0)卻沿用自己的頻帶定義,結果是
+  //    「拿他們的尺、用自己的刻度」。實測 8 份真機快照,我們一律偏低
+  //    0.35 ~ 5.10 dB,其中兩份因此被降級(good → rough):
+  //
+  //      快照            心率   舊定義            他們的定義
+  //      08-26 10:39     69    4.46 dB rough     8.49 dB good
+  //      08-13 11:52     71    3.73 dB rough     7.79 dB good
+  //      08-17 11:10     87    7.19 dB good     12.28 dB good   (差 5.10)
+  //
+  //    心率越高差越大 —— f0 越高脈搏能量在頻譜上散得越開,窄窗漏掉的越多。
+  //
+  // 舊值(**已停用**,保留供回溯):
+  //      基頻半寬 0.1 Hz / 諧波半寬 0.2 Hz / 雜訊帶 0.5 ~ 5.0 Hz
+  //   兩處差異都往同一個方向壓:訊號窗窄一半(分子小)+ 多算 1 Hz 雜訊
+  //   (分母大),所以我們的 dB 系統性偏低。
+  //
+  // 現值對應 aquivio-vitals core.py:50-51:
+  //      SNR_BAND_LO_HZ, SNR_BAND_HI_HZ = 0.5, 4.0
+  //      SNR_PEAK_HALFWIDTH_HZ = 0.2
+  //
+  // 他們把兩個遮罩都限制在同一段 0.5~4.0 Hz 支撐區間,理由寫在原始碼:
+  // 心率 > 120 bpm 時二次諧波會超過 4 Hz,若「不算訊號又不算雜訊」,
+  // 比值就會被系統性拉高。我們照抄這個處理。
+  static const double snrBandLoHz = 0.5;
+  static const double snrBandHiHz = 4.0;
+  static const double snrPeakHalfwidthHz = 0.2;
+
   static String? confidenceFromSnr(double? snrDb) {
     if (snrDb == null) return null;
     if (snrDb >= snrGoodDb) return 'good';
@@ -478,6 +507,27 @@ class Max30102VitalsMetrics {
   ///   · [settling] 沉澱期 —— 手指剛放上,數字還沒穩,不該用。
   ///
   /// 拍數不足 9(核心根本不出 HRV)或沉澱期 → 回 null。
+  /// 拍數門檻。
+  ///
+  /// ⚠️ **門檻必須在自己的視窗上限內可達。** 舊值 `good ≥ 25` 沒有回頭驗證
+  ///    這件事:我們的視窗最長 30 秒(實際跨度約 28 秒),可達拍數是
+  ///    `28 × bpm / 60`,所以 25 拍需要 **心率 ≥ 54 bpm** ——
+  ///    低於這個數的人(運動員、深慢呼吸時)**永遠拿不到 `good`**。
+  ///    實測就出現過 54 bpm 的讀數,正好卡在線上。
+  ///
+  /// 舊值(**已停用**,保留供回溯):`good ≥ 25` / `rough ≥ 15`
+  ///
+  /// 現值把門檻降到 28 秒視窗內對絕大多數人都可達:
+  ///      good  ≥ 20 拍  → 心率 ≥ 43 bpm
+  ///      rough ≥ 13 拍  → 心率 ≥ 28 bpm
+  /// 20 拍仍落在超短時 HRV 的文獻驗證範圍內(RMSSD 在 10~30 秒都驗過),
+  /// 不是放寬標準,是修正一個訂了卻達不到的數字。
+  ///
+  /// 下限維持 [Max30102HrvCalculator.minBeatsForHrv](9 拍)—— 那是核心的
+  /// HRV 暖機門檻,有統計依據,不該在這裡另訂。
+  static const int confidenceGoodBeats = 20;
+  static const int confidenceRoughBeats = 13;
+
   static String? confidence({
     required int beats,
     required bool sqiOk,
@@ -485,8 +535,8 @@ class Max30102VitalsMetrics {
   }) {
     if (settling) return null;
     if (beats < Max30102HrvCalculator.minBeatsForHrv) return null;
-    if (beats >= 25 && sqiOk) return 'good';
-    if (beats >= 15) return 'rough';
+    if (beats >= confidenceGoodBeats && sqiOk) return 'good';
+    if (beats >= confidenceRoughBeats) return 'rough';
     return 'very rough';
   }
 
@@ -534,10 +584,10 @@ class Max30102VitalsMetrics {
     double sig = 0, noise = 0;
     for (int k = 1; k < size ~/ 2; k++) {
       final f = k * binHz;
-      if (f < 0.5 || f > 5.0) continue;
+      if (f < snrBandLoHz || f > snrBandHiHz) continue;
       final p = re[k] * re[k] + im[k] * im[k];
-      final nearF0 = (f - f0).abs() <= 0.1;
-      final nearH2 = (f - 2 * f0).abs() <= 0.2;
+      final nearF0 = (f - f0).abs() <= snrPeakHalfwidthHz;
+      final nearH2 = (f - 2 * f0).abs() <= snrPeakHalfwidthHz;
       if (nearF0 || nearH2) {
         sig += p;
       } else {

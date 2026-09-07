@@ -16,6 +16,9 @@ jobs:
   build-windows:
     name: Build Windows
     runs-on: windows-latest
+    # ⏸ 暫時停用 —— 目前只需要 server 的產物,桌面 App 先不編。
+    #    要恢復把這行 `if: false` 刪掉即可(job 定義完整保留)。
+    if: false
 
     steps:
     - name: Checkout code
@@ -51,6 +54,9 @@ jobs:
   build-linux:
     name: Build Linux
     runs-on: ubuntu-latest
+    # ⏸ 暫時停用 —— 目前只需要 server 的產物,桌面 App 先不編。
+    #    要恢復把這行 `if: false` 刪掉即可(job 定義完整保留)。
+    if: false
 
     steps:
     - name: Checkout code

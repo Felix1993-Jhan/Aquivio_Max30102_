@@ -198,6 +198,35 @@ void main() {
         'very rough',
       );
     });
+
+    test('★ good 的門檻必須在 30 秒視窗內可達 —— 慢心率也要拿得到', () {
+      // 30 秒視窗的實際跨度約 28 秒,可達拍數 = 28 × bpm / 60。
+      // 舊值 25 拍需要 54 bpm,低於此的人永遠拿不到 good(實測遇過 54 bpm)。
+      const spanSec = 28.0;
+      int beatsAt(double bpm) => (spanSec * bpm / 60).floor();
+
+      for (final bpm in [45.0, 50.0, 55.0, 70.0]) {
+        expect(
+          Max30102VitalsMetrics.confidence(
+              beats: beatsAt(bpm), sqiOk: true, settling: false),
+          'good',
+          reason: '$bpm bpm 在 28 秒內收 ${beatsAt(bpm)} 拍,應該拿得到 good',
+        );
+      }
+      // 門檻本身要低於「最慢的合理靜息心率」在滿視窗下的拍數
+      expect(Max30102VitalsMetrics.confidenceGoodBeats,
+          lessThanOrEqualTo(beatsAt(45)),
+          reason: '門檻若高於 45bpm 的可達拍數,那類使用者就被永久排除了');
+    });
+
+    test('視窗太短(10 秒)時降級 —— 那是正確行為,不是 bug', () {
+      // 10 秒 @70bpm 約 11 拍
+      expect(
+        Max30102VitalsMetrics.confidence(
+            beats: 11, sqiOk: true, settling: false),
+        'very rough',
+      );
+    });
   });
 
   group('波形訊噪比 snr_db', () {
