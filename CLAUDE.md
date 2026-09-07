@@ -26,7 +26,8 @@
 
 ```
 bin/
-└── max30102_server.dart                         # ★ 無頭 server 進入點（純 Dart）
+├── max30102_server.dart                         # ★ 無頭 server 進入點（純 Dart）
+└── server_version.dart                          # ★ server 版本號 + 沿革（改版只動這裡）
 lib/
 ├── main.dart                                    # 入口 + 視窗初始化
 ├── main_mode/

@@ -2,6 +2,7 @@
 
 > **Current version `0.0.0.4`** — check which build you have with
 > `./max30102_server --version` or the `version` field in `/health`.
+> The changelog lives in `bin/server_version.dart`.
 
 
 > For the integrating team (React + Koa).

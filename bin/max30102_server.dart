@@ -28,6 +28,9 @@ import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_core.da
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_protocol.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_vitals_metrics.dart';
 
+// 版本號單獨一支檔 —— 改版只動 server_version.dart,那裡也記著沿革。
+import 'server_version.dart';
+
 // ════════════════════════════════════════════════════════════════════════════
 // 常數與小工具
 // ════════════════════════════════════════════════════════════════════════════
@@ -1121,20 +1124,6 @@ class ServerOptions {
     );
   }
 }
-
-/// 服務版本 —— **內部編號**,只用來分辨手上這支執行檔是哪一版。
-///
-/// 之前交出去的執行檔沒有任何版本標示,對方回報問題時得靠 `strings` 去猜
-/// 他手上是不是最新的。所以現在:啟動日誌印一次、`/health` 帶一份、
-/// `--version` 直接問得到。
-///
-/// 沿革:
-///   0.0.0.1  最初版(心率 / 血氧 / HRV / 波形 / 晶片控制)
-///   0.0.0.2  新增 `strapi` 區塊
-///   0.0.0.3  `strapi` 區塊的公式、單位與 confidence 對齊 aquivio-vitals
-///   0.0.0.4  SNR 頻帶定義補齊(snr_db 數值變動);兩套判讀加上
-///            `_video` / `_max30102` 後綴,分清楚每個數字照誰的標準算
-const String kServerVersion = '0.0.0.4';
 
 const String _usage = '''
 max30102_server v$kServerVersion — MAX30102 K2 無頭伺服器 / headless vitals service

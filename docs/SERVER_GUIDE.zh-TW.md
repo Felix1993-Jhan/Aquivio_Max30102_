@@ -1,6 +1,7 @@
 # MAX30102 量測服務 — 使用說明
 
 > **目前版本 `0.0.0.4`** — 用 `./max30102_server --version` 或 `/health` 的 `version` 欄位確認手上是哪一版。
+> 版本沿革記在 `bin/server_version.dart`。
 
 
 > 這份文件是給**串接方（React + Koa）**看的。
