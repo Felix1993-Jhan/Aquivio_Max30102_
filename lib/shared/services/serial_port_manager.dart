@@ -123,6 +123,25 @@ class SerialPortManager with ArduinoConnectionMixin {
   /// 是否正在等待心跳回應
   bool _waitingForHeartbeat = false;
 
+  /// PING 輪流打的站號(Header3)。主板與擴充板**二選一在線**,而送出去之前
+  /// 無從得知對面是哪一塊 —— 收的那一側兩個都認,送的那一側以前卻寫死 0x30,
+  /// 結果擴充板在線時心跳必定連續落空、三次之後誤報「連線已斷開」。
+  ///
+  /// 交叉輪替解掉這件事,而且**不會誤判斷線**:擴充板在線時 0x30 那次落空
+  /// (計數 +1)、下一次 0x31 收到回應就歸零,計數在 0↔1 之間擺盪,永遠到不了
+  /// [_heartbeatFailThreshold]。真的兩塊都沒回應才會一路累加到觸發。
+  static const List<int> _pingBoards = [0x30, 0x31];
+
+  /// 下一次 PING 要打 [_pingBoards] 的哪一個。
+  int _pingBoardIdx = 0;
+
+  /// 取下一個要打的站號並前進索引。
+  int _nextPingBoard() {
+    final b = _pingBoards[_pingBoardIdx % _pingBoards.length];
+    _pingBoardIdx++;
+    return b;
+  }
+
   /// 上次活動時間（任何指令發送或接收都會更新）
   DateTime _lastActivityTime = DateTime.now();
 
@@ -207,17 +226,24 @@ class SerialPortManager with ArduinoConnectionMixin {
     // 3. 重設韌體版本通知器（用於驗證是否收到回應）
     firmwareVersionNotifier.value = null;
 
-    // 4. 發送韌體版本查詢指令 (0x05) 作為 PING
-    final pingCommand = _buildStm32PingCommand();
-    try {
-      _port!.write(Uint8List.fromList(pingCommand));
-    } catch (e) {
-      close();
-      return Stm32ConnectResult.portError;
-    }
-
-    // 5. 輪詢等待回應（最多 2 秒，每次 200ms = 10 次）
+    // 4~5. 發送韌體版本查詢指令 (0x05) 作為 PING,輪詢等待回應
+    //      (最多 2 秒,每次 200ms = 10 次)
+    //
+    // ⚠️ 站號每輪輪替(0x30 ↔ 0x31)。這裡與心跳有**同一個**問題:兩塊板二選一
+    //    在線,而第一支 PING 送出去之前無從得知對面是哪一塊。以前寫死 0x30,
+    //    擴充板在線時就是 2 秒全部落空 → 回 failed,但串口其實是好的。
+    //    只修心跳不修這裡的話,自動連線仍然連不上擴充板。
+    _pingBoardIdx = 0;
     for (int i = 0; i < 10; i++) {
+      try {
+        _port!.write(Uint8List.fromList(
+          _buildStm32PingCommand(_nextPingBoard()),
+        ));
+      } catch (e) {
+        close();
+        return Stm32ConnectResult.portError;
+      }
+
       await Future.delayed(const Duration(milliseconds: 200));
 
       // 檢查是否收到韌體版本回應
@@ -414,7 +440,13 @@ class SerialPortManager with ArduinoConnectionMixin {
     if (_waitingForHeartbeat) {
       _heartbeatFailCount++;
       if (_heartbeatFailCount >= _heartbeatFailThreshold) {
-        _log('⚠️ 心跳失敗 $_heartbeatFailCount 次，連接可能已斷開或連接錯誤');
+        // 站號要印出來 —— 心跳送出本身不寫日誌(避免每秒洗版),所以失敗時若不
+        // 講清楚打了哪些站號,日誌看起來就是「剛連上就莫名其妙斷了」,很難查。
+        final tried = _pingBoards
+            .map((b) => '0x${b.toRadixString(16).toUpperCase()}')
+            .join(' / ');
+        _log('⚠️ 心跳失敗 $_heartbeatFailCount 次(站號 $tried 輪流試過都沒回應)，'
+            '連接可能已斷開或連接錯誤');
         heartbeatOkNotifier.value = false;
         onHeartbeatFailed?.call();
         stopHeartbeat();
@@ -430,8 +462,9 @@ class SerialPortManager with ArduinoConnectionMixin {
         _port!.write(data);
       } else {
         // STM32: 發送 PING 指令（0x05 查詢韌體版本）
-        // 指令格式: 40 71 30 05 00 00 00 00 [CS]
-        final pingCommand = _buildStm32PingCommand();
+        // 指令格式: 40 71 [board] 05 00 00 00 00 [CS]
+        // 站號每次輪替(0x30 ↔ 0x31),理由見 _pingBoards。
+        final pingCommand = _buildStm32PingCommand(_nextPingBoard());
         _port!.write(Uint8List.fromList(pingCommand));
       }
       _waitingForHeartbeat = true;
@@ -447,9 +480,13 @@ class SerialPortManager with ArduinoConnectionMixin {
   }
 
   /// 建構 STM32 PING 指令（查詢韌體版本）
-  /// 格式: Header(40 71 30) + 命令(05) + Data(00 00 00 00) + CS
-  List<int> _buildStm32PingCommand() {
-    const header = [0x40, 0x71, 0x30];
+  /// 格式: Header(40 71 [board]) + 命令(05) + Data(00 00 00 00) + CS
+  ///
+  /// [board] = 站號(Header3),`0x30` 主板 / `0x31` 擴充板。**不要再寫死** ——
+  /// 兩塊板二選一在線,寫死哪一邊都會在另一邊在線時無聲落空(見 [_pingBoards])。
+  /// CS 由整包現算,換站號自動得到對的 CS。
+  List<int> _buildStm32PingCommand(int board) {
+    final header = [0x40, 0x71, board];
     const payload = [0x05, 0x00, 0x00, 0x00, 0x00];
     final command = [...header, ...payload];
 
