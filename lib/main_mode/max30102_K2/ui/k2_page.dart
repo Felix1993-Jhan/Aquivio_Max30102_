@@ -485,6 +485,19 @@ class _K2PageState extends State<K2Page> {
                 color: qualityKnown ? null : Colors.grey.shade400),
             stat('LF', spec == null ? '—' : '${spec.lf.toStringAsFixed(0)} ms²'),
             stat('HF', spec == null ? '—' : '${spec.hf.toStringAsFixed(0)} ms²'),
+            // 通道方向 —— 存這個是為了事後還答得出「這筆是哪種板子量的」。
+            // 'swapped' 代表當時那片把兩顆 LED 裝反了(仿製品的指紋)。
+            stat(
+                tr('k2_orient'),
+                switch (s.channelOrient) {
+                  'normal' => tr('k2_orient_normal'),
+                  'swapped' => tr('k2_orient_swapped'),
+                  'unknown' => tr('k2_orient_unknown'),
+                  _ => '—', // 舊快照沒有這個欄位
+                },
+                color: s.channelOrient == 'swapped'
+                    ? Colors.orange.shade800
+                    : (s.channelOrient == null ? Colors.grey.shade400 : null)),
           ]),
           if (!qualityKnown)
             Padding(
@@ -751,6 +764,8 @@ class _K2PageState extends State<K2Page> {
           _flag(tr('k2_finger'), c?.fingerPresent ?? false),
           const SizedBox(width: 14),
           _flag('SQI', c?.sqiOk ?? false),
+          const SizedBox(width: 14),
+          _orientFlag(c?.orient ?? K2ChannelOrient.unknown),
           const SizedBox(width: 14),
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('spike',
@@ -1803,6 +1818,55 @@ class _K2PageState extends State<K2Page> {
             const SizedBox(width: 3),
             Text(unit, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
           ],
+        ),
+      ],
+    );
+  }
+
+  /// 通道方向指示 —— **除錯用，這是這個 App 存在的理由之一**。
+  ///
+  /// 有些 MAX30102 模組把兩顆 LED 晶粒裝反(實測 8 片中 7 片如此),核心會
+  /// 每次量測自己判定一次。沒有這個指示的話,只能從「波形晚兩秒出現」、
+  /// 「血氧一開始是空的」這些間接現象去猜,插上板子看不出答案。
+  ///
+  /// 三個狀態刻意用不同顏色:
+  ///   · 判定中(灰)—— 此時沒有波形、沒有血氧,心率照給
+  ///   · 正常(綠)  —— 符合 datasheet
+  ///   · 已轉正(橘)—— 這片裝反了,**核心已經把輸出轉正**,不是錯誤狀態,
+  ///                  但值得注意,所以用橘色而不是綠色
+  Widget _orientFlag(K2ChannelOrient o) {
+    final (String key, Color bg, Color fg) = switch (o) {
+      K2ChannelOrient.unknown => (
+          'k2_orient_unknown',
+          Colors.grey.shade300,
+          Colors.grey.shade600
+        ),
+      K2ChannelOrient.normal => (
+          'k2_orient_normal',
+          Colors.green.shade100,
+          Colors.green.shade800
+        ),
+      K2ChannelOrient.swapped => (
+          'k2_orient_swapped',
+          Colors.orange.shade100,
+          Colors.orange.shade900
+        ),
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(tr('k2_orient'),
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(tr(key),
+              style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.bold, color: fg)),
         ),
       ],
     );

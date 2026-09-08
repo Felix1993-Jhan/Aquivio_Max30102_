@@ -1,6 +1,6 @@
 # MAX30102 Vitals Service — Integration Guide
 
-> **Current version `0.0.0.5`** — check which build you have with
+> **Current version `0.0.0.6`** — check which build you have with
 > `./max30102_server --version` or the `version` field in `/health`.
 > The changelog lives in `bin/server_version.dart`.
 
@@ -296,7 +296,7 @@ curl http://localhost:8770/health
 ```json
 {
   "ok": true,
-  "version": "0.0.0.5",
+  "version": "0.0.0.6",
   "mode": "serial",
   "uptimeMs": 60123,
   "totalSamples": 6000,
@@ -1133,3 +1133,97 @@ sanity check.
 
 > Note: SpO₂ from synthetic data is a fixed value (the red/IR amplitude ratio is
 > hard-coded), so it carries no physiological meaning. It only confirms data is flowing.
+
+---
+
+## ⚠️ Known hardware issue: some MAX30102 modules have the two LEDs swapped
+
+> Confirmed 2026-09-08. **This section is for purchasing and field debugging** —
+> the service already handles it automatically.
+
+### Symptom
+
+SpO₂ is always `null`, while heart rate, waveform and HRV are all fine.
+
+### Cause
+
+The MAX30102 datasheet is unambiguous: `0x0C` = LED1 = **RED**, `0x0D` = LED2 =
+**IR**, and each 6-byte FIFO sample is **RED first, IR second**. Our decoder follows
+the spec exactly.
+
+But of the 8 modules we tested, **7 have the two LED dies fitted the wrong way round** —
+the two channels come out swapped. (The whole batch of cheap ones; the expensive one
+from an authorised-distributor is correct.)
+
+With the channels mislabelled, the SpO₂ R-ratio is inverted and yields a
+physiologically impossible value (measured R = 2.35 → SpO₂ −83%), which the valid-range
+check rejects → `spo2` returns `null`.
+
+### 30-second identification, no equipment
+
+```
+1. 40 71 31 09 01 0D 00 00 07     turn off 0x0D (the datasheet's IR LED)
+2. Look at the sensor with your eyes
+3. 40 71 31 09 04 00 00 00 11     RE-INIT to restore
+```
+
+| What you see at step 2 | Verdict |
+|---|---|
+| **The red glow disappears** | **This module is swapped** — `0x0D` actually drives the red die |
+| The red glow remains | Correct, matches the datasheet |
+
+660nm red is plainly visible to the eye; 880nm IR is invisible (a phone camera shows
+it as a faint purple-white glow).
+
+### ⚠️ Raw magnitude tells you nothing
+
+Which channel reads *higher* carries **no identifying information at all**. Measured:
+
+| Module | Slot 1 | Slot 2 | Higher | Which is really IR |
+|---|---|---|---|---|
+| Correct one | 80,411 | 68,567 | Slot 1 | **Slot 2** |
+| Swapped one | 142,750 | 133,603 | Slot 1 | **Slot 1** |
+
+**Same ordering, opposite truth.** The DC level is set by LED brightness, optical
+coupling and photodiode responsivity — all hardware properties that vary per unit.
+The only signal is in the **AC/DC ratio**, because dividing by DC cancels exactly
+those hardware differences out.
+
+### What the service does about it
+
+The core **determines the orientation itself on every measurement**
+(`K2ChannelOrient`), using that AC/DC ratio:
+
+```
+R < 0.9    -> current assumption is correct
+R > 1.3    -> current assumption is inverted
+0.9 .. 1.3 -> cannot tell -> no verdict, and no SpO2 (heart rate still reported)
+```
+
+**No waveform samples are emitted until the orientation is settled** — the same
+principle as the settling period: better two seconds late than mislabelled. So the
+first waveform sample arrives about 2 seconds later than in `0.0.0.5`.
+
+The verdict is exposed in `/vitals` as `channelOrient`:
+
+| Value | Meaning |
+|---|---|
+| `unknown` | Still determining (no waveform, no SpO₂ yet; heart rate is unaffected) |
+| `normal` | Matches the datasheet |
+| `swapped` | This module is wired backwards — **the service has already corrected the output**, so the `ir` / `red` you receive are the actual light sources |
+
+The orientation belongs to *one measurement*: it resets when the finger leaves and is
+re-determined for the next person. Swapping modules mid-deployment is therefore handled
+automatically, with no configuration.
+
+### Purchasing note
+
+A complete module priced below the cost of the genuine chip alone cannot contain a
+genuine chip. If SpO₂ is only for internal testing, the visual check above is enough.
+If SpO₂ is going to be shown to customers, buy through an authorised distributor —
+**a wavelength error is a silent one**: the numbers look normal but are systematically
+wrong, and you will not notice until you compare against a real pulse oximeter.
+
+(So far the corrected readings agree with the good module to within 0.4%, showing no
+sign of a wavelength problem — but that was measured near 100% SpO₂, where the curve is
+flat, so it is not proof.)

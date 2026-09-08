@@ -38,9 +38,36 @@ import 'k2_setting_limits.dart';
 import 'k2_signal.dart';
 
 /// 一次計算的產物(全部是「原始值」,未做任何顯示平滑)。
+/// FIFO 兩個資料槽與實際光源的對應關係。
+///
+/// datasheet 規定:`0x0C` = LED1 = **紅光**、FIFO 每組 6 bytes 是 RED 在前 IR 在後。
+/// 我們的解碼完全照規格 —— 但市面上有模組**把兩顆 LED 晶粒裝反**,那種板子送出來
+/// 的兩路就是對調的(專案文件「已知硬體問題」有完整的查證過程與目視檢驗法)。
+///
+/// 所以核心不預設相信標籤,而是每次量測**自己判定一次**(見
+/// [Max30102Config.orientRatioNormal])。判定完成前不輸出樣本 —— 理由與沉澱期
+/// 相同:寧可晚兩秒,也不要送出貼錯標籤的資料。
+enum K2ChannelOrient {
+  /// 還在判定中。此時**不輸出樣本、不給血氧**(心率照給)。
+  unknown,
+
+  /// 符合 datasheet:第 1 槽 = 紅光、第 2 槽 = 紅外。
+  normal,
+
+  /// 與 datasheet 相反:第 1 槽 = 紅外、第 2 槽 = 紅光。模組把晶粒裝反了。
+  swapped,
+}
+
 class K2Compute {
   /// 是否偵測到手指(IR 平均 ≥ fingerThreshold)。
   final bool fingerPresent;
+
+  /// 這次量測判定出來的通道方向。
+  ///
+  /// [K2ChannelOrient.swapped] 代表手上這片模組把兩顆 LED 裝反了 ——
+  /// 核心**已經在輸出裡把它轉正**(`newIr` / `newRed` 都是實際的光源),
+  /// 這個欄位只是讓上層知道發生過什麼、可以記錄或警示。
+  final K2ChannelOrient orient;
 
   /// 這一輪訊號品質是否過關(cv + spike)。false → 這輪的谷不進 NN 序列。
   final bool sqiOk;
@@ -102,6 +129,7 @@ class K2Compute {
     required this.spikeMax,
     required this.troughAbs,
     this.settling = false,
+    this.orient = K2ChannelOrient.unknown,
   });
 
   /// 沒手指:所有數值 null,緩衝已被清空(見 [Max30102K2.feedSamples])。
@@ -109,6 +137,7 @@ class K2Compute {
       : fingerPresent = false,
         sqiOk = false,
         settling = false,
+        orient = K2ChannelOrient.unknown,
         bpm = null,
         spo2 = null,
         hrv = null,
@@ -122,6 +151,7 @@ class K2Compute {
       : fingerPresent = true,
         sqiOk = false,
         settling = true,
+        orient = K2ChannelOrient.unknown,
         bpm = null,
         spo2 = null,
         hrv = null,
@@ -226,6 +256,38 @@ class Max30102K2 {
 
   /// 連續幾批低於手指門檻(去彈跳用)。有手指的一批 → 歸零。
   int _noFingerBatches = 0;
+
+  // ── 通道方向判定(見 [K2ChannelOrient])──────────────────────────────
+  //
+  // ⚠️ 這三個是**這一次量測**的狀態,不是設備常數。手指離開就全部清掉,
+  //    下一位重新判定 —— 這樣換板子、換模組都自動處理,不必人工設定。
+  //    (免洗模式下與 `_totalSamples = 0` 在同一個區塊清。)
+
+  /// 目前判定出來的方向。[K2ChannelOrient.unknown] = 還在判,**此時不輸出樣本**。
+  K2ChannelOrient _orient = K2ChannelOrient.unknown;
+
+  /// 最近一輪投給哪個方向(連續票用)。null = 上一輪落在模糊帶,沒投。
+  K2ChannelOrient? _orientVote;
+
+  /// 目前這個方向已經連續拿到幾票。湊滿 `orientVotesToLatch` 就鎖定。
+  int _orientVotes = 0;
+
+  /// 方向是**投票投出來的**(true),還是逾時退回預設(false)。
+  ///
+  /// 逾時那條路只是為了讓波形出得來,方向其實沒被驗證過 —— 所以
+  /// **血氧只在 true 時才輸出**。用獨立旗標而不是「票數是不是 0」來記,
+  /// 是因為後者要靠讀者自己推論,改到一半很容易失去意義。
+  bool _orientByVote = false;
+
+  /// 沉澱完成時的絕對位置 —— 逾時保護的起算點。-1 = 還沒沉澱完。
+  int _settledAtAbs = -1;
+
+  /// 判定期間累積、還沒吐出去的樣本數。鎖定的那一刻一次全部吐出
+  /// (與沉澱期「200 筆一次吐」是同一個做法)。
+  int _pendingOut = 0;
+
+  /// 這次量測判定出來的通道方向(唯讀)。
+  K2ChannelOrient get channelOrient => _orient;
 
   /// 谷去重容差(樣本):120ms @100Hz。視窗滑動時同一顆谷可能位移 1~2 樣本。
   static const int _dedupTol = 12;
@@ -338,6 +400,7 @@ class Max30102K2 {
         _newSinceCompute = 0;
         _settled = false;
         _sinceFingerOn = 0;
+        _clearOrient(); // 方向是「這一次量測」的狀態,下一位重新判定
         // RR 池一起清 —— 不是只 markDiscontinuity。
         // 理由:抬手指的「下降斜坡」在跨過門檻之前就已經進緩衝並被算過了,
         // 那批假拍會留在池裡當 ±40% 誤拍閘門的中位基準。下次手指回來時,
@@ -423,24 +486,14 @@ class Max30102K2 {
       );
     }
 
-    // ── ③ 決定這次要吐哪些樣本 ────────────────────────────────────────
-    //    剛沉澱完 → 把整個沉澱期(≈settleSamples 筆)一次吐出;之後照常每批 n 筆。
-    final List<int> outIr, outRed;
     if (!_settled) {
       _settled = true;
-      outIr = List<int>.of(_ir);
-      outRed = List<int>.of(_red);
-    } else {
-      outIr = ir.sublist(0, n);
-      outRed = red.sublist(0, n);
+      _settledAtAbs = _totalSamples; // 逾時保護的起算點
     }
-    final firstAbs = _totalSamples - outIr.length;
+    _pendingOut += n;
 
-    // 截尾平滑:在緩衝上算(才有正確的前後文),取尾端這批新的
-    final newIrTrim = _trimTail(_ir, outIr.length);
-    final newRedTrim = _trimTail(_red, outRed.length);
-
-    // 湊滿才算
+    // 湊滿才算。⚠️ 必須在決定輸出**之前** —— 這一輪的計算可能讓方向鎖定,
+    //    鎖定的話這一輪就要把累積的樣本一次吐出去,晚一輪就多壓一秒。
     K2Compute? computed;
     if (_newSinceCompute >= config.computeEvery) {
       _newSinceCompute = 0;
@@ -448,15 +501,90 @@ class Max30102K2 {
       _last = computed;
     }
 
+    // ── ③ 方向未定 → 不輸出樣本 ──────────────────────────────────────
+    //    理由與沉澱期完全相同:手上有樣本,但還不知道該叫它 IR 還是 RED。
+    //    貼錯標籤送出去,跟送出沉澱期的爬升資料是同一類錯誤 ——
+    //    **寧可晚兩秒,也不要送出會誤導的資料。**
+    //    (逾時保護在 _voteOrient() 裡,超過就退回預設方向放行。)
+    if (_orient == K2ChannelOrient.unknown) {
+      return K2FeedResult(
+        firstAbs: _totalSamples - n,
+        newIr: const [],
+        newRed: const [],
+        newIrTrim: const [],
+        newRedTrim: const [],
+        computed: computed,
+        didReset: didReset,
+      );
+    }
+
+    // ── ④ 決定這次要吐哪些樣本 ────────────────────────────────────────
+    //    方向剛鎖定 → 把壓著的那段(沉澱期 + 判定期)一次吐出;之後照常每批 n 筆。
+    //    `_pendingOut` 可能超過緩衝長度(緩衝有上限),取小的那個。
+    final int outN = _pendingOut > _ir.length ? _ir.length : _pendingOut;
+    _pendingOut = 0;
+    final outRed = _red.sublist(_red.length - outN); // 前 3 bytes 那一槽
+    final outIr = _ir.sublist(_ir.length - outN); // 後 3 bytes 那一槽
+    final firstAbs = _totalSamples - outN;
+
+    // 截尾平滑:在緩衝上算(才有正確的前後文),取尾端這批新的
+    final trimRed = _trimTail(_red, outN);
+    final trimIr = _trimTail(_ir, outN);
+
+    // ⚠️ **方向只在這裡套用到輸出** —— 緩衝永遠存線上收到的原始槽位,不做交換。
+    //    這樣下游(波形圖、快照、/waveform、WS /stream 的 wave)全部自動拿到
+    //    實際的光源,不必逐一分流,也不會有「某處交換了、某處忘了」的漂移。
+    final swapped = _orient == K2ChannelOrient.swapped;
     return K2FeedResult(
       firstAbs: firstAbs,
-      newIr: outIr,
-      newRed: outRed,
-      newIrTrim: newIrTrim,
-      newRedTrim: newRedTrim,
+      newIr: swapped ? outRed : outIr,
+      newRed: swapped ? outIr : outRed,
+      newIrTrim: swapped ? trimRed : trimIr,
+      newRedTrim: swapped ? trimIr : trimRed,
       computed: computed,
       didReset: didReset,
     );
+  }
+
+  /// 依這一輪的 R 值投票,湊滿票數就鎖定方向;逾時則退回 datasheet 預設。
+  ///
+  /// [ratio] = 演算層算出來的 R(`(AC/DC)red ÷ (AC/DC)ir`)。0 = 這輪算不出。
+  ///
+  /// 投票要**相對於當下假設**解讀:目前假設「正常」而 R 偏大 → 投「對調」;
+  /// 目前已經是「對調」而 R 偏大 → 表示又反了 → 投回「正常」。
+  void _voteOrient(double ratio) {
+    if (_orient != K2ChannelOrient.unknown) return; // 鎖定後不再改
+    final assumed = _orientVote ?? K2ChannelOrient.normal;
+
+    if (ratio > 0) {
+      K2ChannelOrient? v;
+      if (ratio < Max30102Config.orientRatioNormal) {
+        v = assumed; // 目前假設是對的
+      } else if (ratio > Max30102Config.orientRatioSwapped) {
+        v = assumed == K2ChannelOrient.normal
+            ? K2ChannelOrient.swapped
+            : K2ChannelOrient.normal;
+      }
+      // v == null → 落在模糊帶(R 接近 1,分不出「真缺氧」與「接反」)→ 不投票
+      if (v != null) {
+        _orientVotes = (v == _orientVote) ? _orientVotes + 1 : 1;
+        _orientVote = v;
+        if (_orientVotes >= Max30102Config.orientVotesToLatch) {
+          _orient = v;
+          _orientByVote = true;
+          return;
+        }
+      }
+    }
+
+    // 逾時逃生口:訊號差到湊不出 3 顆谷、或 R 一直落在模糊帶時,
+    // 不能讓波形永遠出不來。退回 datasheet 預設方向放行樣本,
+    // 但血氧仍然不給(見 _compute:方向不是判定出來的就不輸出血氧)。
+    if (_settledAtAbs >= 0 &&
+        _totalSamples - _settledAtAbs >= Max30102Config.orientTimeoutSamples) {
+      _orient = K2ChannelOrient.normal;
+      _orientByVote = false;
+    }
   }
 
   /// 清空重來(開始一段新的檢驗前呼叫)。
@@ -470,7 +598,22 @@ class Max30102K2 {
     _sinceFingerOn = 0;
     _noFingerBatches = 0;
     _last = null;
+    _clearOrient();
     _beats.reset();
+  }
+
+  /// 把通道方向的判定狀態全部歸零 —— 下一次量測從頭判。
+  ///
+  /// ⚠️ 每個清除點都要呼叫它,漏掉一個就會發生「上一位的判定結果套用到
+  ///    下一位」。方向本來就是**這一次量測**的屬性,不是設備常數 ——
+  ///    中途換模組、或同一台機器接不同板子,都靠這裡歸零才會自動處理。
+  void _clearOrient() {
+    _orient = K2ChannelOrient.unknown;
+    _orientVote = null;
+    _orientVotes = 0;
+    _orientByVote = false;
+    _settledAtAbs = -1;
+    _pendingOut = 0;
   }
 
   /// 手指離開 / 訊號中斷時呼叫:只斷「RR 連續性」,不清歷史。
@@ -524,8 +667,22 @@ class Max30102K2 {
         troughAbs: [],
       );
     }
-    final ir = _ir.sublist(_ir.length - take);
-    final red = _red.sublist(_red.length - take);
+    // 兩個緩衝存的是**線上收到的原始槽位**,不是「已知的 IR / RED」:
+    //   _red = FIFO 每組的前 3 bytes(datasheet 說那是紅光)
+    //   _ir  = 後 3 bytes(datasheet 說那是紅外)
+    // 名字沿用歷史,但**方向未經判定之前那只是 datasheet 的宣稱**,不是事實。
+    final bufRed = _red.sublist(_red.length - take);
+    final bufIr = _ir.sublist(_ir.length - take);
+
+    // ⚠️ **方向只在這裡套用到計算** —— 判定期間先照 datasheet 假設跑一次,
+    //    看算出來的 R 再修正(見 _voteOrient)。第一次猜錯不影響心率:
+    //    兩路的脈搏是同一個(實測相關 0.995),谷照樣找得到。
+    final assumed = _orient != K2ChannelOrient.unknown
+        ? _orient
+        : (_orientVote ?? K2ChannelOrient.normal);
+    final swapped = assumed == K2ChannelOrient.swapped;
+    final ir = swapped ? bufRed : bufIr;
+    final red = swapped ? bufIr : bufRed;
 
     final r = Max30102Algorithm.compute(
       red: red,
@@ -542,6 +699,10 @@ class Max30102K2 {
       promRatio: config.promRatio,
       spo2Linear: Max30102Config.spo2Linear,
     );
+
+    // 拿這一輪的 R 去投票。位置要在算 spo2 **之前** —— 這一輪若剛好湊滿票數,
+    // 血氧就能立刻輸出,不用再等下一輪。
+    _voteOrient(r.spo2Ratio);
 
     // 谷(視窗內索引)→ 絕對位置 → 餵進唯一 NN 序列。
     //   · 丟掉最右一顆(B 右緣過濾):視窗邊緣的谷突出度未穩,延遲一拍再收。
@@ -597,7 +758,12 @@ class Max30102K2 {
     // ⚠️ 待決定:這裡**沒有**看 `r.spo2Valid`(拍可信 + 值落在 70~100)。
     //    也就是拍不可信、或值超出生理範圍時照樣輸出。要收緊就改成
     //    `r.spo2Valid ? r.spo2 : null` —— 但那會讓血氧變成更常 null,先不動。
-    final spo2 = r.spo2 > 0 ? r.spo2 : null;
+    // ⚠️ 血氧多一道閘門:**方向必須是投票判定出來的**。
+    //    理由:R 本身就是「紅光脈動 ÷ 紅外脈動」,兩路標反了它就是倒數,
+    //    算出來的血氧會是生理上不可能的值(實測對調板 R=2.35 → 血氧 −83%)。
+    //    方向沒確定就沒有可信的血氧,寧可不給。心率不受影響,照常輸出。
+    final spo2 =
+        (r.spo2 > 0 && _orientByVote) ? r.spo2 : null;
 
     // 乾淨 NN 序列(帶起谷/終谷絕對位置)—— rr / rrPoints / troughAbs 全部由它導出,
     // 保證是同一批:標點、數值、HRV 三者永遠一致。
@@ -613,6 +779,7 @@ class Max30102K2 {
     return K2Compute(
       fingerPresent: r.fingerPresent,
       sqiOk: r.sqiOk,
+      orient: _orient,
       bpm: _beats.hrRecent(6),
       spo2: spo2,
       hrv: _beats.hrvStats(),

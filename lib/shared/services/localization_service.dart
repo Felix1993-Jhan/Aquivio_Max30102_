@@ -578,6 +578,11 @@ class LocalizationService {
       'k2_spo2_new': '血氧(新逐拍)',
       'k2_finger': '手指',
       'k2_settling': '沉澱中… 等 baseline 成形\n空轉 {dead}s + 累積 {settle}s',
+      // 通道方向(RED/IR 誰是誰)—— 有模組把兩顆 LED 裝反,核心會自己判定
+      'k2_orient': '通道',
+      'k2_orient_unknown': '判定中',
+      'k2_orient_normal': '正常',
+      'k2_orient_swapped': '已轉正',
 
       // HRV 面板
       'k2_hrv_short': 'HRV 心率變異(最近 {sec}s)',
@@ -1221,6 +1226,12 @@ class LocalizationService {
       'k2_finger': 'Finger',
       'k2_settling':
           'Settling… waiting for baseline\nidle {dead}s + collect {settle}s',
+      // Channel orientation (which slot is RED / IR) — some modules have the two
+      // LED dies fitted backwards; the core works it out on its own.
+      'k2_orient': 'Channel',
+      'k2_orient_unknown': 'checking',
+      'k2_orient_normal': 'normal',
+      'k2_orient_swapped': 'corrected',
 
       // HRV panel
       'k2_hrv_short': 'HRV (last {sec}s)',

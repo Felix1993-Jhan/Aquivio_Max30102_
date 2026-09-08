@@ -207,6 +207,10 @@ class K2Engine {
       'fingerPresent': c?.fingerPresent ?? false,
       'sqiOk': c?.sqiOk ?? false,
       'settling': c?.settling ?? false,
+      // 通道方向的判定結果(v0.0.0.6 起)。'unknown' = 還在判,此時波形與血氧
+      // 都還不會出來(心率照給)。'swapped' = 手上這片模組把兩顆 LED 裝反了,
+      // **輸出已經由核心轉正**,這個欄位只是讓上層知道、可以記錄或警示。
+      'channelOrient': (c?.orient ?? K2ChannelOrient.unknown).name,
       'bpm': c?.bpm,
       'spo2': c?.spo2,
       'hrv': hv == null

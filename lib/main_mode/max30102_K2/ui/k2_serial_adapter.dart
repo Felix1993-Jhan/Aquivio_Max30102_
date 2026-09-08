@@ -394,6 +394,10 @@ class K2SerialAdapter extends ChangeNotifier {
       // 只能存當下的狀態。舊快照沒有,讀取時會是 null(顯示「—」)。
       'sqiOk': c?.sqiOk ?? false,
       'settling': c?.settling ?? false,
+      // 通道方向 —— `'swapped'` 是**仿製模組的指紋**(把兩顆 LED 晶粒裝反;
+      // 原廠封裝不會這樣,而 PART_ID / REV_ID 都偽造得一模一樣,讀暫存器分不出來)。
+      // 存下來,幾個月後回頭看歷史資料還答得出「這筆是用哪種板子量的」。
+      'channelOrient': (c?.orient ?? K2ChannelOrient.unknown).name,
       if (hv != null)
         'shortHrv': {
           'sdnn': hv.sdnn,

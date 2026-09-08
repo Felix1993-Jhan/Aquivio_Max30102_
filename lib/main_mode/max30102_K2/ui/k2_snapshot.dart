@@ -45,6 +45,19 @@ class K2Snapshot {
   final bool? sqiOk;
   final bool? settling;
 
+  /// 存檔當下判定出來的**通道方向**(`'normal'` / `'swapped'` / `'unknown'`)。
+  ///
+  /// **舊快照沒有這個欄位 → null。**
+  ///
+  /// 為什麼值得存:`'swapped'` 代表當時那片模組把兩顆 LED 晶粒裝反了 ——
+  /// 那是**仿製品的指紋**(原廠封裝不會出這種錯,而且 PART_ID / REV_ID 都偽造得
+  /// 一模一樣,讀暫存器分不出來)。存進快照之後,幾個月後回頭看歷史資料,
+  /// 還答得出「這筆是用原廠 IC 還是外面代工的板子量的」。
+  ///
+  /// 存字串而不是 enum:快照要能被不懂 Dart 的人直接開起來看,
+  /// 而且將來 enum 增減不會讓舊檔解析失敗。
+  final String? channelOrient;
+
   const K2Snapshot({
     required this.path,
     required this.tsMillis,
@@ -59,6 +72,7 @@ class K2Snapshot {
     required this.fingerPresent,
     this.sqiOk,
     this.settling,
+    this.channelOrient,
   });
 
   DateTime get time => DateTime.fromMillisecondsSinceEpoch(tsMillis);
@@ -100,6 +114,7 @@ class K2Snapshot {
       // 變成 false,舊快照就會全部顯示成品質不良)
       sqiOk: j['sqiOk'] as bool?,
       settling: j['settling'] as bool?,
+      channelOrient: j['channelOrient'] as String?,
     );
   }
 }
