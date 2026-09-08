@@ -24,6 +24,7 @@ import '../k2_protocol.dart';
 import '../k2_setting_limits.dart';
 import '../k2_vitals_metrics.dart';
 import 'k2_hrv_chart.dart';
+import 'k2_breathhold_chart.dart';
 import 'k2_lf_experiment.dart';
 import 'k2_serial_adapter.dart';
 import 'k2_snapshot.dart';
@@ -939,7 +940,84 @@ class _K2PageState extends State<K2Page> {
         // 而這一塊的重點就是「一眼看完整個分布」。全寬才排得下兩欄。
         const SizedBox(height: 10),
         _lfExperimentPanelWide(),
+        const SizedBox(height: 10),
+        _breathHoldPanel(),
       ],
+    );
+  }
+
+  /// 憋氣血氧曲線 —— 驗證波長用。
+  ///
+  /// 為什麼要憋氣:血氧的校正曲線綁定波長,仿製模組若用了波長偏掉的 LED,
+  /// 數字會系統性偏移而看起來完全正常。但在 99% 附近曲線很平(靈敏度只有
+  /// 中段的 1/8),兩片板子擠在一起看不出差 —— **要把血氧壓下去才分得出來**。
+  Widget _breathHoldPanel() {
+    final rec = _adapter.breathHold;
+    final c = _adapter.latest;
+    final orientLabel = switch (c?.orient) {
+      K2ChannelOrient.normal => tr('k2_orient_normal'),
+      K2ChannelOrient.swapped => tr('k2_orient_swapped'),
+      _ => '',
+    };
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: AnimatedBuilder(
+        animation: rec,
+        builder: (context, _) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Text(tr('k2_bh_title'),
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 12),
+              // 未開始 → 只能「開始」;錄製中 → 可標記恢復呼吸、可結束
+              if (!rec.active)
+                FilledButton.tonal(
+                  onPressed: () => rec.start(_adapter.core.totalSamples,
+                      orientLabel: orientLabel),
+                  child: Text(tr('k2_bh_start')),
+                )
+              else ...[
+                FilledButton.tonal(
+                  onPressed: rec.resumeT == null
+                      ? () => rec.markResume(_adapter.core.totalSamples)
+                      : null,
+                  child: Text(tr('k2_bh_resume')),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  onPressed: rec.stop,
+                  child: Text(tr('k2_bh_stop')),
+                ),
+              ],
+              const SizedBox(width: 8),
+              TextButton(onPressed: rec.clear, child: Text(tr('k2_bh_clear'))),
+              const Spacer(),
+              Text(tr('k2_bh_hint'),
+                  style: TextStyle(fontSize: 9, color: Colors.grey.shade600)),
+            ]),
+            if (rec.abortReason != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(tr('k2_bh_abort'),
+                    style:
+                        TextStyle(fontSize: 10, color: Colors.orange.shade800)),
+              ),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 180,
+              child: K2BreathHoldChart(
+                  rec: rec, lang: LocalizationService().currentLanguage),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

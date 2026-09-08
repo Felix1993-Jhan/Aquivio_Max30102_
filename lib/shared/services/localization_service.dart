@@ -583,6 +583,22 @@ class LocalizationService {
       'k2_orient_unknown': '判定中',
       'k2_orient_normal': '正常',
       'k2_orient_swapped': '已轉正',
+      // 憋氣血氧曲線(驗證波長用:血氧壓低才分得出兩片板子的差)
+      'k2_bh_title': '憋氣血氧曲線',
+      'k2_bh_start': '開始憋氣',
+      'k2_bh_resume': '恢復呼吸',
+      'k2_bh_stop': '結束',
+      'k2_bh_clear': '清除',
+      'k2_bh_waiting': '記錄中… 等待血氧資料',
+      'k2_bh_press_start': '按「開始憋氣」開始記錄',
+      'k2_bh_min': '最低',
+      'k2_bh_drop': '降幅',
+      'k2_bh_recover': '恢復',
+      'k2_bh_recovering': '恢復中',
+      'k2_bh_previous': '上一次(對照)',
+      'k2_bh_abort': '⚠ 手指離開,核心已歸零 → 時間軸接不起來,錄製中止。',
+      'k2_bh_hint': '手指放好、等「通道」判定完成再按開始。錄完按結束,'
+          '換一片板子再錄一次就會疊在同一張圖上比對。',
 
       // HRV 面板
       'k2_hrv_short': 'HRV 心率變異(最近 {sec}s)',
@@ -1232,6 +1248,25 @@ class LocalizationService {
       'k2_orient_unknown': 'checking',
       'k2_orient_normal': 'normal',
       'k2_orient_swapped': 'corrected',
+      // Breath-hold SpO2 curve (for validating wavelength: the two modules can
+      // only be told apart once SpO2 is driven down)
+      'k2_bh_title': 'Breath-hold SpO₂ curve',
+      'k2_bh_start': 'Start hold',
+      'k2_bh_resume': 'Resume breathing',
+      'k2_bh_stop': 'Stop',
+      'k2_bh_clear': 'Clear',
+      'k2_bh_waiting': 'Recording… waiting for SpO₂',
+      'k2_bh_press_start': 'Press "Start hold" to begin',
+      'k2_bh_min': 'min',
+      'k2_bh_drop': 'drop',
+      'k2_bh_recover': 'recovery',
+      'k2_bh_recovering': 'recovering',
+      'k2_bh_previous': 'previous (reference)',
+      'k2_bh_abort': '⚠ Finger left; the core reset its index, so the timeline '
+          'cannot be joined. Recording aborted.',
+      'k2_bh_hint': 'Place the finger and wait for the channel verdict before '
+          'starting. Stop when done, then record again with a different module '
+          'to overlay both runs on the same chart.',
 
       // HRV panel
       'k2_hrv_short': 'HRV (last {sec}s)',

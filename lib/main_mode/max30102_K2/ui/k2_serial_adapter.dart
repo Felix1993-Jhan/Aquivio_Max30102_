@@ -24,6 +24,7 @@ import '../k2_config.dart';
 import '../k2_core.dart';
 import '../k2_hrv_calculator.dart';
 import '../k2_protocol.dart';
+import 'k2_breathhold.dart';
 import 'k2_lf_experiment.dart';
 import 'k2_snapshot.dart';
 
@@ -120,6 +121,10 @@ class K2SerialAdapter extends ChangeNotifier {
   /// 錄製進度的更新頻率跟整頁不同,不要綁在一起。
   /// 每一輪核心算完就餵一次(見 [_onPacket]);沒開始錄的時候 feed 是 no-op。
   final K2LfExperiment lfExperiment = K2LfExperiment();
+
+  /// 憋氣血氧記錄器 —— 同樣是「跨越核心 30 秒視窗」的長期累積,做在 UI 層。
+  /// 用途:把血氧壓低,才分得出兩片模組的波長有沒有差(99% 附近曲線太平)。
+  final K2BreathHold breathHold = K2BreathHold();
 
   /// 收發日誌(最新在最後)。
   final List<String> logs = [];
@@ -284,6 +289,9 @@ class K2SerialAdapter extends ChangeNotifier {
       // 傳 core.totalSamples 讓它自己算進度,順便偵測核心歸零
       // (免洗模式手指離開 → 索引倒退 → 實驗必須中止,不能把兩段接起來)。
       lfExperiment.feed(c.rrPoints, core.totalSamples);
+      // 憋氣曲線:同上,沒在錄就是 no-op。方向未定時 spo2 是 null,
+      // 記錄器會跳過不記(不要補值,那會在曲線上造一段假的平台)。
+      breathHold.feed(c.spo2, c.fingerPresent, core.totalSamples);
       // 只有「有手指、過了沉澱期、真的算出東西」才更新保留值。
       // 沉澱期的結果是全 null,拿它當保留值等於一放手指就把畫面清空。
       if (c.fingerPresent && !c.settling && c.rrPoints.isNotEmpty) {
@@ -457,6 +465,7 @@ class K2SerialAdapter extends ChangeNotifier {
     stop();
     sampleVersionNotifier.dispose();
     lfExperiment.dispose();
+    breathHold.dispose();
     super.dispose();
   }
 }
