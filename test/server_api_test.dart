@@ -386,17 +386,17 @@ void main() {
   group('WS /stream 的 wave 區塊', () {
     test('★ 增量:連續兩次要首尾相接,不重疊也不跳號', () {
       final e = feedSynthetic(seconds: 20, waveSeconds: 30);
-      final a = e.waveSinceJson(null);
+      final a = e.waveSinceJson(null).wave;
       final cursor = (a['firstAbs'] as int) + (a['count'] as int);
 
       // 同一個遊標再問一次 —— 中間沒有新樣本,應該是空的
-      final b = e.waveSinceJson(cursor);
+      final b = e.waveSinceJson(cursor).wave;
       expect(b['count'], 0, reason: '沒有新樣本就不該重送舊的');
       expect(b['firstAbs'], cursor, reason: 'firstAbs 指向下一筆會落在哪');
 
       // 再餵一點,增量必須正好接在遊標上
       e.feedPacket(packetOf(List.generate(20, (_) => (60000, 100000))));
-      final c = e.waveSinceJson(cursor);
+      final c = e.waveSinceJson(cursor).wave;
       expect(c['firstAbs'], cursor, reason: '接續處不可以有洞,也不可以重疊');
       expect(c['count'], 20);
       expect((c['irTrim'] as List).length, 20, reason: 'count 要與陣列真的等長');
@@ -406,7 +406,7 @@ void main() {
       final e = feedSynthetic(seconds: 20, waveSeconds: 30);
       // 假裝訂閱者記著一個未來的位置(歸零後 base 會掉回接近 0)
       final far = e.totalSamples + 100000;
-      final w = e.waveSinceJson(far);
+      final w = e.waveSinceJson(far).wave;
       expect(w['count'], greaterThan(0),
           reason: '接不上就要整段重送,回空的會讓對方永遠停在黑畫面');
     });
@@ -414,7 +414,7 @@ void main() {
     test('★ 遊標比緩衝舊(樣本已被 waveCap 裁掉)→ 從現存最舊的重送', () {
       // 保留 5 秒,但餵 20 秒 → 前面 15 秒已經被裁掉
       final e = feedSynthetic(seconds: 20, waveSeconds: 5);
-      final w = e.waveSinceJson(0); // 要一筆早就不存在的
+      final w = e.waveSinceJson(0).wave; // 要一筆早就不存在的
       expect(w['firstAbs'], greaterThan(0),
           reason: '不能假裝 0 還在 —— 那會讓波形與 troughAbs 錯開');
       expect(w['count'], greaterThan(0));
@@ -437,6 +437,58 @@ void main() {
       } finally {
         await ws.close();
       }
+    });
+
+    test('★ wave 是減完 baseline 的,raw_wave 才帶 DC', () {
+      final e = feedSynthetic(seconds: 20, waveSeconds: 30);
+      final r = e.waveSinceJson(null);
+      final det = (r.wave['irTrim'] as List).cast<num>();
+      final raw = (r.rawWave['irTrim'] as List).cast<num>();
+
+      expect(det.length, raw.length, reason: '兩區塊必須涵蓋同一批樣本');
+      expect(r.wave['firstAbs'], r.rawWave['firstAbs'], reason: '逐筆對齊');
+
+      // 合成訊號的 IR DC 是 100000 —— raw 應該在那附近,det 應該在 0 附近。
+      final rawMean = raw.reduce((a, b) => a + b) / raw.length;
+      final detMean = det.reduce((a, b) => a + b) / det.length;
+      expect(rawMean, closeTo(100000, 10000), reason: 'raw_wave 帶著 DC');
+      expect(detMean.abs(), lessThan(100),
+          reason: 'wave 已經減掉 baseline,應該在 0 上下震盪');
+    });
+
+    test('★ 延遲輸出 → baseline 與「事後對整段算」完全一致', () {
+      // 這是整個設計的根據:baseline 是置中移動平均,最新那批拿不到未來的
+      // 半個視窗。不延遲的話誤差是脈搏的 65%,而且在每個 frame 內線性成長
+      // → 每秒一次的鋸齒。延遲半個視窗(100 筆)之後誤差歸零。
+      final e = feedSynthetic(seconds: 25, waveSeconds: 30);
+      final det = (e.waveSinceJson(null).wave['irTrim'] as List).cast<num>();
+      final raw = (e.waveSinceJson(null).rawWave['irTrim'] as List).cast<num>();
+
+      // 拿 raw 自己重算一次「完整前後文」的 baseline,兩者必須吻合
+      final n = raw.length;
+      const win = 200, half = win ~/ 2;
+      final pre = List<double>.filled(n + 1, 0);
+      for (int i = 0; i < n; i++) {
+        pre[i + 1] = pre[i] + raw[i];
+      }
+      var maxErr = 0.0;
+      // 只驗中段 —— 兩端在 raw 這個子序列裡本來就缺前後文,
+      // server 是對整個 30 秒緩衝算的,條件不同。
+      for (int i = half; i < n - half; i++) {
+        final b = (pre[i + half + 1] - pre[i - half]) / (2 * half + 1);
+        final err = (det[i] - (raw[i] - b)).abs();
+        if (err > maxErr) maxErr = err;
+      }
+      expect(maxErr, lessThan(1.0),
+          reason: '延遲夠了就該完全吻合(0.1 是四捨五入的量級)');
+    });
+
+    test('★ 最新的 100 筆會被壓著不送(等湊滿置中視窗)', () {
+      final e = feedSynthetic(seconds: 20, waveSeconds: 30);
+      final w = e.waveSinceJson(null).wave;
+      final emitted = (w['firstAbs'] as int) + (w['count'] as int);
+      expect(emitted, lessThanOrEqualTo(e.totalSamples - 100),
+          reason: '沒有完整前後文的樣本不可以送出去 —— 送了就凍住,修不回來');
     });
 
     test('wave 只在 /stream,GET /vitals 不該有', () async {

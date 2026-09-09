@@ -298,22 +298,122 @@ class K2Engine {
   ///   · 免洗歸零(下一位使用者)→ base 掉回 0,遊標比 nextAbs 還大
   ///   · 訂閱者太久沒收 / 剛接上 → 要的樣本已經被 `_waveCap` 裁掉了
   /// 兩種都是「接不上」,硬接會讓波形與 `troughAbs` 錯開,而且錯得很安靜。
-  Map<String, dynamic> waveSinceJson(int? fromAbs) {
-    final nextAbs = _waveBase + _waveIrTrim.length;
+  /// baseline 的移動平均視窗寬 = `fs / bandLowHz` —— 與 UI 的波形圖同一個算法
+  /// (`k2_wave_chart` 的 `baselineWindow`)。預設 hrMin=30 → 0.5Hz → 200 筆(2 秒)。
+  ///
+  /// 為什麼綁在最慢心跳上:baseline 要擋掉「比最慢的心跳還慢」的漂移,
+  /// 視窗比一個心動週期短的話,它會開始跟著心跳跑,反而把脈搏本身抵消掉。
+  int get _baselineWindow =>
+      (kFs / k2.config.bandLowHz).round().clamp(1, 1 << 20);
+
+  /// **輸出要延遲幾筆才算得準。**
+  ///
+  /// baseline 是**置中**移動平均(算第 i 筆要看 i±half)。最新那批樣本拿不到
+  /// 「未來」的一半視窗,只能用截斷的視窗算 —— 而且送出去就凍住了,不會再修正。
+  ///
+  /// 實測(用整段 43 秒的真實資料對照「事後對整段算」的正確值):
+  /// | 延遲 | 誤差 rms | 佔脈搏 |
+  /// |---|---|---|
+  /// | 0 筆   | 89.3 | **65%** ← 而且誤差在每個 frame 內線性成長 → 每秒一次的鋸齒 |
+  /// | 50 筆  | 31.2 | 22% |
+  /// | **100 筆** | **0.0** | **0%** ← 視窗湊滿,與事後算完全相同 |
+  ///
+  /// 所以延遲 half 筆(100 = 1 秒)。**不是近似,是完全正確。**
+  int get _emitDelay => _baselineWindow ~/ 2;
+
+  /// 對整個保留緩衝算 baseline(置中移動平均,前綴和 O(n))。
+  ///
+  /// ⚠️ 每次都對**整段**重算,不做增量 —— 增量會讓舊點的 baseline 凍在
+  ///    當時的截斷視窗上,新資料進來也修不回去(上表 0 筆那一列就是這樣來的)。
+  ///    3000 筆的前綴和一輪不到 0.1ms,沒有優化的必要。
+  List<double> _baseline() {
+    final v = _waveIrTrim;
+    final n = v.length;
+    final half = _baselineWindow ~/ 2;
+    final pre = List<double>.filled(n + 1, 0);
+    for (int i = 0; i < n; i++) {
+      pre[i + 1] = pre[i] + v[i];
+    }
+    return [
+      for (int i = 0; i < n; i++)
+        () {
+          final lo = i - half < 0 ? 0 : i - half;
+          final hi = i + half > n - 1 ? n - 1 : i + half;
+          return (pre[hi + 1] - pre[lo]) / (hi - lo + 1);
+        }(),
+    ];
+  }
+
+  /// WS `/stream` 用的**增量**波形。回傳兩個區塊:
+  ///
+  ///   · `wave`     —— **減完 baseline 的訊號,畫圖直接用這個**。
+  ///                   與我們自己 UI 畫的是同一條線(`k2_wave_chart` 的 detrend)。
+  ///   · `raw_wave` —— 截尾平滑後、**還帶著 DC** 的原始值(舊版 `wave` 的內容)。
+  ///                   除錯與看灌流用。
+  ///
+  /// 為什麼要分兩個:DC 漂移是脈搏的 20~50 倍(實測漂移 5000~7100、脈搏 rms
+  /// 只有 143~269)。直接畫帶 DC 的值,脈搏只佔畫面 3~10%,形狀完全看不出來 ——
+  /// 那正是整合方回報「波形很醜」的成因,不是感測器的問題。
+  ///
+  /// 為什麼是「IR + trim」而不是四條線都送:
+  ///   · **IR** —— 心跳本身就是從這一路算出來的。手指偵測看 IR DC,谷點偵測
+  ///     (`irTroughs`)跑在 IR 上,RED 只在算 SpO2 的 ratio 時才用到。畫 IR
+  ///     等於畫「演算法看到的那條線」,畫面上的谷就是我們數的拍。
+  ///   · **trim** —— 截尾滑動平均(去突波)。核心的主計算本來就跑在 trim 上
+  ///     (見 k2_algorithm「殺掉尖刺型假谷」),raw 上那些尖刺是我們**判定為
+  ///     雜訊而不採信**的東西。送 trim 不是美化,是與計算一致。
+  /// 想要 RED 或未平滑的原始值就走 `GET /waveform`,那邊四條線照舊全給。
+  ///
+  /// [fromAbs] = 呼叫端**上次收到的下一筆**絕對位置;null = 沒收過。
+  /// 遊標落在保留範圍外時**整段重送**,不硬接 —— 有兩種情況會這樣:
+  ///   · 免洗歸零(下一位使用者)→ base 掉回 0,遊標比 nextAbs 還大
+  ///   · 訂閱者太久沒收 / 剛接上 → 要的樣本已經被 `_waveCap` 裁掉了
+  /// 兩種都是「接不上」,硬接會讓波形與 `troughAbs` 錯開,而且錯得很安靜。
+  ({Map<String, dynamic> wave, Map<String, dynamic> rawWave}) waveSinceJson(
+      int? fromAbs) {
+    // 只到「已經有完整置中視窗」的位置為止,後面那 _emitDelay 筆先壓著。
+    final ready = _waveIrTrim.length - _emitDelay;
+    final nextAbs = _waveBase + (ready < 0 ? 0 : ready);
     final from = (fromAbs == null || fromAbs < _waveBase || fromAbs > nextAbs)
         ? _waveBase
         : fromAbs;
+    final lo = from - _waveBase;
+    final hi = nextAbs - _waveBase;
+
     // 一位小數就夠 —— IR 讀值是 ~90000 的量級(與 waveformJson 同樣的理由)。
-    final slice = [
-      for (final x in _waveIrTrim.sublist(from - _waveBase))
-        (x * 10).roundToDouble() / 10,
-    ];
-    return {
-      'firstAbs': from,
-      'fs': kFs,
-      'count': slice.length,
-      'irTrim': slice,
-    };
+    double r1(double x) => (x * 10).roundToDouble() / 10;
+
+    if (hi <= lo) {
+      final empty = {
+        'firstAbs': from,
+        'fs': kFs,
+        'count': 0,
+        'irTrim': const <double>[],
+      };
+      return (wave: Map.of(empty), rawWave: Map.of(empty));
+    }
+
+    final base = _baseline();
+    final det = <double>[];
+    final raw = <double>[];
+    for (int i = lo; i < hi; i++) {
+      det.add(r1(_waveIrTrim[i] - base[i]));
+      raw.add(r1(_waveIrTrim[i]));
+    }
+    return (
+      wave: {
+        'firstAbs': from,
+        'fs': kFs,
+        'count': det.length,
+        'irTrim': det,
+      },
+      rawWave: {
+        'firstAbs': from,
+        'fs': kFs,
+        'count': raw.length,
+        'irTrim': raw,
+      },
+    );
   }
 
   Future<void> dispose() async {
@@ -1068,10 +1168,12 @@ class ApiServer {
     void push(Map<String, dynamic> v) {
       // 順序有意義:`_vitals.add()` 是在波形累積**之後**才發的(見 feedPacket),
       // 所以這裡讀到的緩衝已經含這一輪的新樣本。
-      final w = engine.waveSinceJson(cursor);
-      cursor = (w['firstAbs'] as int) + (w['count'] as int);
+      final r = engine.waveSinceJson(cursor);
+      // 兩個區塊涵蓋**同一批樣本**(同 firstAbs / 同 count),所以遊標只推一次。
+      // 這是刻意的:兩邊逐筆對齊,上層可以直接把它們疊起來比對。
+      cursor = (r.wave['firstAbs'] as int) + (r.wave['count'] as int);
       try {
-        ws.add(jsonEncode({...v, 'wave': w}));
+        ws.add(jsonEncode({...v, 'wave': r.wave, 'raw_wave': r.rawWave}));
       } catch (_) {}
     }
 
