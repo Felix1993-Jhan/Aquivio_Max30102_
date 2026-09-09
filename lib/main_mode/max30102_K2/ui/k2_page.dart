@@ -12,6 +12,7 @@
 
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart'; // PointerDeviceKind(桌面版拖曳)
 import 'package:flutter/material.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 
@@ -67,6 +68,10 @@ class _K2PageState extends State<K2Page> {
 
   // ── 快照檢視 ──
   List<K2Snapshot> _snapshots = const [];
+
+  /// 快照分頁列的捲動控制 —— Scrollbar 與 ListView 必須共用同一個,
+  /// 各自給一個會讓捲軸抓不到位置(Flutter 會直接丟例外)。
+  final ScrollController _snapScroll = ScrollController();
   K2Snapshot? _openSnap; // 目前展開的那張;null = 沒展開
   bool _snapLoading = false;
 
@@ -86,6 +91,7 @@ class _K2PageState extends State<K2Page> {
     _manager.isConnectedNotifier.removeListener(_onUpdate);
     // 只停自己的量測與回呼;**不關共用串口**(其他頁還在用)
     _adapter.dispose();
+    _snapScroll.dispose();
     super.dispose();
   }
 
@@ -205,26 +211,48 @@ class _K2PageState extends State<K2Page> {
           )
         else
           // 清單:橫向捲動的檔案膠囊,點一個就在下方展開
+          //
+          // ⚠️ 桌面版要多做兩件事,不然「看起來不能捲」:
+          //   ① Flutter 的預設 dragDevices **不含滑鼠** —— 觸控裝置拖得動,
+          //      滑鼠拖不動。桌面版是主要平台,一定要補上。
+          //   ② 沒有捲軸的話,使用者連「它可以捲」都看不出來,
+          //      只會以為舊快照不見了(實測就是這樣被回報的)。
           SizedBox(
-            height: 40,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _snapshots.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 6),
-              itemBuilder: (_, i) {
-                final s = _snapshots[i];
-                final open = _openSnap?.path == s.path;
-                final t = s.time;
-                String two(int v) => v.toString().padLeft(2, '0');
-                final label = '${two(t.month)}/${two(t.day)} '
-                    '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
-                return ChoiceChip(
-                  label: Text(label, style: const TextStyle(fontSize: 11)),
-                  selected: open,
-                  onSelected: (_) =>
-                      setState(() => _openSnap = open ? null : s),
-                );
-              },
+            height: 48,
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(context).copyWith(
+                dragDevices: {
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.mouse,
+                  PointerDeviceKind.trackpad,
+                  PointerDeviceKind.stylus,
+                },
+              ),
+              child: Scrollbar(
+                controller: _snapScroll,
+                thumbVisibility: true, // 一直顯示,不要只在捲動時才浮現
+                child: ListView.separated(
+                  controller: _snapScroll,
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.only(bottom: 8),
+                  itemCount: _snapshots.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 6),
+                  itemBuilder: (_, i) {
+                    final s = _snapshots[i];
+                    final open = _openSnap?.path == s.path;
+                    final t = s.time;
+                    String two(int v) => v.toString().padLeft(2, '0');
+                    final label = '${two(t.month)}/${two(t.day)} '
+                        '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
+                    return ChoiceChip(
+                      label: Text(label, style: const TextStyle(fontSize: 11)),
+                      selected: open,
+                      onSelected: (_) =>
+                          setState(() => _openSnap = open ? null : s),
+                    );
+                  },
+                ),
+              ),
             ),
           ),
         if (_openSnap != null) ...[
