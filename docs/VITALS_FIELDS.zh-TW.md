@@ -9,6 +9,28 @@
 
 ---
 
+## ⚠️ 狀態更正（2026-09-29）
+
+本文的**欄位說明與交涉紀錄仍然有效**，但下列狀態已經過時，以這裡為準：
+
+| 欄位 | 本文寫的 | 現況 |
+|---|---|---|
+| `lf_hf` | 🔴 恆為 null | **照送數字**，可信度另以 `lf_reliable` / `lf_cycles` 標明 |
+| `ans` | 🔴 恆為 null | **照送**（`0.5 + log₂(LF/HF)/4`）；另有時域版 `ans_time_domain` |
+| `activity` | ⬜ 不提供 | **已提供**（`(mean_hr − 60) / 80`） |
+| `pns` | 指 z-score 版 | 現在的 `pns` 是 **0~100 分版**（RMSSD 對數縮放）；z-score 版改名 `pns_z` |
+| `stress` | 說是 Baevsky 壓力指數 | 現在的 `stress` 是 `pns` 與 `ans` 的加權混合；真正的 Baevsky 在 `stress_baevsky` |
+
+另外，現在還多送 14 個欄位（`lf` `hf` `lf_ms2` `hf_ms2` `vlf_ms2` `lf_reliable` `hf_reliable`
+`lf_cycles` `hf_cycles` `window_sec` `confidence_video` `pns_z` `sns_z` `ans_time_domain`
+`stress_baevsky` `confidence_by_beats`），本文沒有涵蓋。
+
+**算法細節（公式、出處、短視窗可用性）以
+[aidocs/vitals_metrics_derivation.md](../aidocs/vitals_metrics_derivation.md) 為準**，
+完整欄位清單見該文件的「階段 10｜輸出契約」。
+
+---
+
 ## 狀態說明
 
 | 記號 | 意思 |
@@ -32,14 +54,14 @@
 | 2 | [`sdnn`](#sdnn) | `number \| null` | ✅ | RR 的標準差；整體變異 |
 | 3 | [`rmssd`](#rmssd) | `number \| null` | ✅ | 逐拍變異；**最可信的指標** |
 | 4 | [`ln_rmssd`](#ln_rmssd) | `number \| null` | ✅ | `rmssd` 取自然對數 |
-| 5 | [`lf_hf`](#lf_hf) | `number \| null` | 🔴 | **恆為 null**；量不到穩定值 |
+| 5 | [`lf_hf`](#lf_hf) | `number \| null` | ✅ | 照送；30 秒視窗下 `lf_reliable = false` |
 | 6 | [`sqi`](#sqi) | `number \| null` | ✅ | 訊號品質閘門，`1` / `0` |
 | 7 | [`snr_db`](#snr_db) | `number \| null` | ✅ | 波形的頻帶訊噪比 |
 | 8 | [`confidence`](#confidence) | `'good' \| 'rough' \| 'very rough' \| null` | ✅ | 這次量測該信幾分 |
-| 9 | [`pns`](#pns) | `number \| null` | ✅ | 副交感神經活性指數 |
-| 10 | [`ans`](#ans) | `number \| null` | 🔴 | **恆為 null**；定義與你方不同 |
-| 11 | [`stress`](#stress) | `number \| null` | ✅ | Baevsky 壓力指數 |
-| 12 | [`activity`](#activity) | `number \| null` | ⬜ | 需先確認語意 |
+| 9 | [`pns`](#pns) | `number \| null` | ✅ | 副交感（0~100 分版；z-score 版是 `pns_z`） |
+| 10 | [`ans`](#ans) | `number \| null` | ✅ | 源自 `lf_hf`；另有時域版 `ans_time_domain` |
+| 11 | [`stress`](#stress) | `number \| null` | ✅ | `pns` 與 `ans` 的加權混合（Baevsky 在 `stress_baevsky`） |
+| 12 | [`activity`](#activity) | `number \| null` | ✅ | `(mean_hr − 60) / 80`，夾 0~100 |
 
 ### `VitalsReading` — `aquivio-strapi/src/helpers/deepseek.ts`
 
@@ -49,16 +71,17 @@
 |---|------|------|------|
 | 1 | [`sdnn`](#sdnn) | ✅ | 見上 |
 | 2 | [`rmssd`](#rmssd) | ✅ | 見上 |
-| 3 | [`lf_hf`](#lf_hf) | 🔴 | **會是 null**，prompt 需能處理 |
-| 4 | [`ans`](#ans) | 🔴 | **會是 null**，prompt 需能處理 |
+| 3 | [`lf_hf`](#lf_hf) | ✅ | 照送，但 30 秒視窗不可信（`lf_reliable`） |
+| 4 | [`ans`](#ans) | ✅ | 照送，但源自 `lf_hf`，短視窗一樣不可信 |
 | 5 | [`pns`](#pns) | ✅ | 見上 |
 | 6 | [`stress`](#stress) | ✅ | 見上 |
 | 7 | [`mean_hr`](#mean_hr) | ✅ | 見上 |
 | 8 | [`confidence`](#confidence) | ✅ | 見上 |
 
-**8 個裡有 2 個恆為 null。** 兩者在你的介面裡都已經是 optional
-（`?: number | null`），所以型別上沒問題，但要確認 prompt 對缺欄位的
-處理不會退化 —— 詳見 [`lf_hf`](#lf_hf) 與 [`ans`](#ans)。
+**8 個欄位現在都有值。** 但 `lf_hf` 與 `ans` 在 30 秒視窗下**不可信**
+（LF 只走了約 1.1 圈，需要 4 圈），數字照送、可信度靠 `lf_reliable` 標明。
+prompt 要處理的不再是「缺欄位」，而是「這個數字該不該採信」—— 詳見
+[`lf_hf`](#lf_hf) 與 [`ans`](#ans)。
 
 ### 附錄
 
@@ -276,7 +299,9 @@ const ln_rmssd = v.rmssd != null && v.rmssd > 0 ? Math.log(v.rmssd) : null;
 ---
 
 <a id="lf_hf"></a>
-## 5. `lf_hf` — 低頻/高頻比 🔴 恆為 null
+## 5. `lf_hf` — 低頻/高頻比
+
+> ⚠️ **本節狀態已過時**，見本文最上方的「狀態更正」與 [vitals_metrics_derivation.md](../aidocs/vitals_metrics_derivation.md)。
 
 | | |
 |---|---|
@@ -511,6 +536,8 @@ if (v.confidence === 'very rough') {
 <a id="pns"></a>
 ## 9. `pns` — 副交感神經活性指數
 
+> ⚠️ **本節狀態已過時**，見本文最上方的「狀態更正」與 [vitals_metrics_derivation.md](../aidocs/vitals_metrics_derivation.md)。
+
 | | |
 |---|---|
 | **型別** | `number \| null` |
@@ -565,7 +592,9 @@ Kubios 的 PNS index 是拿他們自己的資料庫做 z-score。我們沒有那
 ---
 
 <a id="ans"></a>
-## 10. `ans` — 自律神經平衡 🔴 恆為 null
+## 10. `ans` — 自律神經平衡
+
+> ⚠️ **本節狀態已過時**，見本文最上方的「狀態更正」與 [vitals_metrics_derivation.md](../aidocs/vitals_metrics_derivation.md)。
 
 | | |
 |---|---|
@@ -616,7 +645,9 @@ ansTimeDomain = SNS − PNS
 ---
 
 <a id="stress"></a>
-## 11. `stress` — Baevsky 壓力指數
+## 11. `stress` — 壓力分數
+
+> ⚠️ **本節狀態已過時**，見本文最上方的「狀態更正」與 [vitals_metrics_derivation.md](../aidocs/vitals_metrics_derivation.md)。
 
 | | |
 |---|---|
@@ -674,7 +705,9 @@ MxDMn 小 → SI 衝高。放鬆時心跳散得開，SI 低。
 ---
 
 <a id="activity"></a>
-## 12. `activity` ⬜ 不提供
+## 12. `activity` — 活動量
+
+> ⚠️ **本節狀態已過時**，見本文最上方的「狀態更正」與 [vitals_metrics_derivation.md](../aidocs/vitals_metrics_derivation.md)。
 
 | | |
 |---|---|

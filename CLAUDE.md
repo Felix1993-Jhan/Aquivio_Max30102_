@@ -46,6 +46,7 @@ lib/
 │       ├── k2_algorithm.dart                    # 峰谷偵測 → HR / SpO2
 │       ├── k2_beatseries.dart                   # 逐拍序列與生理閘門
 │       ├── k2_hrv_calculator.dart               # HRV（RMSSD / SDNN / pNN50…）
+│       ├── k2_vitals_metrics.dart               # 頻域（Lomb-Scargle）+ 衍生分數 + Strapi 欄位
 │       ├── k2_sqi.dart                          # 訊號品質指標
 │       ├── k2_config.dart                       # 可調參數
 │       ├── k2_setting_limits.dart               # 參數合法範圍與自動夾制
@@ -54,6 +55,9 @@ lib/
 │           ├── k2_serial_adapter.dart           # 串口 ↔ k2_core 的黏合層
 │           ├── k2_wave_chart.dart               # 波形圖
 │           ├── k2_hrv_chart.dart                # HRV / Poincaré 圖
+│           ├── k2_breathhold.dart               # 憋氣血氧曲線（狀態）
+│           ├── k2_breathhold_chart.dart         # 憋氣血氧曲線（繪圖）
+│           ├── k2_lf_experiment.dart            # LF 窗長對照實驗
 │           └── k2_snapshot.dart                 # 快照存取（dart:io 直接寫檔）
 └── shared/
     ├── language_state.dart                      # globalLanguageNotifier
@@ -66,7 +70,7 @@ lib/
         └── splash_screen.dart                   # 啟動畫面
 ```
 
-**共 26 個 .dart 檔**（其中 14 個屬於 `max30102_K2/`）。
+**共 32 個 .dart 檔**（其中 18 個屬於 `max30102_K2/`）。
 
 ---
 
@@ -252,7 +256,9 @@ UI 這一側原本有的「長期 RR 池（`allPoints`，上限 300 拍）」**�
 | 文件 | 路徑 | 說明 |
 |------|------|------|
 | K2 架構 | `aidocs/k2_architecture.html` | **MAX30102 K2 交接核心的完整說明，最重要** |
-| MAX30102 運算方式 | `aidocs/max30102_algorithms.md` | 心率 2 種 + 血氧 3 種運算總覽、前處理、SQI、EMA、各自出處 |
+| **數值推導速查** | `aidocs/vitals_metrics_derivation.md` | **每個輸出數字怎麼算出來的：公式 + 出處 + 短視窗可用性，依資料流排序（ADC → 拍 → HRV → 28 個欄位）** |
+| 算法沿革 | `aidocs/vitals_metrics_history.md` | 已退場的算法、曾經訂錯的門檻、為什麼換掉 |
+| ~~MAX30102 運算方式~~ | `aidocs/max30102_algorithms.md` | 已拆進上面兩份，只剩轉址頁 |
 | 串口通訊協定 | `aidocs/serial_protocol.md` | STM32 通訊協定、封包格式、ADC 對應表（含已移除功能的協定，僅供參考）|
 | BIA 生物阻抗原理 | `aidocs/bia_principle.md` | 導電機制、細胞膜電容、頻率與電流路徑、相位量測、誤差排行、手把式限制 |
 | BIA 公式表 | `aidocs/bia_formulas.md` | 全部公式（表格形式）+ AD5940 參數／腳位／隔離元件實查值 |
