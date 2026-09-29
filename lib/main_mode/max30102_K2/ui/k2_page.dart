@@ -1109,6 +1109,23 @@ class _K2PageState extends State<K2Page> {
         ),
       );
 
+  /// 0~100 分的分數**撞到量表的邊**時回傳標記(`⤓` 底 / `⤒` 頂),否則空字串。
+  ///
+  /// 為什麼需要:那四個分數(pns / ans / stress / activity)全都是 clamp 出來的,
+  /// 撞邊時畫面上會出現 `0.0` 或 `100.0` —— **看起來像極端生理讀數,其實是
+  /// 「這個值已經沒有解析度」**。實測 mean_hr 59 → activity 恆為 0.0、
+  /// LF/HF 0.23(量表下緣 0.25,只低 8%)→ ans 夾成 0.0。
+  ///
+  /// [score] 為 null 就不標(那是「算不出來」,不是撞邊,兩件事不能混)。
+  /// 邊界值來自 [Max30102VitalsMetrics] 的公式,**判斷全用 UI 手上已有的輸入,
+  /// 不改交接核心**。
+  String _railMark(double? score, double? input, double lo, double hi) {
+    if (score == null || input == null) return '';
+    if (input <= lo) return ' ⤓';
+    if (input >= hi) return ' ⤒';
+    return '';
+  }
+
   /// HRV 統計:**垂直列**(左標籤右數值),放進側欄用。
   /// [showCounts]:短期(UI 切窗)→ false;長期(核心算)→ true。
   Widget _kvList(HrvStats? hv, int beats, {bool showCounts = true}) {
@@ -1164,6 +1181,22 @@ class _K2PageState extends State<K2Page> {
         v == null ? '—' : v.toStringAsFixed(digits);
 
     final spec = m.spectrum;
+
+    // ── 撞邊偵測(見 [_railMark])────────────────────────────────────
+    //
+    // 四個分數的量表端點,直接對應 k2_vitals_metrics 的公式:
+    //   pns      RMSSD 10ms → 0 分、80ms → 100 分
+    //   ans      LF/HF 0.25 → 0 分、4.0 → 100 分
+    //   activity mean_hr 60bpm → 0 分、140bpm → 100 分
+    //   stress   自己不會撞邊(0.6/0.4 的加權本來就落在範圍內),但 ans 撞底時
+    //            它的 40% 恆為 0 —— 這件事寫在說明行裡,不在數值旁標記。
+    final rmssd = m.hrv?.rmssd;
+    final meanHr = m.hrv?.meanHr;
+    final lfHf = spec?.lfHf;
+    final pnsRail = _railMark(m.pnsScore, rmssd, 10, 80);
+    final ansRail = _railMark(m.ansScore, lfHf, 0.25, 4.0);
+    final actRail = _railMark(m.activityScore, meanHr, 60, 140);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1171,10 +1204,37 @@ class _K2PageState extends State<K2Page> {
         // ── 以下四個是 aquivio-vitals 的公式,0~100 分 ──────────────
         //    pns 就是 RMSSD、ans 就是 LF/HF、stress 是前兩者的組合、
         //    activity 就是心率。它們沒有引入新資訊,只是換尺度。
-        _kv('副交感', f(m.pnsScore, digits: 1), api: 'pns'),
-        _kv('自律平衡', f(m.ansScore, digits: 1), api: 'ans'),
+        _kv('副交感', '${f(m.pnsScore, digits: 1)}$pnsRail',
+            api: 'pns',
+            color: pnsRail.isEmpty ? null : Colors.grey.shade400),
+        _kv('自律平衡', '${f(m.ansScore, digits: 1)}$ansRail',
+            api: 'ans',
+            color: ansRail.isEmpty ? null : Colors.grey.shade400),
         _kv('壓力', f(m.stressScore, digits: 1), api: 'stress'),
-        _kv('活動量', f(m.activityScore, digits: 1), api: 'activity'),
+        _kv('活動量', '${f(m.activityScore, digits: 1)}$actRail',
+            api: 'activity',
+            color: actRail.isEmpty ? null : Colors.grey.shade400),
+        if (pnsRail.isNotEmpty || ansRail.isNotEmpty || actRail.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 2),
+            child: Text(
+              [
+                if (ansRail.isNotEmpty)
+                  '⚠ ans ${f(m.ansScore, digits: 1)} 是夾制的邊,不是極端讀數:'
+                      'LF/HF ${f(lfHf)} 落在量表(0.25~4.0)之外。\n'
+                      '  LF 只走 ${spec == null ? '?' : spec.lfCycles.toStringAsFixed(1)} 圈 '
+                      '→ 這個值沒有解析度;stress 的 40% 也跟著失去意義',
+                if (actRail.isNotEmpty)
+                  '⚠ activity ${f(m.activityScore, digits: 1)} 是量表的邊:'
+                      'mean_hr ${f(meanHr, digits: 1)} 落在 60~140bpm 之外。\n'
+                      '  這與視窗長度無關 —— 靜息心率低於 60 的人這一欄恆為 0',
+                if (pnsRail.isNotEmpty)
+                  '⚠ pns ${f(m.pnsScore, digits: 1)} 是夾制的邊:'
+                      'RMSSD ${f(rmssd, digits: 1)}ms 落在量表(10~80ms)之外',
+              ].join('\n'),
+              style: TextStyle(fontSize: 9, color: Colors.orange.shade800),
+            ),
+          ),
         _kv('可信度', m.confidenceBySnr ?? '—', api: 'confidence'),
         _kv('SQI', '${m.sqi}', api: 'sqi'),
         _kv('訊噪比', m.snrDb == null ? '—' : '${f(m.snrDb, digits: 1)} dB',
@@ -1221,7 +1281,8 @@ class _K2PageState extends State<K2Page> {
             child: Text(
               '⚠ LF 只走 ${spec.lfCycles.toStringAsFixed(1)} 圈'
               '(需 ≥${HrvSpectrum.minBandCycles.toStringAsFixed(0)})。'
-              'HF 有 ${spec.hfCycles.toStringAsFixed(1)} 圈,是可用的那一半。\n'
+              'HF 有 ${spec.hfCycles.toStringAsFixed(1)} 圈'
+              '${spec.hfUsable ? ',是可用的那一半' : ',同樣不足'}。\n'
               '  數字照送(攝影機端也是 30 秒),可信度另以 lf_reliable 標明',
               style: TextStyle(fontSize: 9, color: Colors.orange.shade800),
             ),
@@ -1248,6 +1309,21 @@ class _K2PageState extends State<K2Page> {
         _kv('交感 z', f(m.sns)),
         _kv('自律平衡', f(m.ansTimeDomain)),
         _kv('壓力(Baevsky)', f(m.stress, digits: 1)),
+        // 活動量的**靜息基準改成 50bpm**(送出去的那個是 60,不動)。
+        //
+        // 為什麼要這一列:整合方的 `activity = (mean_hr − 60)/80` 用固定 60bpm
+        // 當「靜息」,但靜息心率 50 幾的人不少(坐著量更常見)——那些人送出去的
+        // activity 會**恆為 0**,看起來像量壞了。50 起算至少分得出高低。
+        //
+        // ⚠️ 這只是換基準,不是更好的指標。真正對的做法是拿**這個人自己的**
+        //    靜息心率當起點,但一次性量測拿不到那個基準。
+        _kv(
+          '活動量(50起算)',
+          meanHr == null
+              ? '—'
+              : (((meanHr - 50) / 80).clamp(0.0, 1.0) * 100)
+                  .toStringAsFixed(1),
+        ),
         _kv('可信度(拍數)', m.confidence ?? '—'),
         _kv('LF', spec == null ? '—' : '${spec.lf.toStringAsFixed(0)} ms²'),
         _kv('HF', spec == null ? '—' : '${spec.hf.toStringAsFixed(0)} ms²'),
