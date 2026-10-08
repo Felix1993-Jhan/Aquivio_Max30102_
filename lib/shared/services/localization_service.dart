@@ -570,6 +570,26 @@ class LocalizationService {
 
       // 即時數值區
       'k2_window': '視窗',
+      // ── 定長量測(只算這次量測的前 N 秒)──────────────────────────
+      'k2_window_range': '10~{max}',
+      'k2_fixed_mode': '定長',
+      'k2_fixed_hint': '只算這次量測的前 {sec} 秒,之後的不列入。'
+          '計時起點 = 核心吐出第一筆乾淨樣本(手指偵測後約 3.5 秒:'
+          '空轉 1.5s + 沉澱 2.0s),所以剛開啟時進度不是從 0.0 開始。',
+      'k2_fixed_collecting': '收集中 {got} / {sec} s',
+      'k2_fixed_frozen': '已凍結 · 本次前 {sec} s',
+      'k2_fixed_ended': '量測已結束(手指離開)',
+      'k2_fixed_short': '資料不足:只收到 {got} s',
+      'k2_fixed_rebased': '波形曾斷層,已重新起算 {n} 次',
+      'k2_fixed_sqi_rounds': 'SQI {ok}/{n} 輪',
+      'k2_fixed_pre_missing': '開頭未還原',
+      'k2_fixed_waiting': '等待本次量測的資料',
+      'k2_hrv_fixed': 'HRV 心率變異(本次前 {sec}s)',
+      'k2_sec1_fixed': '① 即時數值 + 定長:本次前 {sec} 秒',
+      'k2_band_dead': '空轉(丟棄)',
+      'k2_band_settle': '沉澱(不輸出)',
+      'k2_band_orient': '方向判定',
+      'k2_band_normal': '計入',
       'k2_actual_span': '實際 {sec}s({beats} 拍)',
       'k2_save_snapshot': '存快照',
       'k2_feed_stats': '進料 #{ver} · RX {rx} · 波形 {wave}',
@@ -1232,6 +1252,27 @@ class LocalizationService {
 
       // Live values
       'k2_window': 'Window',
+      // ── Fixed window (first N seconds of this measurement only) ──
+      'k2_window_range': '10~{max}',
+      'k2_fixed_mode': 'Fixed',
+      'k2_fixed_hint': 'Uses only the first {sec}s of this measurement; '
+          'later data is excluded. The clock starts at the first clean sample '
+          'the core emits (about 3.5s after the finger is detected: '
+          '1.5s dead + 2.0s settling), so it does not start at 0.0.',
+      'k2_fixed_collecting': 'collecting {got} / {sec} s',
+      'k2_fixed_frozen': 'frozen · first {sec}s',
+      'k2_fixed_ended': 'measurement ended (finger off)',
+      'k2_fixed_short': 'not enough data: only {got}s',
+      'k2_fixed_rebased': 'waveform gap, restarted {n} time(s)',
+      'k2_fixed_sqi_rounds': 'SQI {ok}/{n} rounds',
+      'k2_fixed_pre_missing': 'head not recovered',
+      'k2_fixed_waiting': 'waiting for this measurement',
+      'k2_hrv_fixed': 'HRV (first {sec}s)',
+      'k2_sec1_fixed': '① Live values + fixed: first {sec}s',
+      'k2_band_dead': 'dead (dropped)',
+      'k2_band_settle': 'settling (not emitted)',
+      'k2_band_orient': 'orientation',
+      'k2_band_normal': 'counted',
       'k2_actual_span': 'actual {sec}s ({beats} beats)',
       'k2_save_snapshot': 'Snapshot',
       'k2_feed_stats': 'fed #{ver} · RX {rx} · wave {wave}',

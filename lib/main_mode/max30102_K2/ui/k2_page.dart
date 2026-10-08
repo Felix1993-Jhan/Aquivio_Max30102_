@@ -14,6 +14,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart'; // PointerDeviceKind(桌面版拖曳)
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // 輸入框只收數字
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 
 import '../../../shared/services/localization_service.dart';
@@ -24,6 +25,7 @@ import '../k2_hrv_calculator.dart';
 import '../k2_protocol.dart';
 import '../k2_setting_limits.dart';
 import '../k2_vitals_metrics.dart';
+import 'k2_fixed_window.dart';
 import 'k2_hrv_chart.dart';
 import 'k2_breathhold_chart.dart';
 import 'k2_lf_experiment.dart';
@@ -63,6 +65,21 @@ class _K2PageState extends State<K2Page> {
   /// 目前視窗長(秒)。上限受 K2SerialAdapter._waveCap 限制(目前 30s)。
   int _shortSec = 30;
 
+  /// 定長量測:開 = 只算**這次量測的前 [_shortSec] 秒**,之後進來的不列入;
+  /// 關 = 回到滾動視窗。資料來源切換而已,背後的開頭緩衝一直都在收。
+  bool _fixedMode = false;
+
+  /// 視窗長度輸入框。用 controller 而不是 `initialValue` + `key` ——
+  /// 整頁每秒 rebuild 一次,那種寫法會在打字打到一半時掉焦點。
+  late final TextEditingController _secCtl =
+      TextEditingController(text: '$_shortSec');
+  bool _secInvalid = false;
+
+  /// 視窗長度上限 = 核心保留多久(dataHistoryMs,畫面上可改)。**不寫死 30** ——
+  /// 有人把那個參數調大時,這裡要跟著開放,否則會變成無法解釋的上限。
+  int get _secMax =>
+      (_adapter.core.config.dataHistoryMs ~/ 1000).clamp(10, 300);
+
   /// 即時區塊的高度(可拖曳調整,比照原本波形圖2 的做法)。
   double _sec1Height = 430;
 
@@ -92,6 +109,7 @@ class _K2PageState extends State<K2Page> {
     // 只停自己的量測與回呼;**不關共用串口**(其他頁還在用)
     _adapter.dispose();
     _snapScroll.dispose();
+    _secCtl.dispose();
     super.dispose();
   }
 
@@ -154,7 +172,11 @@ class _K2PageState extends State<K2Page> {
 
   /// 存快照 → 桌面 max30102_snapshots,SnackBar 回報,並刷新清單。
   Future<void> _saveSnapshot() async {
-    final path = await _adapter.saveSnapshot();
+    // 定長模式存凍結的那一段(不是滾動視窗)—— 存兩次應該得到一模一樣的檔。
+    final path = await _adapter.saveSnapshot(
+      fixed: _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null,
+      windowSec: _shortSec,
+    );
     if (!mounted) return;
     final name = path?.split(RegExp(r'[\\/]')).last;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -705,7 +727,10 @@ class _K2PageState extends State<K2Page> {
   /// 這排本來自己佔一列,現在併進標題列 —— 側欄高度是稀缺資源,
   /// 省下的那一列直接變成多看得到一列資料。
   Widget _sec1Controls() {
-    final shortPts = _adapter.pointsRecentSeconds(_shortSec);
+    // 定長模式要顯示凍結那一段的涵蓋時間,不是滾動窗的 —— 兩邊不同步的話,
+    // 左欄說「本次前 12 秒」而這裡說「實際 28.4s」,看的人會以為哪邊算錯了。
+    final fx = _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null;
+    final shortPts = fx?.pts ?? _adapter.pointsRecentSeconds(_shortSec);
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
@@ -719,9 +744,56 @@ class _K2PageState extends State<K2Page> {
               label: Text('${s}s', style: const TextStyle(fontSize: 11)),
               selected: _shortSec == s,
               visualDensity: VisualDensity.compact,
-              onSelected: (_) => setState(() => _shortSec = s),
+              onSelected: (_) => setState(() {
+                _shortSec = s;
+                _secCtl.text = '$s'; // 不同步的話框裡的數字會與實際窗長不一致
+                _secInvalid = false;
+              }),
             ),
           ),
+        // 任意秒數:快捷鈕以外的長度(12 / 15 / 18…)打字輸入。
+        SizedBox(
+          width: 44,
+          child: TextField(
+            controller: _secCtl,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12),
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(3),
+            ],
+            decoration: InputDecoration(
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              border: const OutlineInputBorder(),
+              enabledBorder: _secInvalid
+                  ? const OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.red))
+                  : null,
+            ),
+            // 落在範圍內就立刻套用(波形即時連動,手感好);超出只畫紅框**不套用**
+            // —— 否則打「1」會先被夾成 10,接著打「2」變成 102 再夾,很難用。
+            onChanged: (t) {
+              final v = int.tryParse(t);
+              setState(() {
+                if (v != null && v >= 10 && v <= _secMax) {
+                  _shortSec = v;
+                  _secInvalid = false;
+                } else {
+                  _secInvalid = true;
+                }
+              });
+            },
+            onSubmitted: (_) => setState(() {
+              _secCtl.text = '$_shortSec'; // 無效就還原成目前真正在用的值
+              _secInvalid = false;
+            }),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(trParams('k2_window_range', {'max': _secMax}),
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
         const SizedBox(width: 8),
         // 實際涵蓋時間 = 末拍終谷 − 首拍起谷(用絕對索引算,**含洞**)。
         // 它與「RR 加總」的差就是被過濾器剔掉的空窗長度 → 對照著看很有用。
@@ -864,26 +936,152 @@ class _K2PageState extends State<K2Page> {
   }
 
   // ── ① 即時數值 + 短期 HRV ─────────────────────────────────────
+  /// 定長量測的開關 + 狀態(側欄最上方)。
+  ///
+  /// 放在側欄而不是標題列:它只管左欄這些數值,放在它作用的範圍內最不會誤解;
+  /// 而且標題列已經有快捷鈕 + 輸入框 + 實際涵蓋 + 存快照 + 進料計數,再塞會 overflow。
+  Widget _fixedSwitch(K2FixedView? fx) {
+    final lines = <({String text, Color color})>[];
+    if (_fixedMode) {
+      if (fx == null) {
+        lines.add((text: tr('k2_fixed_waiting'), color: Colors.grey.shade500));
+      } else {
+        final got = (fx.filledSamples / 100).toStringAsFixed(1);
+        if (fx.sealed) {
+          lines.add((
+            text: trParams('k2_fixed_frozen', {'sec': _shortSec}),
+            color: Colors.green.shade700,
+          ));
+        } else if (fx.ended) {
+          lines.add((
+            text: tr('k2_fixed_ended'),
+            color: Colors.blueGrey.shade600,
+          ));
+          lines.add((
+            text: trParams('k2_fixed_short', {'got': got}),
+            color: Colors.orange.shade800,
+          ));
+        } else {
+          lines.add((
+            text: trParams('k2_fixed_collecting', {'got': got, 'sec': _shortSec}),
+            color: Colors.blue.shade700,
+          ));
+        }
+        // SQI 在定長窗裡是「窗內多數票」,所以把原始比例一起亮出來讓人自己判斷。
+        if (fx.rounds > 0) {
+          lines.add((
+            text: trParams(
+                'k2_fixed_sqi_rounds', {'ok': fx.sqiOkRounds, 'n': fx.rounds}),
+            color: Colors.grey.shade600,
+          ));
+        }
+        if (fx.rebases > 0) {
+          lines.add((
+            text: trParams('k2_fixed_rebased', {'n': fx.rebases}),
+            color: Colors.orange.shade800,
+          ));
+        }
+        if (fx.preMissing) {
+          lines.add((
+            text: tr('k2_fixed_pre_missing'),
+            color: Colors.grey.shade500,
+          ));
+        }
+      }
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Transform.scale(
+              scale: 0.8,
+              alignment: Alignment.centerLeft,
+              child: Switch(
+                value: _fixedMode,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onChanged: (b) => setState(() => _fixedMode = b),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(tr('k2_fixed_mode'),
+                style: const TextStyle(
+                    fontSize: 11.5, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        for (final l in lines)
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Text(l.text,
+                style: TextStyle(fontSize: 10, color: l.color)),
+          ),
+        // 關閉時說明零點在哪 —— 沒有這句,第一個看到的人一定會以為漏算了 3.5 秒。
+        if (!_fixedMode)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(trParams('k2_fixed_hint', {'sec': _shortSec}),
+                style: TextStyle(fontSize: 9, color: Colors.grey.shade500)),
+          ),
+      ],
+    );
+  }
+
+  /// 區塊語意([K2HeadBand])→ 畫面上的顏色與文字。
+  /// 定長窗模組刻意不 import material(才能被純 Dart 測試直接用),所以配色在這裡。
+  List<({int from, int to, String label, Color color})> _bandsOf(
+      K2FixedView? fx) {
+    if (fx == null) return const [];
+    return [
+      for (final b in fx.bands)
+        (
+          from: b.from,
+          to: b.to,
+          label: switch (b.kind) {
+            K2HeadBand.dead => tr('k2_band_dead'),
+            K2HeadBand.settle => tr('k2_band_settle'),
+            K2HeadBand.orientWait => tr('k2_band_orient'),
+            K2HeadBand.normal => tr('k2_band_normal'),
+          },
+          color: switch (b.kind) {
+            K2HeadBand.dead => Colors.red.withValues(alpha: 0.14),
+            K2HeadBand.settle => Colors.orange.withValues(alpha: 0.12),
+            K2HeadBand.orientWait => Colors.blue.withValues(alpha: 0.10),
+            K2HeadBand.normal => Colors.transparent,
+          },
+        ),
+    ];
+  }
+
   Widget _liveAndShortHrv() {
     final c = _adapter.latest; // 狀態旗標(手指 / SQI / 沉澱中)看原始的
     final v = _adapter.displayCompute; // 數值看這個 —— 手指離開時是保留的舊值
     final holding = _adapter.holding;
     // 短期窗一律先拿「帶索引的拍」,值與連續性都從它導出 → 三者保證同一批
-    final shortPts = _adapter.pointsRecentSeconds(_shortSec);
-    final shortHrv = _adapter.hrvRecentSeconds(_shortSec);
+    // ── 唯一的分流點:定長模式改吃凍結的那一份,其餘程式一字不動 ──────
+    //    滾動路徑(pointsRecentSeconds / hrvRecentSeconds / displayTroughs)
+    //    刻意保持原樣,它是定長模式的對照組。
+    final fx = _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null;
+    final shortPts = fx?.pts ?? _adapter.pointsRecentSeconds(_shortSec);
+    final shortHrv =
+        fx != null ? fx.hv : _adapter.hrvRecentSeconds(_shortSec);
     final shortRr = [for (final p in shortPts) p.rr];
     // 軟體端(Strapi)要的衍生欄位 —— 用**同一批** shortPts/shortHrv 算,
     // 保證畫面上的 SDNN 跟 pns/stress 那些是同一段資料導出來的。
     // 每秒算一次:Lomb-Scargle 約 250 個頻率 × 35 拍、FFT 4096 點,都可忽略。
-    final metrics = Max30102VitalsMetrics.compute(
-      pts: shortPts,
-      hv: shortHrv,
-      sqiOk: c?.sqiOk ?? false,
-      settling: c?.settling ?? false,
-      bpm: v?.bpm,
-      ir: _adapter.waveIr,
-    );
-    final waveSamples = _shortSec * 100; // fs=100Hz;波形與短期 HRV 同一個視窗
+    // 定長模式下這一份是凍結窗自己算好的(而且有 memo,不會每秒重算)。
+    final metrics = fx?.metrics ??
+        Max30102VitalsMetrics.compute(
+          pts: shortPts,
+          hv: shortHrv,
+          sqiOk: c?.sqiOk ?? false,
+          settling: c?.settling ?? false,
+          bpm: v?.bpm,
+          ir: _adapter.waveIr,
+        );
+    // 定長模式的波形多了還原回來的開頭段 → 圖要變寬才放得下。
+    final fxPre = fx == null ? 0 : fx.chartIr.length - fx.ir.length;
+    final waveSamples =
+        fx != null ? fxPre + fx.needSamples : _shortSec * 100; // fs=100Hz
     // 「N 秒前」參考線:比目前視窗小的那幾檔(視窗 30s → 畫 10s/20s 線,
     //  最左緣本身就是 30s,不另外畫)。波形圖與 RR 趨勢圖用同一組 → 兩張圖對得起來。
     final marks = [for (final s in _secOptions) if (s < _shortSec) s];
@@ -905,7 +1103,11 @@ class _K2PageState extends State<K2Page> {
             children: [
               // ── 黃:左側垂直資料面板 ──
               _sidePanel([
-                Text(trParams('k2_hrv_short', {'sec': _shortSec}),
+                _fixedSwitch(fx),
+                const Divider(height: 14),
+                Text(
+                    trParams(_fixedMode ? 'k2_hrv_fixed' : 'k2_hrv_short',
+                        {'sec': _shortSec}),
                     style: const TextStyle(
                         fontSize: 12, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
@@ -929,15 +1131,25 @@ class _K2PageState extends State<K2Page> {
                     // 谷標點也在 builder 內每次重算(不能在外層凍結,否則標點不會跟著動)。
                     Expanded(
                       child: ValueListenableBuilder<int>(
-                        valueListenable: _adapter.sampleVersionNotifier,
+                        // 定長模式聽 growVersion:收滿之後它就不再遞增 → 波形
+                        // 一次都不重繪。「畫面真的靜止」本身就是凍結的證明。
+                        valueListenable: _fixedMode
+                            ? _adapter.fixedWindow.growVersion
+                            : _adapter.sampleVersionNotifier,
                         builder: (context, ver, _) => K2WaveChart(
-                          ir: _adapter.waveIr,
-                          red: _adapter.waveRed,
-                          troughs: _adapter.displayTroughs(),
+                          // ⚠ shouldRepaint 不比對 ir:切換開關時 displaySamples
+                          //   與 version 可能都沒變 → 不換 key 波形不會更新。
+                          key: ValueKey(_fixedMode),
+                          ir: fx?.chartIr ?? _adapter.waveIr,
+                          red: fx?.chartRed ?? _adapter.waveRed,
+                          troughs:
+                              fx?.chartTroughs ?? _adapter.displayTroughs(),
+                          bands: _bandsOf(fx),
                           version: ver,
-                          markSeconds: marks,
+                          markSeconds: fx != null ? const [] : marks,
                           displaySamples: waveSamples,
-                          windowSeconds: _shortSec,
+                          windowSeconds:
+                              fx != null ? (waveSamples / 100).round() : _shortSec,
                           baselineWindow:
                               (100 / _adapter.core.config.bandLowHz).round(),
                           trimWindow: 9,
@@ -1279,9 +1491,11 @@ class _K2PageState extends State<K2Page> {
           Padding(
             padding: const EdgeInsets.only(top: 2, bottom: 2),
             child: Text(
-              '⚠ LF 只走 ${spec.lfCycles.toStringAsFixed(1)} 圈'
+              // 圈數用**兩位**小數:HF 常常剛好卡在門檻附近(3.97 圈),
+              // 一位小數會顯示成「4.0 圈,同樣不足」,看起來像判斷錯了。
+              '⚠ LF 只走 ${spec.lfCycles.toStringAsFixed(2)} 圈'
               '(需 ≥${HrvSpectrum.minBandCycles.toStringAsFixed(0)})。'
-              'HF 有 ${spec.hfCycles.toStringAsFixed(1)} 圈'
+              'HF 有 ${spec.hfCycles.toStringAsFixed(2)} 圈'
               '${spec.hfUsable ? ',是可用的那一半' : ',同樣不足'}。\n'
               '  數字照送(攝影機端也是 30 秒),可信度另以 lf_reliable 標明',
               style: TextStyle(fontSize: 9, color: Colors.orange.shade800),

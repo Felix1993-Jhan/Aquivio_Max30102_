@@ -25,6 +25,7 @@ import '../k2_core.dart';
 import '../k2_hrv_calculator.dart';
 import '../k2_protocol.dart';
 import 'k2_breathhold.dart';
+import 'k2_fixed_window.dart';
 import 'k2_lf_experiment.dart';
 import 'k2_snapshot.dart';
 
@@ -126,6 +127,25 @@ class K2SerialAdapter extends ChangeNotifier {
   /// 用途:把血氧壓低,才分得出兩片模組的波長有沒有差(99% 附近曲線太平)。
   final K2BreathHold breathHold = K2BreathHold();
 
+  /// 定長量測:凍結「這次量測的前 N 秒」當對照組。
+  /// 它自己是 ChangeNotifier,畫面用 ListenableBuilder 單獨聽(見 k2_fixed_window)。
+  final K2FixedWindow fixedWindow = K2FixedWindow();
+
+  // ── 原始樣本滾動緩衝 —— 只為了還原「被核心丟掉的開頭」──────────────
+  //
+  // 核心在空轉期(1.5s)直接丟棄樣本、沉澱期(2.0s)只留在自己的緩衝裡當 baseline
+  // 前後文,兩段都**永遠不會輸出**。想在畫面上看到那 3.5 秒(確認核心真的做了
+  // 該做的事、以及評估能不能縮短),唯一不動核心的辦法就是**自己再解一份**:
+  // `decodeFifoResponse` 是純函式,同一個封包解兩次沒有副作用。
+  //
+  // 只留 10 秒:第一批輸出抵達時要回頭撈的是約 350 筆,10 秒綽綽有餘。
+  final List<int> _rawIr = [];
+  final List<int> _rawRed = [];
+  static const int _rawCap = 1000;
+
+  /// 這一次量測的開頭是否已經還原過(每次 didReset 後重置)。
+  bool _preDone = false;
+
   /// 收發日誌(最新在最後)。
   final List<String> logs = [];
   static const int _logCap = 500;
@@ -168,8 +188,36 @@ class K2SerialAdapter extends ChangeNotifier {
   void reset() {
     core.reset();
     _clearLocal();
+    // 「清除」的語意就是全部歸零,定長窗不能留著上一段。
+    fixedWindow.hardClear();
+    _preDone = false;
     _log(tr('k2_log_cleared_core'));
     notifyListeners();
+  }
+
+  /// 把核心丟掉的開頭(空轉期 + 沉澱期)從原始緩衝裡撈回來,交給定長窗顯示。
+  ///
+  /// 對位只做一次,靠「最新的那一筆樣本在兩邊都是最新的」:
+  /// ```
+  /// 核心這批最後一筆的絕對位置 = r.firstAbs + r.newIr.length − 1
+  /// 它在原始緩衝裡的索引       = _rawIr.length − 1
+  /// ⇒ 絕對位置 x 的原始索引    = _rawIr.length − (r.firstAbs + r.newIr.length) + x
+  /// ```
+  /// 要撈的是絕對位置 `[0, r.firstAbs)` —— 也就是零點之前那一整段。
+  /// 撈不到(緩衝不夠深、或中途才連上)就放棄,畫面會標「開頭未還原」。
+  void _recoverPreRoll(K2FeedResult r) {
+    final preLen = r.firstAbs;
+    if (preLen <= 0) {
+      _preDone = true; // 沒有被丟掉的開頭(理論上不會,保險)
+      return;
+    }
+    final start = _rawIr.length - (r.firstAbs + r.newIr.length);
+    if (start < 0 || start + preLen > _rawIr.length) return; // 等下一批再試
+    fixedWindow.setPreRoll(
+      _rawIr.sublist(start, start + preLen),
+      _rawRed.sublist(start, start + preLen),
+    );
+    _preDone = true;
   }
 
   /// 清掉 **UI 這一側**存的所有東西(核心不動)。
@@ -250,14 +298,44 @@ class K2SerialAdapter extends ChangeNotifier {
       }
     }
 
+    // 原始樣本另存一份(只為了還原核心丟掉的開頭,見 _rawIr 的說明)。
+    // 必須在 feedData 之前解:解碼是純函式,順序其實無關,但放前面讀起來
+    // 才符合「這是同一批 bytes 的兩種用途」。
+    if (packet.length > 4 && packet[4] == Max30102Protocol.kSubQueryFifo) {
+      for (final s in Max30102Protocol.decodeFifoResponse(packet)) {
+        _rawIr.add(s.ir);
+        _rawRed.add(s.red);
+      }
+      final rawOver = _rawIr.length - _rawCap;
+      if (rawOver > 0) {
+        _rawIr.removeRange(0, rawOver);
+        _rawRed.removeRange(0, rawOver);
+      }
+    }
+
     // ★ 唯一與核心互動的地方:原封丟進去,核心自己驗 CS、拆 red/ir、累積、算。
     final r = core.feedData(packet);
+
+    // 定長量測:每一個封包都要餵,**不可以只在有樣本或有 computed 時餵** ——
+    // didReset 與 computed 是兩條獨立的資訊,少接一條就會漏掉量測結束或漏掉拍。
+    fixedWindow.feed(
+      firstAbs: r.firstAbs,
+      newIr: r.newIr,
+      newRed: r.newRed,
+      computed: r.computed,
+      didReset: r.didReset,
+      cap: _waveCap,
+      deadSamples: core.config.fingerDeadSamples,
+      settleSamples: core.config.settleSamples,
+    );
+    if (!_preDone && r.newIr.isNotEmpty) _recoverPreRoll(r);
 
     // 核心自行歸零過 → 我們存的座標全失效,一起丟掉重來。
     // 兩種來源:①免洗模式下確認手指離開(常態) ②絕對索引到頂(約 497 天才一次)。
     // 旗標只有一個、分不出來,所以訊息寫中性的。
     if (r.didReset) {
       _clearLocal();
+      _preDone = false; // 下一次量測要重新還原它自己的開頭
       _log(tr('k2_log_core_reset'));
     }
 
@@ -377,35 +455,49 @@ class K2SerialAdapter extends ChangeNotifier {
   ///
   /// 格式與舊版快照相容(ir/red/goldTroughs/fs 同名),可餵回核心重放。
   /// ⚠️ 免洗版**不再寫 longTerm 欄位**(長期池已移除)。舊快照檔裡若有,讀取時忽略。
-  Map<String, dynamic> buildSnapshot() {
+  /// [fixed] 非 null → 存**定長窗**那一份(凍結的前 N 秒)而不是滾動視窗。
+  /// ⚠️ **JSON 的欄位名、結構、版本號一個都不改** —— 只換填進去的內容,
+  ///    舊快照與檢視器完全不受影響。
+  Map<String, dynamic> buildSnapshot({K2FixedView? fixed, int? windowSec}) {
     const fs = Max30102Config.samplingRateHz;
     final c = latest;
-    final hv = c?.hrv;
+    final hv = fixed != null ? fixed.hv : c?.hrv;
+    final pts = fixed?.pts ?? c?.rrPoints ?? const <HrvRrPoint>[];
 
     return {
       'version': 'k2-1',
       'tsMillis': DateTime.now().millisecondsSinceEpoch,
       'fs': fs,
-      'windowSeconds': _waveCap ~/ fs,
-      // 核心視窗(畫面上看得到的那段)
-      'ir': List<int>.of(waveIr),
-      'red': List<int>.of(waveRed),
-      'goldTroughs': displayTroughs(), // 視窗內索引,重放對拍用
+      'windowSeconds': fixed != null ? (windowSec ?? _waveCap ~/ fs) : _waveCap ~/ fs,
+      // 核心視窗(畫面上看得到的那段);定長模式存的是凍結的那一段
+      'ir': List<int>.of(fixed?.ir ?? waveIr),
+      'red': List<int>.of(fixed?.red ?? waveRed),
+      // 視窗內索引(不是絕對索引),重放對拍用。定長模式的 ir 從 fixed.base
+      // 起算,所以谷的索引要減掉那個零點。
+      'goldTroughs': fixed != null
+          ? [
+              for (final p in pts)
+                if (p.endAbs - fixed.base < fixed.ir.length)
+                  p.endAbs - fixed.base
+            ]
+          : displayTroughs(),
       // 30 秒視窗的 RR(帶起訖谷)→ 檢視器重畫 RR 趨勢 / Poincaré 用
-      'rr': [for (final p in (c?.rrPoints ?? const <HrvRrPoint>[])) p.rr],
-      'rrStartAbs': [for (final p in (c?.rrPoints ?? const <HrvRrPoint>[])) p.startAbs],
-      'rrEndAbs': [for (final p in (c?.rrPoints ?? const <HrvRrPoint>[])) p.endAbs],
-      'bpm': c?.bpm,
-      'spo2': c?.spo2,
+      'rr': [for (final p in pts) p.rr],
+      'rrStartAbs': [for (final p in pts) p.startAbs],
+      'rrEndAbs': [for (final p in pts) p.endAbs],
+      'bpm': fixed != null ? hv?.meanHr : c?.bpm,
+      'spo2': fixed != null ? fixed.spo2 : c?.spo2,
       'fingerPresent': c?.fingerPresent ?? false,
       // 給檢視器重算 confidence / sqi 用 —— 那兩個從 rr/ir 推不出來,
       // 只能存當下的狀態。舊快照沒有,讀取時會是 null(顯示「—」)。
-      'sqiOk': c?.sqiOk ?? false,
-      'settling': c?.settling ?? false,
+      'sqiOk': fixed != null ? fixed.sqiOkRounds * 2 >= fixed.rounds : (c?.sqiOk ?? false),
+      'settling': fixed != null ? false : (c?.settling ?? false),
       // 通道方向 —— `'swapped'` 是**仿製模組的指紋**(把兩顆 LED 晶粒裝反;
       // 原廠封裝不會這樣,而 PART_ID / REV_ID 都偽造得一模一樣,讀暫存器分不出來)。
       // 存下來,幾個月後回頭看歷史資料還答得出「這筆是用哪種板子量的」。
-      'channelOrient': (c?.orient ?? K2ChannelOrient.unknown).name,
+      'channelOrient':
+          (fixed != null ? fixed.orient : (c?.orient ?? K2ChannelOrient.unknown))
+              .name,
       if (hv != null)
         'shortHrv': {
           'sdnn': hv.sdnn,
@@ -421,13 +513,13 @@ class K2SerialAdapter extends ChangeNotifier {
   }
 
   /// 存快照到桌面 `max30102_snapshots`。回傳存檔路徑(失敗回 null)。
-  Future<String?> saveSnapshot() async {
-    if (waveIr.isEmpty) {
+  Future<String?> saveSnapshot({K2FixedView? fixed, int? windowSec}) async {
+    if ((fixed?.ir ?? waveIr).isEmpty) {
       _log(tr('k2_log_no_wave'));
       notifyListeners();
       return null;
     }
-    final snap = buildSnapshot();
+    final snap = buildSnapshot(fixed: fixed, windowSec: windowSec);
     final path = await K2SnapshotStore.save(
       snap,
       snap['tsMillis'] as int,
@@ -466,6 +558,7 @@ class K2SerialAdapter extends ChangeNotifier {
     sampleVersionNotifier.dispose();
     lfExperiment.dispose();
     breathHold.dispose();
+    fixedWindow.dispose();
     super.dispose();
   }
 }

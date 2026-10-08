@@ -46,6 +46,12 @@ class K2WaveChart extends StatelessWidget {
   /// 「N 秒前」垂直參考線(例:[10, 20]);與下方 RR 趨勢圖用同一組秒數。
   final List<int> markSeconds;
 
+  /// 時間區塊底色(定長模式用:空轉 / 沉澱 / 方向判定 / 正常)。
+  /// `from`/`to` 是**相對 [ir] 第 0 筆**的索引;顏色與文字由呼叫端決定 ——
+  /// 這裡只負責畫,語意留在上層(定長窗模組不 import material)。
+  /// 滾動模式傳空陣列(開頭早就滑出畫面了)。
+  final List<({int from, int to, String label, Color color})> bands;
+
   const K2WaveChart({
     super.key,
     required this.ir,
@@ -61,6 +67,7 @@ class K2WaveChart extends StatelessWidget {
     this.showIr = true,
     this.showRed = true,
     this.fixedAmp,
+    this.bands = const [],
   });
 
   @override
@@ -77,6 +84,7 @@ class K2WaveChart extends StatelessWidget {
           baselineWindow: baselineWindow,
           trimWindow: trimWindow,
           promRatio: promRatio,
+          bands: bands,
           showIr: showIr,
           showRed: showRed,
           hrvTroughAbs: troughs, // 🟡 谷標點
@@ -117,6 +125,7 @@ class _Waveform2Painter extends CustomPainter {
   final double? fixedAmp; // 非 null → 縱軸固定半振幅;null → 自動
   final int version;
   final List<int> markSeconds; // 「N 秒前」垂直參考線
+  final List<({int from, int to, String label, Color color})> bands;
   final AppLanguage lang; // 只為了讓 shouldRepaint 認得語言變化
 
   static const Color _irColor = Color(0xFF80DEEA); // IR：青
@@ -142,6 +151,7 @@ class _Waveform2Painter extends CustomPainter {
     required this.ectopicAbs,
     this.fixedAmp,
     required this.version,
+    this.bands = const [],
     this.markSeconds = const [],
     required this.lang,
   });
@@ -212,6 +222,25 @@ class _Waveform2Painter extends CustomPainter {
       final x = w * s / windowSeconds;
       canvas.drawLine(Offset(x, 0), Offset(x, mainBottom), grid);
     }
+    // ── 時間區塊底色 ──────────────────────────────────────────────
+    // 索引是相對 ir[0] 的,只有「整段波形都放得下」時才對得上;滾動模式
+    // 傳空陣列所以平常不會執行。畫在格線之後、波形之前 → 不蓋住資料。
+    if (bands.isNotEmpty && count <= displaySamples) {
+      for (final b in bands) {
+        final x0 = xOfVisible(b.from.clamp(0, visible));
+        final x1 = xOfVisible(b.to.clamp(0, visible));
+        if (x1 - x0 < 0.5) continue;
+        canvas.drawRect(
+            Rect.fromLTRB(x0, 0, x1, mainBottom), Paint()..color = b.color);
+        canvas.drawLine(Offset(x1, 0), Offset(x1, mainBottom),
+            Paint()..color = Colors.white.withValues(alpha: 0.18));
+        if (b.label.isNotEmpty && x1 - x0 > 30) {
+          _text(canvas, b.label, Offset(x0 + 3, mainBottom - 13),
+              Colors.white.withValues(alpha: 0.55), 9);
+        }
+      }
+    }
+
     // 中線(baseline)：白色虛線水平置中
     _dashedH(canvas, w, mid, Colors.white.withValues(alpha: 0.5));
     _text(canvas, tr('k2_chart_baseline'), Offset(4, mid - 11),
@@ -644,6 +673,8 @@ class _Waveform2Painter extends CustomPainter {
       old.showIr != showIr ||
       old.showRed != showRed ||
       old.fixedAmp != fixedAmp ||
+      old.bands.length != bands.length ||
+      (bands.isNotEmpty && old.bands.last.to != bands.last.to) ||
       old.lang != lang;
 }
 
