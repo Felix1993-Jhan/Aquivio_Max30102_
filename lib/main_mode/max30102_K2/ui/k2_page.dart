@@ -1069,10 +1069,17 @@ class _K2PageState extends State<K2Page> {
         (
           from: b.from,
           to: b.to,
+          // 區塊上直接標它實際多長 —— 判定花了多久(0.5s 還是 3.2s)一眼看得到。
           label: switch (b.kind) {
-            K2HeadBand.dead => tr('k2_band_dead'),
-            K2HeadBand.settle => tr('k2_band_settle'),
-            K2HeadBand.orientWait => tr('k2_band_orient'),
+            K2HeadBand.dead => trParams('k2_band_dead', {
+                'sec': ((b.to - b.from) / 100).toStringAsFixed(1),
+              }),
+            K2HeadBand.settle => trParams('k2_band_settle', {
+                'sec': ((b.to - b.from) / 100).toStringAsFixed(1),
+              }),
+            K2HeadBand.orientWait => trParams('k2_band_orient', {
+                'sec': ((b.to - b.from) / 100).toStringAsFixed(1),
+              }),
             K2HeadBand.normal => tr('k2_band_normal'),
           },
           color: switch (b.kind) {
@@ -1140,6 +1147,47 @@ class _K2PageState extends State<K2Page> {
         : (headInRolling
             ? _headBands(fw, chartIr.length)
             : const <({int from, int to, K2HeadBand kind})>[]));
+    // ── 事件標記:核心裡那幾個精確的瞬間 ────────────────────────────
+    //
+    // ⚠️ 「沉澱結束」「開始累積待釋放」「開始判定」是**同一個瞬間** ——
+    //    核心的沉澱期 return 寫在計算之前,所以那段連 _compute() 都不會跑,
+    //    自然沒有 R、沒有投票;_pendingOut 也是從沉澱結束那一批才開始累加。
+    //    三件事收斂成一條線,不必畫三條。
+    //
+    // 「釋放」= 方向鎖定那一刻,把壓著的整段一次吐出(= 第一批輸出的尾端)。
+    //
+    // 「baseline 可信起點」= 陣列開頭 + 半個 baseline 視窗。置中移動平均在
+    //    陣列最前面取不到左半邊 → 那 1 秒的 baseline 是偏的,去趨勢後會凸一塊。
+    //    這正是「釋放出來最前面 0.x 秒波形異常大」的來源 —— 核心自己不受影響
+    //    (它緩衝裡有沉澱期那 200 筆當左緣前後文),問題只在畫圖端。
+    //    接上還原的開頭之後,釋放段不再位於陣列左緣,那個假凸起就會消失。
+    final baselineWin = (100 / _adapter.core.config.bandLowHz).round();
+    final chartEvents = <({int at, String label, Color color})>[
+      if (preLen > 0) ...[
+        (
+          at: preLen,
+          label: trParams('k2_ev_settled', {
+            'sec': (preLen / 100).toStringAsFixed(2),
+          }),
+          color: Colors.lightBlueAccent.withValues(alpha: 0.75),
+        ),
+        if (fw.firstBatchLen > 0)
+          (
+            at: preLen + fw.firstBatchLen,
+            label: trParams('k2_ev_release', {
+              'sec': ((preLen + fw.firstBatchLen) / 100).toStringAsFixed(2),
+            }),
+            color: Colors.greenAccent.withValues(alpha: 0.75),
+          ),
+      ],
+      (
+        at: baselineWin ~/ 2,
+        label: trParams('k2_ev_baseline_ok', {
+          'sec': (baselineWin / 2 / 100).toStringAsFixed(2),
+        }),
+        color: Colors.white.withValues(alpha: 0.45),
+      ),
+    ];
     // 多了開頭段 → 圖要變寬才放得下
     final waveSamples =
         fx != null ? preLen + fx.needSamples : preLen + _shortSec * 100;
@@ -1205,6 +1253,7 @@ class _K2PageState extends State<K2Page> {
                           red: chartRed,
                           troughs: chartTroughs,
                           bands: chartBands,
+                          events: chartEvents,
                           version: ver,
                           markSeconds: preLen > 0 ? const [] : marks,
                           displaySamples: waveSamples,

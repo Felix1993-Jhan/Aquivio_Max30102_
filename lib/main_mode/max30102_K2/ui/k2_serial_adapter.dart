@@ -214,9 +214,21 @@ class K2SerialAdapter extends ChangeNotifier {
     }
     final start = _rawIr.length - (r.firstAbs + r.newIr.length);
     if (start < 0 || start + preLen > _rawIr.length) return; // 等下一批再試
+
+    // ⚠️ **結論要往回套用。** 這段資料本身沒有錯,它只是「還沒貼標籤」——
+    // 原始封包裡只有槽 1 / 槽 2,哪個是 IR 哪個是 RED 本來就不知道,
+    // 空轉 / 沉澱 / 判定這三段做的事情就是在找出答案。核心的做法是
+    // 「答案出來之前一個樣本都不送,出來那一刻把壓著的整段貼好標籤再送」,
+    // 這裡是同一件事:拿**核心同一個** orient 欄位,往回套用到還原的那段。
+    // 不套用的話接縫處兩路互換,實測是近 10,000 counts 的階梯,而波形圖畫的是
+    // 「原始值 − 2 秒置中移動平均」,一個階梯會讓前後各約 1 秒整個炸開。
+    final orient = r.computed?.orient ?? latest?.orient;
+    final swapped = orient == K2ChannelOrient.swapped;
+    final sliceIr = _rawIr.sublist(start, start + preLen);
+    final sliceRed = _rawRed.sublist(start, start + preLen);
     fixedWindow.setPreRoll(
-      _rawIr.sublist(start, start + preLen),
-      _rawRed.sublist(start, start + preLen),
+      swapped ? sliceRed : sliceIr,
+      swapped ? sliceIr : sliceRed,
     );
     _preDone = true;
   }

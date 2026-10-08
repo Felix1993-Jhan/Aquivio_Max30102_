@@ -52,6 +52,10 @@ class K2WaveChart extends StatelessWidget {
   /// 滾動模式傳空陣列(開頭早就滑出畫面了)。
   final List<({int from, int to, String label, Color color})> bands;
 
+  /// 事件標記:垂直虛線 + 文字。`at` 是**相對 [ir] 第 0 筆**的索引。
+  /// 用來標出核心裡那幾個精確的瞬間(判定開始 / 釋放 / baseline 可信起點)。
+  final List<({int at, String label, Color color})> events;
+
   const K2WaveChart({
     super.key,
     required this.ir,
@@ -68,6 +72,7 @@ class K2WaveChart extends StatelessWidget {
     this.showRed = true,
     this.fixedAmp,
     this.bands = const [],
+    this.events = const [],
   });
 
   @override
@@ -85,6 +90,7 @@ class K2WaveChart extends StatelessWidget {
           trimWindow: trimWindow,
           promRatio: promRatio,
           bands: bands,
+          events: events,
           showIr: showIr,
           showRed: showRed,
           hrvTroughAbs: troughs, // 🟡 谷標點
@@ -126,6 +132,7 @@ class _Waveform2Painter extends CustomPainter {
   final int version;
   final List<int> markSeconds; // 「N 秒前」垂直參考線
   final List<({int from, int to, String label, Color color})> bands;
+  final List<({int at, String label, Color color})> events;
   final AppLanguage lang; // 只為了讓 shouldRepaint 認得語言變化
 
   static const Color _irColor = Color(0xFF80DEEA); // IR：青
@@ -152,6 +159,7 @@ class _Waveform2Painter extends CustomPainter {
     this.fixedAmp,
     required this.version,
     this.bands = const [],
+    this.events = const [],
     this.markSeconds = const [],
     required this.lang,
   });
@@ -238,6 +246,15 @@ class _Waveform2Painter extends CustomPainter {
           _text(canvas, b.label, Offset(x0 + 3, mainBottom - 13),
               Colors.white.withValues(alpha: 0.55), 9);
         }
+      }
+    }
+
+    // 事件標記:垂直虛線 + 文字。與區塊同一套索引,所以同樣只在整段放得下時畫。
+    if (events.isNotEmpty && count <= displaySamples) {
+      for (final e in events) {
+        final x = xOfVisible(e.at.clamp(0, visible));
+        _dashedV(canvas, x, mainBottom, e.color);
+        _text(canvas, e.label, Offset(x + 3, 15), e.color, 9);
       }
     }
 
@@ -634,6 +651,18 @@ class _Waveform2Painter extends CustomPainter {
   // (K2 版已移除 _drawAcStrip:AC 回血/供血折上帶不再顯示)
 
   // ---- helpers ----
+  void _dashedV(Canvas canvas, double x, double h, Color color) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+    const dash = 5.0, gap = 4.0;
+    double y = 0;
+    while (y < h) {
+      canvas.drawLine(Offset(x, y), Offset(x, (y + dash).clamp(0, h)), paint);
+      y += dash + gap;
+    }
+  }
+
   void _dashedH(Canvas canvas, double w, double y, Color color) {
     final paint = Paint()
       ..color = color
@@ -674,6 +703,8 @@ class _Waveform2Painter extends CustomPainter {
       old.showRed != showRed ||
       old.fixedAmp != fixedAmp ||
       old.bands.length != bands.length ||
+      old.events.length != events.length ||
+      (events.isNotEmpty && old.events.last.at != events.last.at) ||
       (bands.isNotEmpty && old.bands.last.to != bands.last.to) ||
       old.lang != lang;
 }
