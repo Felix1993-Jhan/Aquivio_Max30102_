@@ -573,6 +573,10 @@ class LocalizationService {
       // ── 定長量測(只算這次量測的前 N 秒)──────────────────────────
       'k2_window_range': '10~{max}',
       'k2_fixed_mode': '定長',
+      'k2_hide_dead': '隱藏空轉段',
+      'k2_hide_dead_tip': '把開頭空轉期那 1.5 秒從圖上拿掉(只是顯示,那段本來就沒進計算)。'
+          '先按開始、手指才壓上去時,IR 會從 5 萬爬到 9 萬,縱軸會被那根大波吃掉,'
+          '後面真正的脈搏被壓成一條直線。確認過核心在做什麼之後就可以收起來。',
       'k2_snap_full': '完整',
       'k2_snap_full_tip': '完整存檔:快照額外寫入「核心丟掉的開頭段(空轉 + 沉澱)、'
           '定長窗狀態、軟體端衍生的全部數值、HRV 全欄位」。'
@@ -1264,6 +1268,11 @@ class LocalizationService {
       // ── Fixed window (first N seconds of this measurement only) ──
       'k2_window_range': '10~{max}',
       'k2_fixed_mode': 'Fixed',
+      'k2_hide_dead': 'Hide dead',
+      'k2_hide_dead_tip': 'Removes the 1.5s dead period from the chart (display '
+          'only; that segment never enters any calculation). When start is '
+          'pressed before the finger lands, IR ramps from 50k to 90k and that '
+          'swing takes over the vertical scale, flattening the real pulse.',
       'k2_snap_full': 'Full',
       'k2_snap_full_tip': 'Full snapshot: also writes the head segment the core '
           'discards (dead + settling), fixed-window state, every derived value, '

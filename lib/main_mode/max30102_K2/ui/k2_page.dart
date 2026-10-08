@@ -65,6 +65,12 @@ class _K2PageState extends State<K2Page> {
   /// 目前視窗長(秒)。上限受 K2SerialAdapter._waveCap 限制(目前 30s)。
   int _shortSec = 30;
 
+  /// 隱藏空轉段(只有定長模式有意義)。空轉期那 1.5 秒若是「先按開始、手指才
+  /// 壓上去」,IR 會從 5 萬爬到 9 萬,p2p 實測到 33554 —— 縱軸是跨通道取最大
+  /// 振幅,那根大波會把後面真正的脈搏壓成一條直線。看過一次確認核心在做什麼
+  /// 之後就可以收起來。滾動模式不需要這個:那段本來就會自己滑出畫面。
+  bool _hideDead = false;
+
   /// 完整存檔:開 = 快照額外寫入開頭段與全部衍生數值。**預設關** ——
   /// 關閉時產出的檔案與以往逐位元相同,舊檢視器與既有的比對流程不受影響。
   bool _fullSnapshot = false;
@@ -1026,6 +1032,23 @@ class _K2PageState extends State<K2Page> {
                     fontSize: 11.5, fontWeight: FontWeight.bold)),
           ],
         ),
+        // 空轉段的開關:只有定長模式、而且真的還原到開頭時才出現。
+        // 滾動模式不需要 —— 那段本來就會自己滑出畫面。
+        if (_fixedMode && fx != null && !fx.preMissing)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Tooltip(
+              message: tr('k2_hide_dead_tip'),
+              child: FilterChip(
+                label: Text(tr('k2_hide_dead'),
+                    style: const TextStyle(fontSize: 10)),
+                selected: _hideDead,
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onSelected: (b) => setState(() => _hideDead = b),
+              ),
+            ),
+          ),
         for (final l in lines)
           Padding(
             padding: const EdgeInsets.only(top: 1),
@@ -1142,11 +1165,38 @@ class _K2PageState extends State<K2Page> {
     // 谷標點是「陣列索引」,前面接了開頭段就要整批往後平移。
     final chartTroughs = fx?.chartTroughs ??
         [for (final t in _adapter.displayTroughs()) t + preLen];
-    final chartBands = _paintBands(fx != null
+    final rawBands = fx != null
         ? fx.bands
         : (headInRolling
             ? _headBands(fw, chartIr.length)
-            : const <({int from, int to, K2HeadBand kind})>[]));
+            : const <({int from, int to, K2HeadBand kind})>[]);
+
+    // ── 隱藏空轉段:把陣列開頭那一截整個拿掉,索引全部往前移 ────────────
+    //    只是顯示上的裁切 —— 那段資料本來就沒有進入任何計算。
+    final dropHead = (_hideDead && fx != null && preLen > 0)
+        ? math.min(fw.deadSamples, preLen)
+        : 0;
+    final headLen = preLen - dropHead; // 裁切後,開頭段還剩多長
+    final viewIr = dropHead > 0 ? chartIr.sublist(dropHead) : chartIr;
+    final viewRed = dropHead > 0 ? chartRed.sublist(dropHead) : chartRed;
+    final viewTroughs = dropHead > 0
+        ? [
+            for (final t in chartTroughs)
+              if (t >= dropHead) t - dropHead
+          ]
+        : chartTroughs;
+    final chartBands = _paintBands(dropHead > 0
+        ? [
+            for (final b in rawBands)
+              if (b.to > dropHead)
+                (
+                  from: b.from > dropHead ? b.from - dropHead : 0,
+                  to: b.to - dropHead,
+                  kind: b.kind,
+                )
+          ]
+        : rawBands);
+
     // ── 事件標記:核心裡那幾個精確的瞬間 ────────────────────────────
     //
     // ⚠️ 「沉澱結束」「開始累積待釋放」「開始判定」是**同一個瞬間** ——
@@ -1162,10 +1212,13 @@ class _K2PageState extends State<K2Page> {
     //    (它緩衝裡有沉澱期那 200 筆當左緣前後文),問題只在畫圖端。
     //    接上還原的開頭之後,釋放段不再位於陣列左緣,那個假凸起就會消失。
     final baselineWin = (100 / _adapter.core.config.bandLowHz).round();
+    // ⚠️ 時間標籤一律用「距手指偵測」的絕對秒數(所以用 preLen 不是 headLen)——
+    //    裁掉空轉段只是把畫面往後挪,事件發生的時刻不會因此改變。
+    //    但**位置**要用裁切後的 headLen,否則線會畫錯地方。
     final chartEvents = <({int at, String label, Color color})>[
-      if (preLen > 0) ...[
+      if (headLen > 0) ...[
         (
-          at: preLen,
+          at: headLen,
           label: trParams('k2_ev_settled', {
             'sec': (preLen / 100).toStringAsFixed(2),
           }),
@@ -1173,7 +1226,7 @@ class _K2PageState extends State<K2Page> {
         ),
         if (fw.firstBatchLen > 0)
           (
-            at: preLen + fw.firstBatchLen,
+            at: headLen + fw.firstBatchLen,
             label: trParams('k2_ev_release', {
               'sec': ((preLen + fw.firstBatchLen) / 100).toStringAsFixed(2),
             }),
@@ -1188,9 +1241,10 @@ class _K2PageState extends State<K2Page> {
         color: Colors.white.withValues(alpha: 0.45),
       ),
     ];
-    // 多了開頭段 → 圖要變寬才放得下
+    // 多了開頭段 → 圖要變寬才放得下(裁掉空轉段之後就再縮回來)
     final waveSamples =
-        fx != null ? preLen + fx.needSamples : preLen + _shortSec * 100;
+        (fx != null ? preLen + fx.needSamples : preLen + _shortSec * 100) -
+            dropHead;
     // 「N 秒前」參考線:比目前視窗小的那幾檔(視窗 30s → 畫 10s/20s 線,
     //  最左緣本身就是 30s,不另外畫)。波形圖與 RR 趨勢圖用同一組 → 兩張圖對得起來。
     final marks = [for (final s in _secOptions) if (s < _shortSec) s];
@@ -1248,10 +1302,10 @@ class _K2PageState extends State<K2Page> {
                         builder: (context, ver, _) => K2WaveChart(
                           // ⚠ shouldRepaint 不比對 ir:切換開關時 displaySamples
                           //   與 version 可能都沒變 → 不換 key 波形不會更新。
-                          key: ValueKey('$_fixedMode/${preLen > 0}'),
-                          ir: chartIr,
-                          red: chartRed,
-                          troughs: chartTroughs,
+                          key: ValueKey('$_fixedMode/${preLen > 0}/$dropHead'),
+                          ir: viewIr,
+                          red: viewRed,
+                          troughs: viewTroughs,
                           bands: chartBands,
                           events: chartEvents,
                           version: ver,
