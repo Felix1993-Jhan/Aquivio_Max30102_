@@ -1154,22 +1154,6 @@ class _K2PageState extends State<K2Page> {
     final preLen = fx != null
         ? fx.chartIr.length - fx.ir.length
         : (headInRolling ? fw.preIr.length : 0);
-    final chartIr = fx?.chartIr ??
-        (headInRolling
-            ? <int>[...fw.preIr, ..._adapter.waveIr]
-            : _adapter.waveIr);
-    final chartRed = fx?.chartRed ??
-        (headInRolling
-            ? <int>[...fw.preRed, ..._adapter.waveRed]
-            : _adapter.waveRed);
-    // 谷標點是「陣列索引」,前面接了開頭段就要整批往後平移。
-    final chartTroughs = fx?.chartTroughs ??
-        [for (final t in _adapter.displayTroughs()) t + preLen];
-    final rawBands = fx != null
-        ? fx.bands
-        : (headInRolling
-            ? _headBands(fw, chartIr.length)
-            : const <({int from, int to, K2HeadBand kind})>[]);
 
     // ── 隱藏空轉段:把陣列開頭那一截整個拿掉,索引全部往前移 ────────────
     //    只是顯示上的裁切 —— 那段資料本來就沒有進入任何計算。
@@ -1177,25 +1161,6 @@ class _K2PageState extends State<K2Page> {
         ? math.min(fw.deadSamples, preLen)
         : 0;
     final headLen = preLen - dropHead; // 裁切後,開頭段還剩多長
-    final viewIr = dropHead > 0 ? chartIr.sublist(dropHead) : chartIr;
-    final viewRed = dropHead > 0 ? chartRed.sublist(dropHead) : chartRed;
-    final viewTroughs = dropHead > 0
-        ? [
-            for (final t in chartTroughs)
-              if (t >= dropHead) t - dropHead
-          ]
-        : chartTroughs;
-    final chartBands = _paintBands(dropHead > 0
-        ? [
-            for (final b in rawBands)
-              if (b.to > dropHead)
-                (
-                  from: b.from > dropHead ? b.from - dropHead : 0,
-                  to: b.to - dropHead,
-                  kind: b.kind,
-                )
-          ]
-        : rawBands);
 
     // ── 事件標記:核心裡那幾個精確的瞬間 ────────────────────────────
     //
@@ -1299,24 +1264,71 @@ class _K2PageState extends State<K2Page> {
                         valueListenable: _fixedMode
                             ? _adapter.fixedWindow.growVersion
                             : _adapter.sampleVersionNotifier,
-                        builder: (context, ver, _) => K2WaveChart(
-                          // ⚠ shouldRepaint 不比對 ir:切換開關時 displaySamples
-                          //   與 version 可能都沒變 → 不換 key 波形不會更新。
-                          key: ValueKey('$_fixedMode/${preLen > 0}/$dropHead'),
-                          ir: viewIr,
-                          red: viewRed,
-                          troughs: viewTroughs,
-                          bands: chartBands,
-                          events: chartEvents,
-                          version: ver,
-                          markSeconds: preLen > 0 ? const [] : marks,
-                          displaySamples: waveSamples,
-                          windowSeconds: (waveSamples / 100).round(),
-                          baselineWindow:
-                              (100 / _adapter.core.config.bandLowHz).round(),
-                          trimWindow: 9,
-                          promRatio: _adapter.core.config.promRatio,
-                        ),
+                        builder: (context, ver, _) {
+                          // ⚠️ **波形與谷標點必須在 builder 內組**(10Hz),
+                          //    不能在外層算好傳進來(外層是 1Hz 的整頁 rebuild)——
+                          //    否則波形往前滑、標點卻停在原地,一秒才跳一次。
+                          //    定長模式的資料是靜態的,走同一條路不受影響。
+                          final srcIr = fx?.chartIr ??
+                              (headInRolling
+                                  ? <int>[...fw.preIr, ..._adapter.waveIr]
+                                  : _adapter.waveIr);
+                          final srcRed = fx?.chartRed ??
+                              (headInRolling
+                                  ? <int>[...fw.preRed, ..._adapter.waveRed]
+                                  : _adapter.waveRed);
+                          // 谷標點是「陣列索引」,前面接了開頭段就要整批往後平移。
+                          final srcTroughs = fx?.chartTroughs ??
+                              [
+                                for (final t in _adapter.displayTroughs())
+                                  t + preLen
+                              ];
+                          final srcBands = fx != null
+                              ? fx.bands
+                              : (headInRolling
+                                  ? _headBands(fw, srcIr.length)
+                                  : const <({
+                                      int from,
+                                      int to,
+                                      K2HeadBand kind
+                                    })>[]);
+                          return K2WaveChart(
+                            // ⚠ shouldRepaint 不比對 ir:切換開關時 displaySamples
+                            //   與 version 可能都沒變 → 不換 key 波形不會更新。
+                            key: ValueKey('$_fixedMode/${preLen > 0}/$dropHead'),
+                            ir: dropHead > 0 ? srcIr.sublist(dropHead) : srcIr,
+                            red:
+                                dropHead > 0 ? srcRed.sublist(dropHead) : srcRed,
+                            troughs: dropHead > 0
+                                ? [
+                                    for (final t in srcTroughs)
+                                      if (t >= dropHead) t - dropHead
+                                  ]
+                                : srcTroughs,
+                            bands: _paintBands(dropHead > 0
+                                ? [
+                                    for (final b in srcBands)
+                                      if (b.to > dropHead)
+                                        (
+                                          from: b.from > dropHead
+                                              ? b.from - dropHead
+                                              : 0,
+                                          to: b.to - dropHead,
+                                          kind: b.kind,
+                                        )
+                                  ]
+                                : srcBands),
+                            events: chartEvents,
+                            version: ver,
+                            markSeconds: preLen > 0 ? const [] : marks,
+                            displaySamples: waveSamples,
+                            windowSeconds: (waveSamples / 100).round(),
+                            baselineWindow:
+                                (100 / _adapter.core.config.bandLowHz).round(),
+                            trimWindow: 9,
+                            promRatio: _adapter.core.config.promRatio,
+                          );
+                        },
                       ),
                     ),
                     const SizedBox(height: 6),
