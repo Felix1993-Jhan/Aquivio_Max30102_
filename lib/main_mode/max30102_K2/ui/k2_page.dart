@@ -1177,10 +1177,15 @@ class _K2PageState extends State<K2Page> {
     //    (它緩衝裡有沉澱期那 200 筆當左緣前後文),問題只在畫圖端。
     //    接上還原的開頭之後,釋放段不再位於陣列左緣,那個假凸起就會消失。
     final baselineWin = (100 / _adapter.core.config.bandLowHz).round();
+    // ⚠️ **只有「有開頭段」或「定長模式」時才標。** 平常的滾動視窗維持原樣 ——
+    //    這次要做的是「把前面還原出來」,後面本來就看得到的東西不該被動到。
+    final showEvents = fx != null || preLen > 0;
     // ⚠️ 時間標籤一律用「距手指偵測」的絕對秒數(所以用 preLen 不是 headLen)——
     //    裁掉空轉段只是把畫面往後挪,事件發生的時刻不會因此改變。
     //    但**位置**要用裁切後的 headLen,否則線會畫錯地方。
-    final chartEvents = <({int at, String label, Color color})>[
+    final chartEvents = !showEvents
+        ? const <({int at, String label, Color color})>[]
+        : <({int at, String label, Color color})>[
       if (headLen > 0) ...[
         (
           at: headLen,
