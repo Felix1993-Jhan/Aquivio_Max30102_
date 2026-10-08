@@ -573,6 +573,11 @@ class LocalizationService {
       // ── 定長量測(只算這次量測的前 N 秒)──────────────────────────
       'k2_window_range': '10~{max}',
       'k2_fixed_mode': '定長',
+      'k2_snap_full': '完整',
+      'k2_snap_full_tip': '完整存檔:快照額外寫入「核心丟掉的開頭段(空轉 + 沉澱)、'
+          '定長窗狀態、軟體端衍生的全部數值、HRV 全欄位」。'
+          '關閉(預設)時產出的檔案與以往完全相同。'
+          '⚠ 這是桌面上的快照檔,與 server 送出去的 JSON 無關。',
       'k2_fixed_hint': '只算這次量測的前 {sec} 秒,之後的不列入。'
           '計時起點 = 核心吐出第一筆乾淨樣本(手指偵測後約 3.5 秒:'
           '空轉 1.5s + 沉澱 2.0s),所以剛開啟時進度不是從 0.0 開始。',
@@ -1255,6 +1260,12 @@ class LocalizationService {
       // ── Fixed window (first N seconds of this measurement only) ──
       'k2_window_range': '10~{max}',
       'k2_fixed_mode': 'Fixed',
+      'k2_snap_full': 'Full',
+      'k2_snap_full_tip': 'Full snapshot: also writes the head segment the core '
+          'discards (dead + settling), fixed-window state, every derived value, '
+          'and all HrvStats fields. '
+          'When off (default) the file is identical to before. '
+          'Note: this is the desktop snapshot file, not the server JSON.',
       'k2_fixed_hint': 'Uses only the first {sec}s of this measurement; '
           'later data is excluded. The clock starts at the first clean sample '
           'the core emits (about 3.5s after the finger is detected: '

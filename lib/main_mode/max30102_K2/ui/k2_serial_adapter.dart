@@ -24,6 +24,7 @@ import '../k2_config.dart';
 import '../k2_core.dart';
 import '../k2_hrv_calculator.dart';
 import '../k2_protocol.dart';
+import '../k2_vitals_metrics.dart';
 import 'k2_breathhold.dart';
 import 'k2_fixed_window.dart';
 import 'k2_lf_experiment.dart';
@@ -456,9 +457,23 @@ class K2SerialAdapter extends ChangeNotifier {
   /// 格式與舊版快照相容(ir/red/goldTroughs/fs 同名),可餵回核心重放。
   /// ⚠️ 免洗版**不再寫 longTerm 欄位**(長期池已移除)。舊快照檔裡若有,讀取時忽略。
   /// [fixed] 非 null → 存**定長窗**那一份(凍結的前 N 秒)而不是滾動視窗。
-  /// ⚠️ **JSON 的欄位名、結構、版本號一個都不改** —— 只換填進去的內容,
-  ///    舊快照與檢視器完全不受影響。
-  Map<String, dynamic> buildSnapshot({K2FixedView? fixed, int? windowSec}) {
+  ///
+  /// [full] = 完整存檔(預設關)。關閉時產出的 JSON **與以往逐位元相同** ——
+  /// 欄位名、結構、版本號一個都不動,舊檢視器完全不受影響。
+  /// 打開時**額外**附加幾組 key(不改既有的任何一個):
+  ///   · `pre*`    —— 還原回來的開頭段(空轉 + 沉澱)與區塊邊界
+  ///   · `fixed`   —— 定長窗的狀態(秒數、是否凍結、SQI 輪數、斷層次數)
+  ///   · `derived` —— 畫面上「軟體端衍生」那一區的全部數值
+  ///   · `hrvFull` —— HrvStats 的全部欄位(含 pairs / totalPairs / hrvScore)
+  /// 舊檔沒有這些 key,新檔多了也不影響解析(fromJson 只讀它認得的)。
+  ///
+  /// ⚠️ 這是**桌面上的快照檔**,與 server `/vitals` 送出去的 JSON 無關 ——
+  ///    那份契約在 k2_vitals_metrics.toStrapiJson(),這裡一個字都碰不到。
+  Map<String, dynamic> buildSnapshot({
+    K2FixedView? fixed,
+    int? windowSec,
+    bool full = false,
+  }) {
     const fs = Max30102Config.samplingRateHz;
     final c = latest;
     final hv = fixed != null ? fixed.hv : c?.hrv;
@@ -509,17 +524,72 @@ class K2SerialAdapter extends ChangeNotifier {
           'meanHr': hv.meanHr,
           'beats': hv.beats,
         },
+      // ── 以下只有「完整存檔」打開時才有 ────────────────────────────
+      if (full) ...{
+        'full': true,
+        // 核心丟掉的開頭:空轉期直接丟棄、沉澱期只當 baseline 前後文,
+        // 兩段都不會出現在上面的 ir/red 裡。這是從原始封包另外解回來的。
+        if (fixedWindow.preIr.isNotEmpty) ...{
+          'preIr': List<int>.of(fixedWindow.preIr),
+          'preRed': List<int>.of(fixedWindow.preRed),
+          'preDeadSamples': fixedWindow.deadSamples,
+          'preSettleSamples': fixedWindow.settleSamples,
+          'preBaseAbs': fixedWindow.base, // 開頭段的最後一筆 + 1 = 這個值
+          'orientWaitSamples': fixedWindow.firstBatchLen,
+        },
+        if (fixed != null)
+          'fixed': {
+            'seconds': windowSec,
+            'sealed': fixed.sealed,
+            'ended': fixed.ended,
+            'rebases': fixed.rebases,
+            'sqiOkRounds': fixed.sqiOkRounds,
+            'rounds': fixed.rounds,
+            'filledSamples': fixed.filledSamples,
+          },
+        // 畫面上「軟體端衍生」那一區的全部數值。存下來的理由:公式日後會改,
+        // 存了才知道「當時畫面上看到的是什麼」;檢視器照樣會從 rr/ir 重算,
+        // 兩者對不上就是公式動過 —— 那本身就是有用的資訊。
+        'derived': Max30102VitalsMetrics.compute(
+          pts: fixed?.pts ?? c?.rrPoints ?? const <HrvRrPoint>[],
+          hv: hv,
+          sqiOk: fixed != null
+              ? fixed.sqiOkRounds * 2 >= fixed.rounds
+              : (c?.sqiOk ?? false),
+          settling: fixed != null ? false : (c?.settling ?? false),
+          bpm: fixed != null ? hv?.meanHr : c?.bpm,
+          ir: fixed?.ir ?? waveIr,
+        ).toStrapiJson(),
+        if (hv != null)
+          'hrvFull': {
+            'meanRr': hv.meanRr,
+            'meanHr': hv.meanHr,
+            'sdnn': hv.sdnn,
+            'rmssd': hv.rmssd,
+            'pnn50': hv.pnn50,
+            'sd1': hv.sd1,
+            'sd2': hv.sd2,
+            'hrvScore': hv.hrvScore,
+            'beats': hv.beats,
+            'pairs': hv.pairs,
+            'totalPairs': hv.totalPairs,
+          },
+      },
     };
   }
 
   /// 存快照到桌面 `max30102_snapshots`。回傳存檔路徑(失敗回 null)。
-  Future<String?> saveSnapshot({K2FixedView? fixed, int? windowSec}) async {
+  Future<String?> saveSnapshot({
+    K2FixedView? fixed,
+    int? windowSec,
+    bool full = false,
+  }) async {
     if ((fixed?.ir ?? waveIr).isEmpty) {
       _log(tr('k2_log_no_wave'));
       notifyListeners();
       return null;
     }
-    final snap = buildSnapshot(fixed: fixed, windowSec: windowSec);
+    final snap = buildSnapshot(fixed: fixed, windowSec: windowSec, full: full);
     final path = await K2SnapshotStore.save(
       snap,
       snap['tsMillis'] as int,

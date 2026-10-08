@@ -65,6 +65,10 @@ class _K2PageState extends State<K2Page> {
   /// 目前視窗長(秒)。上限受 K2SerialAdapter._waveCap 限制(目前 30s)。
   int _shortSec = 30;
 
+  /// 完整存檔:開 = 快照額外寫入開頭段與全部衍生數值。**預設關** ——
+  /// 關閉時產出的檔案與以往逐位元相同,舊檢視器與既有的比對流程不受影響。
+  bool _fullSnapshot = false;
+
   /// 定長量測:開 = 只算**這次量測的前 [_shortSec] 秒**,之後進來的不列入;
   /// 關 = 回到滾動視窗。資料來源切換而已,背後的開頭緩衝一直都在收。
   bool _fixedMode = false;
@@ -176,6 +180,7 @@ class _K2PageState extends State<K2Page> {
     final path = await _adapter.saveSnapshot(
       fixed: _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null,
       windowSec: _shortSec,
+      full: _fullSnapshot,
     );
     if (!mounted) return;
     final name = path?.split(RegExp(r'[\\/]')).last;
@@ -805,6 +810,18 @@ class _K2PageState extends State<K2Page> {
           style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
         ),
         const SizedBox(width: 12),
+        // 完整存檔開關:預設關,要查開頭段或事後對帳時才打開。
+        Tooltip(
+          message: tr('k2_snap_full_tip'),
+          child: FilterChip(
+            label: Text(tr('k2_snap_full'),
+                style: const TextStyle(fontSize: 11)),
+            selected: _fullSnapshot,
+            visualDensity: VisualDensity.compact,
+            onSelected: (b) => setState(() => _fullSnapshot = b),
+          ),
+        ),
+        const SizedBox(width: 6),
         // 存快照:把當下 30 秒視窗存成 JSON。純 UI 行為。
         OutlinedButton.icon(
           onPressed: _saveSnapshot,
@@ -1026,13 +1043,29 @@ class _K2PageState extends State<K2Page> {
     );
   }
 
+  /// 滾動模式的開頭區塊 —— 定長窗沒開時也要看得到空轉 / 沉澱 / 方向判定。
+  /// 索引相對「還原段 + waveIr」接起來之後的第 0 筆。
+  List<({int from, int to, K2HeadBand kind})> _headBands(
+      K2FixedWindow fw, int total) {
+    final pre = fw.preIr.length;
+    final dead = fw.deadSamples < pre ? fw.deadSamples : pre;
+    final orientEnd = (pre + fw.firstBatchLen).clamp(pre, total);
+    return [
+      if (dead > 0) (from: 0, to: dead, kind: K2HeadBand.dead),
+      if (pre > dead) (from: dead, to: pre, kind: K2HeadBand.settle),
+      if (orientEnd > pre)
+        (from: pre, to: orientEnd, kind: K2HeadBand.orientWait),
+      if (total > orientEnd)
+        (from: orientEnd, to: total, kind: K2HeadBand.normal),
+    ];
+  }
+
   /// 區塊語意([K2HeadBand])→ 畫面上的顏色與文字。
   /// 定長窗模組刻意不 import material(才能被純 Dart 測試直接用),所以配色在這裡。
-  List<({int from, int to, String label, Color color})> _bandsOf(
-      K2FixedView? fx) {
-    if (fx == null) return const [];
+  List<({int from, int to, String label, Color color})> _paintBands(
+      List<({int from, int to, K2HeadBand kind})> src) {
     return [
-      for (final b in fx.bands)
+      for (final b in src)
         (
           from: b.from,
           to: b.to,
@@ -1078,10 +1111,38 @@ class _K2PageState extends State<K2Page> {
           bpm: v?.bpm,
           ir: _adapter.waveIr,
         );
-    // 定長模式的波形多了還原回來的開頭段 → 圖要變寬才放得下。
-    final fxPre = fx == null ? 0 : fx.chartIr.length - fx.ir.length;
+    // ── 波形圖的輸入:定長 / 滾動兩條路在這裡收斂成同一組變數 ──────────
+    //
+    // 開頭那 3.5 秒(空轉 + 沉澱 + 方向判定)**兩種模式都要看得到** ——
+    // 滾動模式只在「這次量測還沒長到超過視窗長度」時成立,一旦超過,畫面本來
+    // 就只剩尾端那 N 秒,開頭沒有東西可畫(下面的條件會自動不成立)。
+    final fw = _adapter.fixedWindow;
+    final headInRolling = fx == null &&
+        fw.preIr.isNotEmpty &&
+        _adapter.waveBase == fw.base && // 波形沒被裁過 → 頭還在陣列裡
+        _adapter.waveIr.length <= _shortSec * 100;
+    final preLen = fx != null
+        ? fx.chartIr.length - fx.ir.length
+        : (headInRolling ? fw.preIr.length : 0);
+    final chartIr = fx?.chartIr ??
+        (headInRolling
+            ? <int>[...fw.preIr, ..._adapter.waveIr]
+            : _adapter.waveIr);
+    final chartRed = fx?.chartRed ??
+        (headInRolling
+            ? <int>[...fw.preRed, ..._adapter.waveRed]
+            : _adapter.waveRed);
+    // 谷標點是「陣列索引」,前面接了開頭段就要整批往後平移。
+    final chartTroughs = fx?.chartTroughs ??
+        [for (final t in _adapter.displayTroughs()) t + preLen];
+    final chartBands = _paintBands(fx != null
+        ? fx.bands
+        : (headInRolling
+            ? _headBands(fw, chartIr.length)
+            : const <({int from, int to, K2HeadBand kind})>[]));
+    // 多了開頭段 → 圖要變寬才放得下
     final waveSamples =
-        fx != null ? fxPre + fx.needSamples : _shortSec * 100; // fs=100Hz
+        fx != null ? preLen + fx.needSamples : preLen + _shortSec * 100;
     // 「N 秒前」參考線:比目前視窗小的那幾檔(視窗 30s → 畫 10s/20s 線,
     //  最左緣本身就是 30s,不另外畫)。波形圖與 RR 趨勢圖用同一組 → 兩張圖對得起來。
     final marks = [for (final s in _secOptions) if (s < _shortSec) s];
@@ -1139,17 +1200,15 @@ class _K2PageState extends State<K2Page> {
                         builder: (context, ver, _) => K2WaveChart(
                           // ⚠ shouldRepaint 不比對 ir:切換開關時 displaySamples
                           //   與 version 可能都沒變 → 不換 key 波形不會更新。
-                          key: ValueKey(_fixedMode),
-                          ir: fx?.chartIr ?? _adapter.waveIr,
-                          red: fx?.chartRed ?? _adapter.waveRed,
-                          troughs:
-                              fx?.chartTroughs ?? _adapter.displayTroughs(),
-                          bands: _bandsOf(fx),
+                          key: ValueKey('$_fixedMode/${preLen > 0}'),
+                          ir: chartIr,
+                          red: chartRed,
+                          troughs: chartTroughs,
+                          bands: chartBands,
                           version: ver,
-                          markSeconds: fx != null ? const [] : marks,
+                          markSeconds: preLen > 0 ? const [] : marks,
                           displaySamples: waveSamples,
-                          windowSeconds:
-                              fx != null ? (waveSamples / 100).round() : _shortSec,
+                          windowSeconds: (waveSamples / 100).round(),
                           baselineWindow:
                               (100 / _adapter.core.config.bandLowHz).round(),
                           trimWindow: 9,

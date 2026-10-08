@@ -127,6 +127,17 @@ class K2FixedWindow extends ChangeNotifier {
   bool get preMissing => _preIr.isEmpty;
   List<HrvRrPoint> get points => List.unmodifiable(_pts);
 
+  /// 還原回來的開頭段(空轉 + 沉澱)。**只用於顯示與完整存檔,不進計算。**
+  List<int> get preIr => List.unmodifiable(_preIr);
+  List<int> get preRed => List.unmodifiable(_preRed);
+
+  /// 區塊邊界(存檔時一起寫下去,之後離線看圖才知道哪一段是哪一段)。
+  int get deadSamples => _deadSamples;
+  int get settleSamples => _settleSamples;
+
+  /// 第一批輸出的長度 = 方向判定期被壓著、鎖定時一次吐出的那一段。
+  int get firstBatchLen => _firstBatchLen;
+
   /// 開頭要還原幾筆。adapter 照這個數字回頭去原始緩衝撈,兩邊共用同一個定義。
   ///
   /// ⚠️ **不是固定的 `空轉 + 沉澱`**。核心是逐批判斷的:空轉期的條件是
