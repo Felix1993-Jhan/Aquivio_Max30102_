@@ -664,7 +664,43 @@ class SerialPortManager with ArduinoConnectionMixin {
         return;
       }
 
-      // ── ② 看門狗:送得出去卻收不到 ───────────────────────────────
+      // ── ② 有資料就先讀。**讀一定要排在判停滯之前** ────────────────
+      //
+      // ⚠️ 這個順序踩過坑:先前把看門狗放前面,實測出現
+      //      「停滯 3.2 秒;待讀位元組 = 151」
+      //    —— 資料其實已經自己回來了(151 = 單包最大長度),卻因為看門狗
+      //    先判定「距上次收到超過 3 秒」而 return 去重開,把那包躺在緩衝區
+      //    裡的資料連同緩衝區一起清掉。
+      //
+      //    兩個判斷的證據強度不同:
+      //      看門狗 =「我很久沒收到」→ **間接推論**,從沒發生去猜壞了
+      //      有資料 =「緩衝區現在就有 151 bytes」→ **直接證據**
+      //    有資料本身就證明沒有停滯,所以直接證據必須贏過間接推論。
+      //    走到下面那段就代表 available == 0,「真的沒東西」由控制流保證。
+      if (available > 0) {
+        Uint8List data;
+        try {
+          data = _port!.read(available);
+        } catch (e) {
+          _recoverRead('實際讀取時丟出例外:$e');
+          return;
+        }
+        if (data.isEmpty) return;
+        _lastRxAt = DateTime.now();
+
+        // ── ③ 處理:**例外絕對不可以影響讀取** ──────────────────────
+        //    舊版這段與讀取共用一個 try,結果上層任何 bug(解析、索引、UI)
+        //    都會被當成「USB 拔除」並永久停掉讀取 —— 一個小錯誤就要重新連線。
+        //    現在照 MCU 那套精神:這一批丟掉,下一批繼續。
+        try {
+          _processReceivedData(data);
+        } catch (e) {
+          _logAnomaly('⚠️ 資料處理錯誤(已略過這批): $e');
+        }
+        return;
+      }
+
+      // ── ④ 走到這裡 ⇒ 驅動明確說「沒有資料」,看門狗才上場 ──────────
       //    補「不是負數、也沒丟例外,但就是不來了」的情況 —— 實測這才是
       //    真正會發生的那一種(驅動回 0,看起來完全正常,但資料永遠不來)。
       final lastRx = _lastRxAt;
@@ -694,29 +730,6 @@ class SerialPortManager with ArduinoConnectionMixin {
           }
           return;
         }
-      }
-
-      if (available == 0) return;
-
-      // ── ③ 讀 ────────────────────────────────────────────────────
-      Uint8List data;
-      try {
-        data = _port!.read(available);
-      } catch (e) {
-        _recoverRead('read() 丟例外: $e');
-        return;
-      }
-      if (data.isEmpty) return;
-      _lastRxAt = DateTime.now();
-
-      // ── ④ 處理:**例外絕對不可以影響讀取** ────────────────────────
-      //    舊版這段與 ②③ 共用一個 try,結果上層任何 bug(解析、索引、UI)
-      //    都會被當成「USB 拔除」並永久停掉讀取 —— 一個小錯誤就要重新連線。
-      //    現在照 MCU 那套精神:這一批丟掉,下一批繼續。
-      try {
-        _processReceivedData(data);
-      } catch (e) {
-        _logAnomaly('⚠️ 資料處理錯誤(已略過這批): $e');
       }
     });
   }
