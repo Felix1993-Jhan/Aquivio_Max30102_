@@ -44,6 +44,15 @@ class SerialPortManager with ArduinoConnectionMixin {
   DateTime? _lastRxAt; // 最後一次真的收到 bytes
   DateTime? _lastTxAt; // 最後一次真的送出 bytes
 
+  /// 這條連線是什麼時候開啟的。用來回答「每個 handle 能活多久」——
+  /// 實測每次重開後大約 57 秒就又收不到,這個數字是判斷「是不是固定壽命」
+  /// 的唯一依據(固定 → 驅動/電源管理的閒置計時器;不固定 → 接觸或雜訊)。
+  DateTime? _openedAt;
+
+  /// 自從上次收到資料以來,送出了幾包。比「停滯幾秒」更貼近「對方沒回」——
+  /// 量測中是 10Hz、只有心跳時是 1Hz,同樣的秒數代表的包數差 10 倍。
+  int _txSinceRx = 0;
+
   /// 看門狗連續觸發幾次都沒把 RX 救回來。
   ///
   /// ⚠️ 「有在送卻收不到」有兩種可能:**我們的讀取端壞了**(重開有效),
@@ -362,6 +371,8 @@ class SerialPortManager with ArduinoConnectionMixin {
       }
 
       _log('串口 $portName 已開啟 (115200, 8, N, 1)');
+      _openedAt = DateTime.now(); // 量「這個 handle 活了多久」的起點
+      _txSinceRx = 0;
       _startReading();
       return true;
     } catch (e) {
@@ -512,6 +523,7 @@ class SerialPortManager with ArduinoConnectionMixin {
       }
       _waitingForHeartbeat = true;
       _lastTxAt = DateTime.now(); // 看門狗用(心跳也算在送)
+      _txSinceRx++;
       // 心跳指令不記錄日誌，避免干擾
     } catch (e) {
       // write 拋出異常代表串口已無法通訊（USB 拔除等）
@@ -579,6 +591,7 @@ class SerialPortManager with ArduinoConnectionMixin {
       final data = Uint8List.fromList('$command\n'.codeUnits);
       _port!.write(data);
       _lastTxAt = DateTime.now(); // 看門狗用:有在送卻收不到 → 讀取端壞了
+      _txSinceRx++;
       _log('發送: $command');
       return true;
     } catch (e) {
@@ -604,6 +617,7 @@ class SerialPortManager with ArduinoConnectionMixin {
       final data = Uint8List.fromList(bytes);
       _port!.write(data);
       _lastTxAt = DateTime.now(); // 看門狗用:有在送卻收不到 → 讀取端壞了
+      _txSinceRx++;
 
       final hexStr = bytes
           .map((e) => e.toRadixString(16).padLeft(2, '0').toUpperCase())
@@ -633,8 +647,26 @@ class SerialPortManager with ArduinoConnectionMixin {
         return;
       }
 
-      // ── ① 看門狗:我們還在送,但很久沒收到任何 byte ──────────────
-      //    補「不是負數、也沒丟例外,但就是不來了」的情況。
+      // ── ① 問有幾個 bytes 可讀 ────────────────────────────────────
+      //    先問再判斷,看門狗的訊息才帶得出「驅動當下到底回什麼」——
+      //    那是分辨「驅動說出錯」與「驅動說沒資料」的唯一線索。
+      int available;
+      try {
+        available = _port!.bytesAvailable;
+      } catch (e) {
+        _recoverRead('查詢待讀位元組時丟出例外:$e');
+        return;
+      }
+      if (available < 0) {
+        // ⚠️ sp_input_waiting 失敗時回**負的錯誤碼**,Dart 包裝原封回傳、
+        //    不丟例外。舊版只判 `> 0`,等於把錯誤當成「沒資料」靜靜跳過。
+        _recoverRead('驅動回報錯誤碼 $available(負數不是數量,是錯誤)');
+        return;
+      }
+
+      // ── ② 看門狗:送得出去卻收不到 ───────────────────────────────
+      //    補「不是負數、也沒丟例外,但就是不來了」的情況 —— 實測這才是
+      //    真正會發生的那一種(驅動回 0,看起來完全正常,但資料永遠不來)。
       final lastRx = _lastRxAt;
       final lastTx = _lastTxAt;
       if (lastRx != null && lastTx != null) {
@@ -643,34 +675,27 @@ class SerialPortManager with ArduinoConnectionMixin {
             now.difference(lastRx) > _rxStallTimeout) {
           if (_rxStallRecovers < _maxRxStallRecovers) {
             _rxStallRecovers++;
-            _recoverRead(
-                'RX 停滯 ${now.difference(lastRx).inSeconds}s(TX 仍在送)');
+            final stall =
+                (now.difference(lastRx).inMilliseconds / 1000).toStringAsFixed(1);
+            final alive = _openedAt == null
+                ? '不明'
+                : '${(now.difference(_openedAt!).inMilliseconds / 1000).toStringAsFixed(1)} 秒';
+            _recoverRead('送得出去但收不到 —— '
+                '已連續送出 $_txSinceRx 包沒有任何回應,停滯 $stall 秒;'
+                '驅動說「沒有資料可讀」(待讀位元組 = $available,不是錯誤碼);'
+                '這條連線從開啟到現在撐了 $alive');
             if (_rxStallRecovers == _maxRxStallRecovers) {
               // 重開都救不回來 → 多半是對方沒在回答,不是我們的讀取端壞了。
               // 停手等對方自己回來(收到任何資料就會歸零重新啟用)。
-              _logAnomaly('⚠️ 重開 $_maxRxStallRecovers 次仍收不到資料,'
-                  '可能是對方沒有回應;暫停自動重開,等資料回來');
+              _logAnomaly('⚠️ 已經重開 $_maxRxStallRecovers 次都還是收不到資料,'
+                  '判定為「對方沒有回應」(MCU 沒開機 / 板子不在線)而不是我們的'
+                  '讀取端壞掉;暫停自動重開,等資料自己回來');
             }
           }
           return;
         }
       }
 
-      // ── ② 問有幾個 bytes 可讀 ────────────────────────────────────
-      int available;
-      try {
-        available = _port!.bytesAvailable;
-      } catch (e) {
-        _recoverRead('bytesAvailable 丟例外: $e');
-        return;
-      }
-      if (available < 0) {
-        // ⚠️ sp_input_waiting 失敗時回**負的錯誤碼**,Dart 包裝原封回傳、
-        //    不丟例外。舊版只判 `> 0`,等於把錯誤當成「沒資料」靜靜跳過 ——
-        //    這就是實測「TX 照送、RX 歸零、沒有任何日誌」那條路徑。
-        _recoverRead('bytesAvailable=$available');
-        return;
-      }
       if (available == 0) return;
 
       // ── ③ 讀 ────────────────────────────────────────────────────
@@ -711,7 +736,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     _lastRecoverAt = now;
     _recoverPortName ??= _currentPortName;
     if (_recoverPortName == null) return;
-    _logAnomaly('⚠️ 讀取異常($reason),自動重開串口');
+    _logAnomaly('⚠️ 讀取異常 → 自動重開串口。原因:$reason');
     _tryReopen();
   }
 
@@ -758,6 +783,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     if (data.isEmpty) return;
     _lastRxAt = DateTime.now(); // 看門狗用
     _rxStallRecovers = 0; // 收到東西 → 重新啟用看門狗
+    _txSinceRx = 0; // 對方有回 → 未回應計數歸零
 
     // 原始 bytes callback（在任何分流前觸發；Bootloader OTA 頁透過此 callback 自行解析）
     onRawBytes?.call(data);
