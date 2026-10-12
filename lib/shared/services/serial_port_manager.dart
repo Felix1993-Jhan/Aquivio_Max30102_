@@ -24,6 +24,39 @@ class SerialPortManager with ArduinoConnectionMixin {
   /// 定時讀取計時器（每 50ms 輪詢讀取串口資料）
   Timer? _readTimer;
 
+  // ── 讀取端自動復原 ──────────────────────────────────────────────
+  //
+  // 實測症狀:量測中 TX 一直加、RX 歸零,MCU 照常回答但一個 byte 都收不到,
+  // 畫面凍結卻仍顯示「已連線」,只有手動「斷線 → 連線」會好。
+  //
+  // 根因是讀取端有三條會**安靜死掉**的路徑(送出端完全不受影響):
+  //   ① `bytesAvailable` 回負數 —— sp_input_waiting 失敗時回負的錯誤碼,
+  //      Dart 包裝原封回傳、不丟例外,只判 `> 0` 就等於把它當成「沒資料」
+  //   ② `read()` 丟例外 —— 舊版 catch 會把讀取計時器永久取消
+  //   ③ 上層處理邏輯丟例外 —— 舊版與 ①② 共用一個 try,被誤判成 USB 拔除
+  //
+  // 現在三條都會走到 [_recoverRead]:重開串口繼續跑,**對使用者靜默**。
+  // 觸發源多半是 USB 選擇性暫停(裝置被掛起再喚醒,handle 留在錯誤狀態)。
+  Timer? _recoverTimer; // open 失敗後的重試(那時沒有任何計時器在跑)
+  String? _recoverPortName; // close() 會清 _currentPortName,復原前先存起來
+  int _recoverTries = 0;
+  DateTime? _lastRecoverAt; // 節流:50ms 的迴圈不可以狂重開
+  DateTime? _lastRxAt; // 最後一次真的收到 bytes
+  DateTime? _lastTxAt; // 最後一次真的送出 bytes
+
+  /// 看門狗連續觸發幾次都沒把 RX 救回來。
+  ///
+  /// ⚠️ 「有在送卻收不到」有兩種可能:**我們的讀取端壞了**(重開有效),
+  ///    或**對方根本沒回答**(MCU 沒開機、板子不在線 —— 重開完全沒用)。
+  ///    兩者從這一層分不出來,所以試幾次就停手,否則會變成每 3 秒重開一次的
+  ///    無限迴圈,反而把能用的連線搞壞。收到任何資料就歸零。
+  int _rxStallRecovers = 0;
+  static const int _maxRxStallRecovers = 3;
+
+  static const Duration _recoverCooldown = Duration(seconds: 1);
+  static const Duration _rxStallTimeout = Duration(seconds: 3);
+  static const int _maxRecoverTries = 5;
+
   // -------------------- 公開成員變數 --------------------
 
   /// 串口識別名稱（如 "Arduino" 或 "UR"），用於日誌顯示
@@ -319,6 +352,8 @@ class SerialPortManager with ArduinoConnectionMixin {
       // 清空硬體串口緩衝區中的殘留數據（如 Arduino 重置時的 bootloader 輸出）
       try {
         final available = _port!.bytesAvailable;
+        // > 0 才讀:負數是 sp_input_waiting 的錯誤碼(不是數量),拿去 read 沒有意義。
+        // 這裡剛開啟,失敗不觸發復原 —— 殘留資料沒清掉頂多被組框器丟掉幾個 byte。
         if (available > 0) {
           _port!.read(available);  // 讀取並丟棄
         }
@@ -361,6 +396,11 @@ class SerialPortManager with ArduinoConnectionMixin {
     stopHeartbeat();  // 停止心跳
     _readTimer?.cancel();
     _readTimer = null;
+    // 關閉時一併停掉自動復原,否則關了之後還會在背景把串口重開起來。
+    // (open() 內部也會走這裡 → _tryReopen 失敗時會自己把 _recoverPortName 補回去)
+    _recoverTimer?.cancel();
+    _recoverTimer = null;
+    _recoverPortName = null;
 
     _disposePort();
 
@@ -378,6 +418,9 @@ class SerialPortManager with ArduinoConnectionMixin {
     stopHeartbeat();  // 停止心跳
     _readTimer?.cancel();
     _readTimer = null;
+    _recoverTimer?.cancel();
+    _recoverTimer = null;
+    _recoverPortName = null;
 
     _disposePort();
     _log('⚠️ 串口已強制關閉');
@@ -468,6 +511,7 @@ class SerialPortManager with ArduinoConnectionMixin {
         _port!.write(Uint8List.fromList(pingCommand));
       }
       _waitingForHeartbeat = true;
+      _lastTxAt = DateTime.now(); // 看門狗用(心跳也算在送)
       // 心跳指令不記錄日誌，避免干擾
     } catch (e) {
       // write 拋出異常代表串口已無法通訊（USB 拔除等）
@@ -534,6 +578,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     try {
       final data = Uint8List.fromList('$command\n'.codeUnits);
       _port!.write(data);
+      _lastTxAt = DateTime.now(); // 看門狗用:有在送卻收不到 → 讀取端壞了
       _log('發送: $command');
       return true;
     } catch (e) {
@@ -558,6 +603,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     try {
       final data = Uint8List.fromList(bytes);
       _port!.write(data);
+      _lastTxAt = DateTime.now(); // 看門狗用:有在送卻收不到 → 讀取端壞了
 
       final hexStr = bytes
           .map((e) => e.toRadixString(16).padLeft(2, '0').toUpperCase())
@@ -581,37 +627,137 @@ class SerialPortManager with ArduinoConnectionMixin {
   void _startReading() {
     _readTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
       if (_port == null) {
+        // 正常關閉路徑(close/forceClose 已經清掉 _port)
         _readTimer?.cancel();
         _readTimer = null;
         return;
       }
 
-      try {
-        final available = _port!.bytesAvailable;
-
-        if (available > 0) {
-          final data = _port!.read(available);
-
-          if (data.isNotEmpty) {
-            _processReceivedData(data);
+      // ── ① 看門狗:我們還在送,但很久沒收到任何 byte ──────────────
+      //    補「不是負數、也沒丟例外,但就是不來了」的情況。
+      final lastRx = _lastRxAt;
+      final lastTx = _lastTxAt;
+      if (lastRx != null && lastTx != null) {
+        final now = DateTime.now();
+        if (now.difference(lastTx) < const Duration(seconds: 1) &&
+            now.difference(lastRx) > _rxStallTimeout) {
+          if (_rxStallRecovers < _maxRxStallRecovers) {
+            _rxStallRecovers++;
+            _recoverRead(
+                'RX 停滯 ${now.difference(lastRx).inSeconds}s(TX 仍在送)');
+            if (_rxStallRecovers == _maxRxStallRecovers) {
+              // 重開都救不回來 → 多半是對方沒在回答,不是我們的讀取端壞了。
+              // 停手等對方自己回來(收到任何資料就會歸零重新啟用)。
+              _log('⚠️ 重開 $_maxRxStallRecovers 次仍收不到資料,'
+                  '可能是對方沒有回應;暫停自動重開,等資料回來');
+            }
           }
+          return;
         }
+      }
+
+      // ── ② 問有幾個 bytes 可讀 ────────────────────────────────────
+      int available;
+      try {
+        available = _port!.bytesAvailable;
       } catch (e) {
-        // 讀取錯誤（USB 拔除等）
-        _log('讀取錯誤: $e');
-        _log('⚠️ 讀取異常，觸發斷線處理');
-        heartbeatOkNotifier.value = false;
-        onHeartbeatFailed?.call();
-        stopHeartbeat();
-        _readTimer?.cancel();
-        _readTimer = null;
+        _recoverRead('bytesAvailable 丟例外: $e');
+        return;
+      }
+      if (available < 0) {
+        // ⚠️ sp_input_waiting 失敗時回**負的錯誤碼**,Dart 包裝原封回傳、
+        //    不丟例外。舊版只判 `> 0`,等於把錯誤當成「沒資料」靜靜跳過 ——
+        //    這就是實測「TX 照送、RX 歸零、沒有任何日誌」那條路徑。
+        _recoverRead('bytesAvailable=$available');
+        return;
+      }
+      if (available == 0) return;
+
+      // ── ③ 讀 ────────────────────────────────────────────────────
+      Uint8List data;
+      try {
+        data = _port!.read(available);
+      } catch (e) {
+        _recoverRead('read() 丟例外: $e');
+        return;
+      }
+      if (data.isEmpty) return;
+      _lastRxAt = DateTime.now();
+
+      // ── ④ 處理:**例外絕對不可以影響讀取** ────────────────────────
+      //    舊版這段與 ②③ 共用一個 try,結果上層任何 bug(解析、索引、UI)
+      //    都會被當成「USB 拔除」並永久停掉讀取 —— 一個小錯誤就要重新連線。
+      //    現在照 MCU 那套精神:這一批丟掉,下一批繼續。
+      try {
+        _processReceivedData(data);
+      } catch (e) {
+        _log('⚠️ 資料處理錯誤(已略過這批): $e');
       }
     });
+  }
+
+  /// 讀取端故障 → 自動重開串口。**對使用者靜默**:不閃斷線,只寫日誌。
+  ///
+  /// 為什麼只能重開:`sp_input_waiting` 失敗後會一直回負數、`read()` 失敗後
+  /// 那個 handle 也不會自己好。實測使用者手動「斷線 → 連線」有效,
+  /// 這裡就是把那件事自動化。
+  void _recoverRead(String reason) {
+    if (_port == null) return; // 已經正常關閉了,不要插手
+    final now = DateTime.now();
+    if (_lastRecoverAt != null &&
+        now.difference(_lastRecoverAt!) < _recoverCooldown) {
+      return; // 節流
+    }
+    _lastRecoverAt = now;
+    _recoverPortName ??= _currentPortName;
+    if (_recoverPortName == null) return;
+    _log('⚠️ 讀取異常($reason),自動重開串口');
+    _tryReopen();
+  }
+
+  /// 重開一次。成功 → 歸零;失敗 → 1 秒後再試。
+  ///
+  /// ⚠️ 失敗後**一定**要自己排下一次 —— `open()` 失敗時 `_port` 是 null,
+  ///    讀取計時器也已經被 `close()` 取消,沒有任何東西會再把它叫起來。
+  void _tryReopen() {
+    _recoverTimer?.cancel();
+    _recoverTimer = null;
+
+    final portName = _recoverPortName;
+    if (portName == null) return;
+    _recoverTries++;
+
+    // K2 頁刻意把心跳停掉(每秒的 PING 會混進資料流),所以只有原本開著才恢復。
+    // 必須在 open() 之前讀 —— open() 內含 close(),close() 會停掉心跳。
+    final hadHeartbeat = _heartbeatTimer != null;
+
+    if (open(portName)) {
+      // open() 開頭自帶 close(),所以這一支就是完整的「close + open」。
+      // callback(含 K2 的 onRawBytes)不會被 close 清掉 → 資料流自動接回來。
+      _log('✅ 串口已復原(重開第 $_recoverTries 次成功)');
+      _recoverTries = 0;
+      _recoverPortName = null;
+      _lastRxAt = DateTime.now(); // 給看門狗新起點,不要馬上又觸發
+      if (hadHeartbeat) startHeartbeat();
+      return;
+    }
+
+    if (_recoverTries >= _maxRecoverTries) {
+      _log('❌ 連續 $_recoverTries 次重開失敗,標記斷線');
+      _recoverTries = 0;
+      _recoverPortName = null;
+      forceClose(); // 這才把 isConnected 設 false,交給熱插拔監看接手
+      return;
+    }
+    _recoverPortName = portName; // open() 內的 close() 會清掉,補回來給下一次用
+    _recoverTimer = Timer(const Duration(seconds: 1), _tryReopen);
   }
 
   /// 處理接收到的串口資料
   void _processReceivedData(Uint8List data) {
     if (data.isEmpty) return;
+    _lastRxAt = DateTime.now(); // 看門狗用
+    _rxStallRecovers = 0; // 收到東西 → 重新啟用看門狗
 
     // 原始 bytes callback（在任何分流前觸發；Bootloader OTA 頁透過此 callback 自行解析）
     onRawBytes?.call(data);
@@ -1145,6 +1291,8 @@ class SerialPortManager with ArduinoConnectionMixin {
 
   /// 釋放資源
   void dispose() {
+    _recoverTimer?.cancel();
+    _recoverTimer = null;
     close();
     logNotifier.dispose();
     isConnectedNotifier.dispose();
