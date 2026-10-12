@@ -14,12 +14,18 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/arduino_connection_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/serial_trace.dart';
 
 class SerialPortManager with ArduinoConnectionMixin {
   // -------------------- 私有成員變數 --------------------
 
   /// 串口物件，null 表示尚未連接
   SerialPort? _port;
+
+  /// 收送現場紀錄（環形緩衝，只留最近 10 秒）。
+  /// 停滯觸發時把前後各約 1 秒的原始 bytes 連同 `write()` 回傳值寫到桌面，
+  /// 用來回答「為什麼送了幾十包一個回應都沒有」。詳見 [SerialTrace]。
+  final SerialTrace trace = SerialTrace();
 
   /// 定時讀取計時器（每 50ms 輪詢讀取串口資料）
   Timer? _readTimer;
@@ -278,9 +284,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     _pingBoardIdx = 0;
     for (int i = 0; i < 10; i++) {
       try {
-        _port!.write(Uint8List.fromList(
-          _buildStm32PingCommand(_nextPingBoard()),
-        ));
+        _writeBytes(_buildStm32PingCommand(_nextPingBoard()));
       } catch (e) {
         close();
         return Stm32ConnectResult.portError;
@@ -373,6 +377,7 @@ class SerialPortManager with ArduinoConnectionMixin {
       _log('串口 $portName 已開啟 (115200, 8, N, 1)');
       _openedAt = DateTime.now(); // 量「這個 handle 活了多久」的起點
       _txSinceRx = 0;
+      trace.onOpen(portName, baudRate);
       _startReading();
       return true;
     } catch (e) {
@@ -404,6 +409,7 @@ class SerialPortManager with ArduinoConnectionMixin {
 
   /// 關閉串口連接
   void close() {
+    trace.note('串口關閉'); // 現場紀錄裡標出重開的分界
     stopHeartbeat();  // 停止心跳
     _readTimer?.cancel();
     _readTimer = null;
@@ -512,19 +518,15 @@ class SerialPortManager with ArduinoConnectionMixin {
     try {
       if (isTextMode) {
         // Arduino: 發送 "connect" 心跳指令（Arduino 會回傳各自韌體識別字串）
-        final data = Uint8List.fromList('connect\n'.codeUnits);
-        _port!.write(data);
+        _writeBytes('connect\n'.codeUnits);
       } else {
         // STM32: 發送 PING 指令（0x05 查詢韌體版本）
         // 指令格式: 40 71 [board] 05 00 00 00 00 [CS]
         // 站號每次輪替(0x30 ↔ 0x31),理由見 _pingBoards。
-        final pingCommand = _buildStm32PingCommand(_nextPingBoard());
-        _port!.write(Uint8List.fromList(pingCommand));
+        _writeBytes(_buildStm32PingCommand(_nextPingBoard()));
       }
       _waitingForHeartbeat = true;
-      _lastTxAt = DateTime.now(); // 看門狗用(心跳也算在送)
-      _txSinceRx++;
-      // 心跳指令不記錄日誌，避免干擾
+      // 心跳指令不記錄日誌，避免干擾（送出統計由 _writeBytes 顧）
     } catch (e) {
       // write 拋出異常代表串口已無法通訊（USB 拔除等）
       // 立即觸發斷線，不再等待計數
@@ -577,6 +579,50 @@ class SerialPortManager with ArduinoConnectionMixin {
   // 資料發送方法
   // ============================================================================
 
+  /// 真正動手寫串口的**唯一出口**。四處送出（連線驗證 PING、心跳、
+  /// [sendString]、[sendHex]）都走這裡，理由是回傳值一定要檢查，
+  /// 而同樣的檢查重複四份必定會漏掉一份。
+  ///
+  /// ⚠️⚠️ `write()` 預設 `timeout = -1` ⇒ 底下走的是 **`sp_nonblocking_write`**。
+  ///    非阻塞寫入**可以只寫出一部分**（驅動的輸出緩衝區塞住時），也**可以回
+  ///    負的錯誤碼**，而且**兩種都不丟例外** —— 跟 `bytesAvailable` 是同一個坑，
+  ///    舊版四處全部把回傳值丟掉。
+  ///
+  ///    沒寫完的後果不是「少送一點」，而是**送出半截封包**：MCU 收到不完整的
+  ///    frame → checksum 不過 → **正確地不回答**。我們這邊看到的就是
+  ///    「已連續送出 N 包沒有任何回應」，非常容易誤判成對方故障或我們的
+  ///    讀取端壞掉，實際上是我們根本沒把封包送完。
+  ///
+  /// 回傳 true 表示整包都寫出去了。
+  bool _writeBytes(List<int> bytes) {
+    final data = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+    final ret = _port!.write(data);
+
+    // 輸出緩衝區還積著幾個 byte。這個數字往上爬，就是「USB 裝置沒有把資料
+    // 收走」的直接證據（被電源管理暫停、或 handle 已經壞了）。
+    int? outQ;
+    try {
+      outQ = _port!.bytesToWrite;
+    } catch (_) {
+      outQ = null;
+    }
+
+    trace.tx(data, ret, outQ);
+    _lastTxAt = DateTime.now(); // 看門狗用:有在送卻收不到 → 讀取端壞了
+    _txSinceRx++;
+
+    if (ret != data.length) {
+      _logAnomaly(ret < 0
+          ? '⚠️ 送出失敗:write() 回傳 $ret —— 負數是錯誤碼不是數量,'
+              '這次要求寫 ${data.length} bytes'
+          : '⚠️ 送出不完整:要求寫 ${data.length} bytes,實際只寫出 $ret,'
+              '輸出緩衝區還積著 ${outQ ?? -1} bytes —— '
+              '對面收到的是半截封包,checksum 不會過,所以它不回答是正確的');
+      return false;
+    }
+    return true;
+  }
+
   /// 發送字串指令（Arduino 用）
   ///
   /// @param command 要發送的指令字串，如 "flowon"、"s0" 等
@@ -588,10 +634,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     }
 
     try {
-      final data = Uint8List.fromList('$command\n'.codeUnits);
-      _port!.write(data);
-      _lastTxAt = DateTime.now(); // 看門狗用:有在送卻收不到 → 讀取端壞了
-      _txSinceRx++;
+      _writeBytes('$command\n'.codeUnits);
       _log('發送: $command');
       return true;
     } catch (e) {
@@ -614,10 +657,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     }
 
     try {
-      final data = Uint8List.fromList(bytes);
-      _port!.write(data);
-      _lastTxAt = DateTime.now(); // 看門狗用:有在送卻收不到 → 讀取端壞了
-      _txSinceRx++;
+      _writeBytes(bytes);
 
       final hexStr = bytes
           .map((e) => e.toRadixString(16).padLeft(2, '0').toUpperCase())
@@ -750,6 +790,11 @@ class SerialPortManager with ArduinoConnectionMixin {
     _recoverPortName ??= _currentPortName;
     if (_recoverPortName == null) return;
     _logAnomaly('⚠️ 讀取異常 → 自動重開串口。原因:$reason');
+
+    // 把現場留下來。**在 _tryReopen() 之前就排**,因為 armDump 會停止裁切
+    // 緩衝區,接下來 1 秒(含重開、以及恢復收到的第一包)才錄得完整。
+    trace.armDump(reason, onDone: (msg) => _logAnomaly('📄 $msg'));
+
     _tryReopen();
   }
 
@@ -797,6 +842,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     _lastRxAt = DateTime.now(); // 看門狗用
     _rxStallRecovers = 0; // 收到東西 → 重新啟用看門狗
     _txSinceRx = 0; // 對方有回 → 未回應計數歸零
+    trace.rx(data); // 現場紀錄(環形,只留最近 10 秒)
 
     // 原始 bytes callback（在任何分流前觸發；Bootloader OTA 頁透過此 callback 自行解析）
     onRawBytes?.call(data);
