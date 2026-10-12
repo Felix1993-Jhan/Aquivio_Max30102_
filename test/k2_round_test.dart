@@ -96,7 +96,7 @@ void main() {
       fakeAsync((async) {
         final r = _rig();
         _startLocked(r, async);
-        // 鎖定後每輪 = 150ms 逾時（比 100ms 節奏長，節奏由逾時決定）
+        // 鎖定後每輪 = 120ms 逾時（比 100ms 節奏長，節奏由逾時決定）
         async.elapse(const Duration(milliseconds: 800));
 
         expect(r.ad.roundsOk, 0, reason: '鎖定之後一包都沒再回');
@@ -105,21 +105,22 @@ void main() {
       });
     });
 
-    test('③ 連續到門檻 → 請求重開一次，然後重新起算', () {
+    test('③ 連續到門檻（2 輪 = 240ms）→ 請求重開一次，然後重新起算', () {
       fakeAsync((async) {
         final r = _rig();
         _startLocked(r, async);
-        async.elapse(const Duration(milliseconds: 1000));
+        // 鎖定後第一輪的逾時落在 t≈220ms，第二輪 t≈340ms → 那時才到門檻。
+        async.elapse(const Duration(milliseconds: 400));
 
-        expect(r.ad.roundsLate, greaterThanOrEqualTo(5));
+        expect(r.ad.roundsLate, greaterThanOrEqualTo(2));
         expect(r.mgr.recoveries.length, 1,
             reason: '到門檻才喊一次,不是每輪都喊');
-        expect(r.mgr.recoveries.first, contains('連續 5 輪'));
-        expect(r.mgr.recoveries.first, contains('150ms'),
+        expect(r.mgr.recoveries.first, contains('連續 2 輪'));
+        expect(r.mgr.recoveries.first, contains('120ms'),
             reason: '原因要寫清楚等了多久,給看日誌的人判斷用');
 
-        // 重新起算後再累積 5 輪 → 第二次
-        async.elapse(const Duration(milliseconds: 1000));
+        // 重新起算後再累積 2 輪 → 第二次
+        async.elapse(const Duration(milliseconds: 300));
         expect(r.mgr.recoveries.length, 2, reason: '重新起算後會再觸發');
         r.ad.stop();
       });

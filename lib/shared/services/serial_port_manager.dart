@@ -47,6 +47,7 @@ class SerialPortManager with ArduinoConnectionMixin {
   String? _recoverPortName; // close() 會清 _currentPortName,復原前先存起來
   int _recoverTries = 0;
   DateTime? _lastRecoverAt; // 節流:50ms 的迴圈不可以狂重開
+  int _recoverSuppressed = 0; // 被冷卻擋下幾次(一定要報出來,見 _recoverRead)
   DateTime? _lastRxAt; // 最後一次真的收到 bytes
   DateTime? _lastTxAt; // 最後一次真的送出 bytes
 
@@ -846,12 +847,25 @@ class SerialPortManager with ArduinoConnectionMixin {
     final now = DateTime.now();
     if (_lastRecoverAt != null &&
         now.difference(_lastRecoverAt!) < _recoverCooldown) {
+      // ⚠️ **不可以靜默丟掉。** 協定層的偵測只要 240ms,所以一次重開沒救回來
+      //    的話,接下來 1 秒內的重試全部會走到這裡。不寫出來的話日誌看起來
+      //    會像「重開一次就沒事了」,實際上是連續失敗被藏起來。
+      //    只在第一次寫(240ms 一次會洗版),總數留到真的重開時一起報。
+      _recoverSuppressed++;
+      if (_recoverSuppressed == 1) {
+        _logAnomaly('⏸ 距上次重開不到 ${_recoverCooldown.inMilliseconds}ms,'
+            '這次先壓著(原因:$reason)');
+      }
       return; // 節流
     }
     _lastRecoverAt = now;
     _recoverPortName ??= _currentPortName;
     if (_recoverPortName == null) return;
-    _logAnomaly('⚠️ 讀取異常 → 自動重開串口。原因:$reason');
+
+    final suppressed = _recoverSuppressed;
+    _recoverSuppressed = 0;
+    _logAnomaly('⚠️ 讀取異常 → 自動重開串口。原因:$reason'
+        '${suppressed > 0 ? '(冷卻期間另有 $suppressed 次重開請求被擋下)' : ''}');
 
     // 把現場留下來。**在 _tryReopen() 之前就排**,因為 armDump 會停止裁切
     // 緩衝區,接下來 1 秒(含重開、以及恢復收到的第一包)才錄得完整。
@@ -904,6 +918,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     _lastRxAt = DateTime.now(); // 看門狗用
     _rxStallRecovers = 0; // 收到東西 → 重新啟用看門狗
     _txSinceRx = 0; // 對方有回 → 未回應計數歸零
+    _recoverSuppressed = 0; // 已經好了,之前被擋下的那些不必再報
     trace.rx(data); // 現場紀錄(環形,只留最近 10 秒)
 
     // 原始 bytes callback（在任何分流前觸發；Bootloader OTA 頁透過此 callback 自行解析）
