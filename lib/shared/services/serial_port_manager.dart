@@ -365,7 +365,7 @@ class SerialPortManager with ArduinoConnectionMixin {
       _startReading();
       return true;
     } catch (e) {
-      _log('開啟串口錯誤: $e');
+      _logAnomaly('開啟串口錯誤: $e');
       _port = null;
       return false;
     }
@@ -381,7 +381,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     try {
       port.close();
     } catch (e) {
-      _log('關閉串口錯誤: $e');
+      _logAnomaly('關閉串口錯誤: $e');
     }
 
     try {
@@ -423,7 +423,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     _recoverPortName = null;
 
     _disposePort();
-    _log('⚠️ 串口已強制關閉');
+    _logAnomaly('⚠️ 串口已強制關閉');
 
     _currentPortName = null;
     _receiveBuffer.clear();
@@ -488,7 +488,7 @@ class SerialPortManager with ArduinoConnectionMixin {
         final tried = _pingBoards
             .map((b) => '0x${b.toRadixString(16).toUpperCase()}')
             .join(' / ');
-        _log('⚠️ 心跳失敗 $_heartbeatFailCount 次(站號 $tried 輪流試過都沒回應)，'
+        _logAnomaly('⚠️ 心跳失敗 $_heartbeatFailCount 次(站號 $tried 輪流試過都沒回應)，'
             '連接可能已斷開或連接錯誤');
         heartbeatOkNotifier.value = false;
         onHeartbeatFailed?.call();
@@ -516,7 +516,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     } catch (e) {
       // write 拋出異常代表串口已無法通訊（USB 拔除等）
       // 立即觸發斷線，不再等待計數
-      _log('⚠️ 心跳發送異常: $e，立即觸發斷線處理');
+      _logAnomaly('⚠️ 心跳發送異常: $e，立即觸發斷線處理');
       heartbeatOkNotifier.value = false;
       onHeartbeatFailed?.call();
       stopHeartbeat();
@@ -582,7 +582,7 @@ class SerialPortManager with ArduinoConnectionMixin {
       _log('發送: $command');
       return true;
     } catch (e) {
-      _log('⚠️ 發送錯誤: $e，觸發斷線處理');
+      _logAnomaly('⚠️ 發送錯誤: $e，觸發斷線處理');
       heartbeatOkNotifier.value = false;
       onHeartbeatFailed?.call();
       stopHeartbeat();
@@ -611,7 +611,7 @@ class SerialPortManager with ArduinoConnectionMixin {
       _log('發送HEX: $hexStr');
       return true;
     } catch (e) {
-      _log('⚠️ 發送HEX錯誤: $e，觸發斷線處理');
+      _logAnomaly('⚠️ 發送HEX錯誤: $e，觸發斷線處理');
       heartbeatOkNotifier.value = false;
       onHeartbeatFailed?.call();
       stopHeartbeat();
@@ -648,7 +648,7 @@ class SerialPortManager with ArduinoConnectionMixin {
             if (_rxStallRecovers == _maxRxStallRecovers) {
               // 重開都救不回來 → 多半是對方沒在回答,不是我們的讀取端壞了。
               // 停手等對方自己回來(收到任何資料就會歸零重新啟用)。
-              _log('⚠️ 重開 $_maxRxStallRecovers 次仍收不到資料,'
+              _logAnomaly('⚠️ 重開 $_maxRxStallRecovers 次仍收不到資料,'
                   '可能是對方沒有回應;暫停自動重開,等資料回來');
             }
           }
@@ -691,7 +691,7 @@ class SerialPortManager with ArduinoConnectionMixin {
       try {
         _processReceivedData(data);
       } catch (e) {
-        _log('⚠️ 資料處理錯誤(已略過這批): $e');
+        _logAnomaly('⚠️ 資料處理錯誤(已略過這批): $e');
       }
     });
   }
@@ -711,7 +711,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     _lastRecoverAt = now;
     _recoverPortName ??= _currentPortName;
     if (_recoverPortName == null) return;
-    _log('⚠️ 讀取異常($reason),自動重開串口');
+    _logAnomaly('⚠️ 讀取異常($reason),自動重開串口');
     _tryReopen();
   }
 
@@ -734,7 +734,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     if (open(portName)) {
       // open() 開頭自帶 close(),所以這一支就是完整的「close + open」。
       // callback(含 K2 的 onRawBytes)不會被 close 清掉 → 資料流自動接回來。
-      _log('✅ 串口已復原(重開第 $_recoverTries 次成功)');
+      _logAnomaly('✅ 串口已復原(重開第 $_recoverTries 次成功)');
       _recoverTries = 0;
       _recoverPortName = null;
       _lastRxAt = DateTime.now(); // 給看門狗新起點,不要馬上又觸發
@@ -743,7 +743,7 @@ class SerialPortManager with ArduinoConnectionMixin {
     }
 
     if (_recoverTries >= _maxRecoverTries) {
-      _log('❌ 連續 $_recoverTries 次重開失敗,標記斷線');
+      _logAnomaly('❌ 連續 $_recoverTries 次重開失敗,標記斷線');
       _recoverTries = 0;
       _recoverPortName = null;
       forceClose(); // 這才把 isConnected 設 false,交給熱插拔監看接手
@@ -886,7 +886,7 @@ class SerialPortManager with ArduinoConnectionMixin {
           final hex = packet
               .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
               .join(' ');
-          _log('⚠️ CS 驗證失敗，跳過 ($expectedLen B): $hex');
+          _logAnomaly('⚠️ CS 驗證失敗，跳過 ($expectedLen B): $hex');
         }
         _hexReceiveBuffer.removeAt(0);
         continue;
@@ -1273,6 +1273,19 @@ class SerialPortManager with ArduinoConnectionMixin {
   // ============================================================================
   // 日誌管理方法
   // ============================================================================
+
+  /// **異常事件**:同時寫進 App 日誌 **與 VS Code 的 Debug Console**。
+  ///
+  /// 為什麼要分一支:[_log] 只寫進 [logNotifier](App 畫面上那個日誌面板),
+  /// 從 IDE 跑的時候完全看不到 —— 而串口的故障多半發生在沒人盯著畫面的時候。
+  /// `debugPrint` 的內容會留在 Debug Console,事後往回捲得到。
+  ///
+  /// ⚠️ **只給異常用。** 正常收送絕對不要走這裡,否則 console 會被洗版,
+  ///    真正有用的那幾行反而被淹掉。
+  void _logAnomaly(String message) {
+    _log(message);
+    debugPrint('[SERIAL:$name] ${DateTime.now().toIso8601String()} $message');
+  }
 
   /// 記錄日誌訊息
   void _log(String message) {

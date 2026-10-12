@@ -38,10 +38,15 @@ class K2SerialAdapter extends ChangeNotifier {
       : core = core ??
             Max30102K2(config: Max30102Config(resetOnFingerOff: true)) {
     _parser.onPacket = _onPacket;
-    _parser.onError =
-        (reason, partial) => _log(trParams('k2_log_parse_error', {
-              'reason': reason,
-            }));
+    _parser.onError = (reason, partial) {
+      _log(trParams('k2_log_parse_error', {'reason': reason}));
+      // 同一行也丟到 VS Code 的 Debug Console —— 封包層的掉包是 TX/RX 落差的
+      // 主要來源,附上當下的計數才看得出「掉在什麼時候、累積多少」。
+      // ⚠️ 只有錯誤走這裡,正常收送不印,否則 console 會被洗版。
+      debugPrint('[K2:parse] ${DateTime.now().toIso8601String()} $reason'
+          ' (RX $rxPackets / TX $txPackets, 落差 ${txPackets - rxPackets},'
+          ' 這段 ${partial.length}B)');
+    };
   }
 
   /// 串口管理(由外部提供,與其他模組共用)。
