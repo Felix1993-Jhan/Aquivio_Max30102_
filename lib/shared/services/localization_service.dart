@@ -725,6 +725,7 @@ class LocalizationService {
       'k2_log_parse_error': '⚠ 解析錯誤:{reason}',
       'k2_log_start': '🟢 開始量測(探測板子中:0x31 優先,逾時退 0x30)',
       'k2_log_stop': '⏸ 停止量測',
+      'k2_log_round_late': '⏳ 送出後 {ms}ms 內沒有完整回應(通訊延遲;連續多輪才會重開串口)',
       'k2_log_cleared_core': '🧹 已清空核心 + 波形',
       'k2_log_board_main': '🔒 板子鎖定:主板 0x30(擴充板 0x31 逾時無回應)',
       'k2_log_board_expansion': '🔒 板子鎖定:擴充板 0x31',
@@ -1433,6 +1434,8 @@ class LocalizationService {
       'k2_log_start':
           '🟢 Measuring (probing board: 0x31 first, falls back to 0x30 on timeout)',
       'k2_log_stop': '⏸ Stopped',
+      'k2_log_round_late':
+          '⏳ No complete reply within {ms}ms (comm delay; port reopens only after several in a row)',
       'k2_log_cleared_core': '🧹 Cleared core + waveform',
       'k2_log_board_main':
           '🔒 Board locked: main 0x30 (expansion 0x31 did not answer)',

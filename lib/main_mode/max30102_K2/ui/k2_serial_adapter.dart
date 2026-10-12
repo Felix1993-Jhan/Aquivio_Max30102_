@@ -56,13 +56,60 @@ class K2SerialAdapter extends ChangeNotifier {
   final Max30102K2 core;
 
   final Max30102RxParser _parser = Max30102RxParser();
-  Timer? _pollTimer;
 
   // ── UI 狀態 ────────────────────────────────────────────────────
-  bool get measuring => _pollTimer != null;
+  bool get measuring => _roundRunning;
 
   /// 詢問間隔(ms):UI 層決定,核心不管。
   int pollIntervalMs = 100;
+
+  // ══════════════════════════════════════════════════════════════
+  // 一問一答的「輪次」(request / response transaction)
+  // ══════════════════════════════════════════════════════════════
+  //
+  // 舊版是 `Timer.periodic(100ms, (_) => _sendQuery())` —— **送出去就不管了**。
+  // 沒有任何東西記得「這包送出去了,該有回應」,所以「對方沒回」這件事
+  // 只能靠串口層的看門狗去看「多久沒收到任何 byte」,門檻被迫放到 3 秒。
+  //
+  // 現在每一輪是一個有頭有尾的區塊:送出 → 等回應(最長 roundTimeoutMs)
+  //   → 這輪算成功或延遲 → 再開新的一輪。
+  //
+  // ⚠️ 用 async/await 而**不是** isolate。等待不是運算:
+  //    `await` 是編譯器生成的狀態機,在同一條線程上讓出控制權給事件迴圈,
+  //    畫面照跑。開 isolate 不但要為零運算量付代價(每秒 10 個),而且多條
+  //    線程讀同一個 COM 埠會搶同一個 `read_ovl` —— 那正是我們在消滅的
+  //    殭屍讀取的來源,等於主動製造它。
+  //
+  // ⚠️ 這一層只在 K2 做,**心跳與 UR 面板不套**:心跳 0x30↔0x31 交叉輪替,
+  //    兩塊板二選一在線,其中一次本來就不會有回應。套上去會每隔一次誤報。
+  //    同理,下面探測期也不計輪次(見 [_runRounds])。
+
+  /// 一輪最長等多久回應。實測正常回應延遲 11~20ms、輪詢抖動約 ±25ms,
+  /// 所以 150ms 仍有 7 倍以上餘裕,不會把正常的慢回應誤判成沒回應。
+  static const int roundTimeoutMs = 150;
+
+  /// 連續幾輪沒回應才判定通訊異常、請串口層重開。
+  /// 設 5 是為了吃掉偶發抖動 —— 單一次誤判不會觸發任何動作。
+  static const int maxLateStreak = 5;
+
+  bool _roundRunning = false;
+
+  /// 這一輪正在等的回應。收到完整封包時由 [_onPacket] 完成它。
+  Completer<bool>? _awaiting;
+
+  /// 有回應的輪數。
+  int roundsOk = 0;
+
+  /// 逾時沒回應的輪數(= 通訊延遲次數)。
+  int roundsLate = 0;
+
+  int _lateStreak = 0;
+
+  /// 通訊品質:有回應的輪數佔比。沒跑過任何一輪時回 null。
+  double? get roundSuccessRate {
+    final total = roundsOk + roundsLate;
+    return total == 0 ? null : roundsOk / total;
+  }
 
   // ── 板子自動偵測(擴充板 0x31 優先)────────────────────────────────
   // 規則:探測期同時問 0x31 與 0x30;**收到 0x31 立刻鎖 0x31**;
@@ -163,29 +210,103 @@ class K2SerialAdapter extends ChangeNotifier {
   // 量測控制(計時器在 UI 層)
   // ══════════════════════════════════════════════════════════════
 
-  /// 開始量測:掛上串口接收 + 啟動輪詢計時器。
+  /// 開始量測:掛上串口接收 + 啟動輪次迴圈。
   void start() {
-    if (_pollTimer != null) return;
+    if (_roundRunning) return;
     manager.onRawBytes = _parser.feed;
     // 每次開始量測重新探測板子(可能換了板子插)
     activeBoard = null;
     _probeTicks = 0;
     _sawMain = false;
+    _lateStreak = 0;
+    // 讓串口的停滯報告也看得到協定層的視角(看門狗先觸發時,這是唯一的來源)。
+    manager.trace.protocolProbe = () => activeBoard == null
+        ? '還在探測板子(探測期不計輪次)'
+        : '輪次:正常 $roundsOk 輪 / 延遲 $roundsLate 輪,'
+            '目前連續延遲 $_lateStreak 輪'
+            '(門檻 $maxLateStreak 輪,每輪等 ${roundTimeoutMs}ms)';
     _log(tr('k2_log_start'));
-    _pollTimer = Timer.periodic(
-      Duration(milliseconds: pollIntervalMs),
-      (_) => _sendQuery(),
-    );
+    _roundRunning = true;
+    _runRounds(); // 刻意不 await:它會一直跑到 stop()
     notifyListeners();
   }
 
-  /// 停止量測:停計時器 + 卸載接收。
+  /// 停止量測:停輪次迴圈 + 卸載接收。
   void stop() {
-    _pollTimer?.cancel();
-    _pollTimer = null;
+    _roundRunning = false;
+    // 正在等的那一輪不去 complete 它 —— 讓它自己逾時,迴圈下一圈就會退出。
+    // 這裡強行完成會讓那一輪被算成「有回應」或「延遲」,兩個都不是事實。
+    _awaiting = null;
     if (manager.onRawBytes == _parser.feed) manager.onRawBytes = null;
     _log(tr('k2_log_stop'));
     notifyListeners();
+  }
+
+  /// 輪次迴圈:一輪一輪地送、等、判定。跑到 [stop] 為止。
+  ///
+  /// 節奏:健康時一輪只花 11~20ms,補到 [pollIntervalMs] 再開下一輪,
+  /// 對外行為與舊版的 100ms 定時輪詢一樣。逾時的那一輪會花掉
+  /// [roundTimeoutMs] 把節奏往後拖 —— 那是對的,**對方沒在回答的時候
+  /// 「準時」毫無意義**。核心吃的是「這批有幾個樣本」,批次大小本來就是
+  /// 變動的,節奏浮動只會讓批次大小變一點。
+  Future<void> _runRounds() async {
+    while (_roundRunning) {
+      // 節奏計時器與這一輪**並行**跑,輪次做完再 await 它:
+      //   輪次比節奏快(正常,11~20ms) → 等剩下的時間,維持 100ms 節奏
+      //   輪次比節奏慢(逾時,150ms)   → 這個 Future 早就完成,await 立刻過
+      //
+      // ⚠️ 不要改回「量 DateTime.now() 的差再減」。那樣要依賴牆上時鐘,
+      //    假時間測試推不動它(測試就是這樣抓到的),而且算出來的節奏還會
+      //    被計算耗時帶著漂移。並行等待沒有這兩個問題。
+      final pace = Future<void>.delayed(Duration(milliseconds: pollIntervalMs));
+
+      // 探測期:同時問 0x31 與 0x30,**其中一塊本來就不會回**(二選一在線)。
+      // 所以這段不做輪次計數,否則每一輪都會被算成延遲。
+      final probing = activeBoard == null;
+      _sendQuery();
+
+      if (probing) {
+        await pace;
+        continue;
+      }
+
+      final c = Completer<bool>();
+      _awaiting = c;
+      final ok = await c.future.timeout(
+        const Duration(milliseconds: roundTimeoutMs),
+        onTimeout: () => false,
+      );
+      if (_awaiting == c) _awaiting = null;
+
+      if (!_roundRunning) break; // stop() 期間逾時的那一輪不計
+
+      if (ok) {
+        roundsOk++;
+        _lateStreak = 0;
+      } else {
+        roundsLate++;
+        _lateStreak++;
+        // 每一輪延遲都寫進串口的現場紀錄 —— 讓「協定層的視角」和原始
+        // bytes 排在同一條時間軸上,停滯報告才看得出是先沒回應還是先沒資料。
+        manager.trace.note('K2 第 $_lateStreak 輪沒有回應'
+            '(已送出但 ${roundTimeoutMs}ms 內沒有完整回應)');
+        if (_lateStreak == 1) {
+          // 只記連續失敗的第一次,不然 10Hz 會把日誌洗掉。
+          _log(trParams('k2_log_round_late', {'ms': '$roundTimeoutMs'}));
+        }
+        if (_lateStreak >= maxLateStreak) {
+          manager.requestReadRecovery(
+            'K2 連續 $maxLateStreak 輪沒有回應 —— '
+            '每輪送出後等 ${roundTimeoutMs}ms 都沒有完整回應,'
+            '累計延遲 $roundsLate 輪 / 正常 $roundsOk 輪',
+          );
+          _lateStreak = 0; // 交給串口層了,重新起算
+        }
+        notifyListeners();
+      }
+
+      await pace; // 補足節奏(逾時的那輪已經超過,會立刻過)
+    }
   }
 
   /// 清空核心 + 波形歷史(開始一段新檢驗前用)。
@@ -301,6 +422,14 @@ class K2SerialAdapter extends ChangeNotifier {
 
   void _onPacket(Uint8List packet) {
     rxPackets++;
+
+    // ── 這一輪有回應了 ──────────────────────────────────────────────
+    // ⚠️ 協定裡沒有序號欄位,所以無法百分之百確認「這包是哪一輪的回應」。
+    //    極端情況:第 N 輪逾時後它的回應才到,會被算在第 N+1 輪頭上。
+    //    這個誤差是協定本身造成的、無法消除,而且無所謂 —— 這套機制要抓的
+    //    是「完全沒有回應」,不是逐包對帳。
+    final waiting = _awaiting;
+    if (waiting != null && !waiting.isCompleted) waiting.complete(true);
 
     // ── 板子偵測:packet[2] 是來源板子身分 ──────────────────────────
     if (packet.length >= 3) {

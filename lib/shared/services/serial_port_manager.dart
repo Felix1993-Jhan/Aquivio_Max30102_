@@ -677,6 +677,58 @@ class SerialPortManager with ArduinoConnectionMixin {
   // 資料接收方法
   // ============================================================================
 
+  /// 讀取逾時值,**每次呼叫交替 1ms / 2ms**。兩個理由都是必要的。
+  ///
+  /// ── 為什麼一定要帶 timeout ──────────────────────────────────────
+  /// `SerialPort.read()` 的 timeout 預設是 −1,而 −1 走的是
+  /// **`sp_nonblocking_read`**,那條路有洞:
+  ///
+  /// ```c
+  /// // 非阻塞版(預設值會把我們帶到這裡)
+  /// if (ReadFile(..., &port->read_ovl) == 0)
+  ///     if (GetLastError() != ERROR_IO_PENDING)   // 容許「還在進行中」
+  ///         RETURN_FAIL(...);
+  /// if (GetOverlappedResult(..., &bytes_read, FALSE) == 0)   // FALSE = 不等
+  ///     RETURN_FAIL(...);     // ← 沒完成就當失敗返回,**那筆讀取被丟在核心裡**
+  ///
+  /// // 阻塞版(timeout >= 0 走這條)
+  /// } else if (GetLastError() == ERROR_IO_PENDING) {
+  ///     if (GetOverlappedResult(..., &bytes_read, TRUE) == 0)  // TRUE = 等它完成
+  /// ```
+  ///
+  /// 差別只有最後那個參數。非阻塞版會留下**沒有被收走的讀取作業**,而
+  /// **`CancelIo` 在整個 libserialport 裡一次都沒有出現** —— 沒有任何地方會
+  /// 去取消它。一筆被棄置的讀取還掛在核心裡等資料,驅動收到 byte 會優先
+  /// 交給它,於是 `ClearCommError` 的 `cbInQue`(我們的「待讀位元組」)
+  /// **永遠回 0**,而送出方向完全正常。那正是實測到的症狀:
+  /// 待讀位元組 0、無任何錯誤、MCU 一直在回答、重開 59ms 就好。
+  ///
+  /// 所以這裡不是「想要阻塞」,是**要走那條會把自己的讀取收乾淨的路徑**,
+  /// 而它剛好叫 blocking。
+  ///
+  /// ── 為什麼要交替 1/2 ──────────────────────────────────────────
+  /// `sp_blocking_read` 只在「**自己記的**逾時值和這次要的不一樣」時才真的
+  /// 呼叫 `SetCommTimeouts` 寫進驅動。USB 選擇性暫停喚醒後驅動會把逾時還原
+  /// 成預設(全零 = 無限等待),但函式庫的快取還以為是舊值 → 不重寫 →
+  /// 下一次讀取就真的卡住。**每次換一個值,它就每次都重寫**,快取不可能
+  /// 長期失同步,讀取也因此一定被 1~2ms 夾住。
+  ///
+  /// ── 代價 ──────────────────────────────────────────────────────
+  /// 最多 2ms,而且實務上接近 0:我們只要求「已經躺在佇列裡的那些 byte」,
+  /// 它們本來就在,函式立刻返回,逾時根本用不到。
+  bool _readTimeoutFlip = false;
+  int _nextReadTimeout() {
+    _readTimeoutFlip = !_readTimeoutFlip;
+    return _readTimeoutFlip ? 1 : 2;
+  }
+
+  /// 讓協定層（K2 adapter）在「連續多輪都沒有回應」時請求重開讀取端。
+  ///
+  /// 協定層知道「一問一答」的語意（我送了 QUERY_FIFO、該有一個完整回應），
+  /// 所以它能在 ~0.5 秒內判定;這一層只看得到「多久沒有任何 byte」,
+  /// 門檻只能放到 3 秒。兩者並存:這支是快的那條,看門狗是最後的保險。
+  void requestReadRecovery(String reason) => _recoverRead(reason);
+
   /// 開始讀取串口資料（使用 Timer.periodic 輪詢）
   void _startReading() {
     _readTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
@@ -720,10 +772,20 @@ class SerialPortManager with ArduinoConnectionMixin {
       if (available > 0) {
         Uint8List data;
         try {
-          data = _port!.read(available);
+          // ⚠️⚠️ **一定要帶 timeout,不可以用預設值。** 見 [_nextReadTimeout]。
+          data = _port!.read(available, timeout: _nextReadTimeout());
         } catch (e) {
           _recoverRead('實際讀取時丟出例外:$e');
           return;
+        }
+        // 要求了 available 卻沒拿到那麼多 —— 寫進現場紀錄(不寫日誌,避免洗版)。
+        // 這是「殭屍讀取」理論唯一會留下痕跡的地方,之前完全沒人在看這件事。
+        if (data.length != available) {
+          trace.note('讀取長度不符:要求 $available bytes,實際拿到 ${data.length}');
+          if (data.isEmpty) {
+            _logAnomaly('⚠️ 驅動說有 $available bytes 可讀,實際讀回來 0 bytes '
+                '—— 讀取端狀態可能已經不對');
+          }
         }
         if (data.isEmpty) return;
         _lastRxAt = DateTime.now();

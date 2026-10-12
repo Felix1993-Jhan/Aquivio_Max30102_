@@ -107,6 +107,17 @@ class SerialTrace {
   /// 改寫落地位置。只給測試用 —— 不覆寫就是桌面，測試不該往使用者桌面丟檔案。
   Directory? dumpDirOverride;
 
+  /// 協定層（K2 的輪次）在觸發當下的摘要，寫進報告表頭。
+  ///
+  /// 為什麼做成回呼而不是欄位：輪次每秒跑 10 次，每輪去組一個字串是白做工。
+  /// 回呼只在真的要寫報告時才被叫一次。
+  ///
+  /// 為什麼需要它：停滯有兩個發現者 —— 協定層（連續 N 輪沒回應，約 0.5 秒）
+  /// 與這一層的看門狗（3 秒沒有任何 byte）。協定層觸發時它的統計會寫在
+  /// `觸發原因` 裡，但**看門狗先觸發時就沒有**，報告會少掉「對方到底有沒有
+  /// 在回應」這個視角。這支補上那個缺口。
+  String Function()? protocolProbe;
+
   void onOpen(String portName, int baud) {
     _portName = portName;
     _baud = baud;
@@ -283,6 +294,17 @@ class SerialTrace {
     } else {
       sb.writeln('送出端結論      : ✅ 送出端正常（每一包都完整寫出）'
           ' ⇒ 要查的是對面或線路，不是我們的送出');
+    }
+
+    // 協定層的視角（有掛才印）。看門狗先觸發時,這是唯一能回答
+    // 「對方到底有沒有在回應」的地方。
+    final probe = protocolProbe;
+    if (probe != null) {
+      try {
+        sb.writeln('協定層狀況      : ${probe()}');
+      } catch (e) {
+        sb.writeln('協定層狀況      : 取得失敗($e)');
+      }
     }
 
     final outQs =

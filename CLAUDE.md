@@ -63,6 +63,7 @@ lib/
     ├── language_state.dart                      # globalLanguageNotifier
     ├── services/
     │   ├── serial_port_manager.dart             # 串口管理（文字 + 二進位雙模式）
+    │   ├── serial_trace.dart                    # 串口異常現場紀錄（環形 10 秒 → 桌面）
     │   ├── arduino_connection_service.dart      # 連線握手驗證 + ConnectResult 列舉
     │   ├── port_filter_service.dart             # COM 埠過濾（排除 ST-Link）
     │   └── localization_service.dart            # 多語系（繁中 / 英文）
@@ -70,7 +71,7 @@ lib/
         └── splash_screen.dart                   # 啟動畫面
 ```
 
-**共 32 個 .dart 檔**（其中 18 個屬於 `max30102_K2/`）。
+**共 33 個 .dart 檔**（其中 18 個屬於 `max30102_K2/`）。
 
 ---
 
@@ -220,6 +221,81 @@ UI 這一側原本有的「長期 RR 池（`allPoints`，上限 300 拍）」**�
 - 其餘 sub-cmd 回應固定 9 bytes
 - FIFO 原始資料：每組 6 bytes = RED(3) + IR(3)，各 18-bit **低位元組在前（LE）**
 - HR / SpO2 不在晶片端計算，晶片只吐原始值
+
+---
+
+## 串口讀寫的三個地雷（`libserialport` + 我們的用法）
+
+實測症狀：量測中 TX 一直加、RX 歸零，MCU 照常回答但一個 byte 都收不到，
+畫面凍結卻仍顯示「已連線」。每約 60 秒發生一次，手動「斷線 → 連線」才會好。
+
+查證結論（現場紀錄檔證實）：**送出端完全正常**（110/110 完整寫出、輸出緩衝區全程 0），
+**MCU 一直是活的**（重開後第一包只有約 200ms 的量，沒有 3 秒的積壓 ⇒ 那些請求它都收到也都回答了），
+壞的是**讀取方向**。
+
+### ⚠️ `read()` 一定要帶 `timeout`，不可以用預設值
+
+`SerialPort.read()` 的 `timeout` 預設 `-1`，`-1` 走 **`sp_nonblocking_read`**，那條路有洞：
+
+```c
+// 非阻塞版（預設值會把你帶到這裡）
+if (ReadFile(..., &port->read_ovl) == 0)
+    if (GetLastError() != ERROR_IO_PENDING) RETURN_FAIL(...);   // 容許「還在進行中」
+if (GetOverlappedResult(..., &bytes_read, FALSE) == 0)          // FALSE = 不等
+    RETURN_FAIL(...);        // ← 沒完成就當失敗返回，**那筆讀取被丟在核心裡**
+
+// 阻塞版（timeout >= 0 走這條）
+} else if (GetLastError() == ERROR_IO_PENDING) {
+    if (GetOverlappedResult(..., &bytes_read, TRUE) == 0)       // TRUE = 等它完成
+```
+
+差別只有最後那個參數。而且 **`CancelIo` 在整個 libserialport 裡一次都沒出現** ——
+沒有任何地方會去取消被棄置的讀取。一筆棄置的讀取還掛在核心裡等資料，
+驅動收到 byte 會優先交給它，於是 `cbInQue`（我們的「待讀位元組」）**永遠回 0**。
+
+所以不是「想要阻塞」，是**要走那條會把自己的讀取收乾淨的路徑**，它剛好叫 blocking。
+
+**逾時值要每次交替 1ms / 2ms**：`sp_blocking_read` 只在「自己記的逾時值和這次要的不一樣」
+時才真的呼叫 `SetCommTimeouts` 寫進驅動。USB 選擇性暫停喚醒後驅動會把逾時還原成預設
+（全零 = 無限等待），但快取還以為是舊值 → 不重寫 → 下次讀取真的卡住。
+每次換一個值就每次都重寫，快取不可能長期失同步。
+
+### ⚠️ `write()` 的回傳值一定要檢查
+
+同一個坑的另一半：`write()` 預設也是 `timeout = -1` ⇒ `sp_nonblocking_write`，
+**可以只寫出一部分**，也**可以回負的錯誤碼**，兩種都不丟例外。沒寫完不是「少送一點」，
+是**送出半截封包** → MCU checksum 不過 → **正確地不回答**。
+四處送出因此收斂成唯一出口 `SerialPortManager._writeBytes()`，別再各寫一份。
+
+### ⚠️ K2 的輪次（一問一答）不可以套在心跳與 UR 面板上
+
+`k2_serial_adapter` 的 `_runRounds()` 把每次詢問變成有頭有尾的一輪：
+送出 → 等最長 `roundTimeoutMs`(150ms) → 這輪算成功或延遲 → 連續 `maxLateStreak`(5) 輪
+沒回應就呼叫 `manager.requestReadRecovery()`。空洞因此從 3.16 秒縮到約 0.5 秒
+（偵測原本佔 95%）。
+
+**兩個地方絕對不能計輪次**，理由完全相同 —— 兩塊板二選一在線，其中一塊本來就不會回：
+
+1. **探測期**（`activeBoard == null`）同時問 `0x31` 與 `0x30`。算進去的話每輪都是延遲，
+   連續 5 輪就去重開串口 —— 一開始量測就無限重開。
+2. **心跳**（`SerialPortManager._pingBoards`）`0x30 ↔ 0x31` 交叉輪替，同理。
+
+⚠️ **不可以在 `start()` 之前設 `activeBoard`** —— `start()` 裡有 `activeBoard = null`
+（每次量測重新探測，可能換板子插），寫在前面會被清掉。測試要鎖定就餵一包 `0x31` 的回應。
+
+⚠️ 節奏用「並行的 `pace` Future，輪次做完再 `await` 它」，**不要改回量 `DateTime.now()` 的差再減** ——
+那要依賴牆上時鐘，假時間測試推不動它，而且節奏會被計算耗時帶著漂移。
+
+### 現場紀錄（`serial_trace.dart`）
+
+觸發自動重開時，把**前 10 秒 + 後 1 秒**的完整收送寫到 `桌面\串口異常紀錄\`，
+含每包的 `寫出/要求`、`bytesToWrite`（輸出緩衝區積壓）、逐筆 hex、以及協定層的輪次統計。
+
+打開只看 **`送出端結論`** 那一行就夠。要篩多份檔案就搜這個字，
+**不要搜「半截封包」** —— 檔尾的閱讀說明本來就會提到它，每份都會命中（測試抓到的）。
+
+為什麼不用 PuTTY：**COM 埠獨占**（App 握著就開不起來），而且線路上旁聽看不到
+`write()` 回傳值與緩衝區積壓 —— 那是程式與驅動之間的事。
 
 ---
 
