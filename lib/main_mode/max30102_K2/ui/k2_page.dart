@@ -842,18 +842,29 @@ class _K2PageState extends State<K2Page> {
         // 即時心跳計數:直接聽 sampleVersionNotifier(10Hz),不靠整頁 rebuild。
         // 用途:一眼分辨「資料停了」vs「畫面沒重繪」——
         //   數字不動 = 串口/解析停了;數字在動但波形不動 = 繪圖問題。
-        ValueListenableBuilder<int>(
-          valueListenable: _adapter.sampleVersionNotifier,
-          builder: (context, ver, _) => Text(
-            trParams('k2_feed_stats', {
-              'ver': ver,
-              'rx': _adapter.rxPackets,
-              'wave': _adapter.waveIr.length,
-            }),
-            style: TextStyle(
-                fontSize: 11,
-                fontFeatures: const [FontFeature.tabularFigures()],
-                color: Colors.blueGrey.shade400),
+        //
+        // ⚠️ 一定要包 Flexible + ellipsis。這串**會隨 App 跑越久變越長**
+        //    (進料 #39531 / RX 79999 都會長到 5~6 位數),而這一行前面是
+        //    固定寬度的控制項,[Spacer] 擠不下時會被壓成 0 → 整行溢位,
+        //    debug 模式直接丟 RenderFlex overflow。
+        //    寬度夠時行為完全一樣,不夠時從尾巴截斷 —— 反正溢位時尾巴本來
+        //    就被切掉了,包起來只是讓它別再報錯。
+        Flexible(
+          child: ValueListenableBuilder<int>(
+            valueListenable: _adapter.sampleVersionNotifier,
+            builder: (context, ver, _) => Text(
+              trParams('k2_feed_stats', {
+                'ver': ver,
+                'rx': _adapter.rxPackets,
+                'wave': _adapter.waveIr.length,
+              }),
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                  color: Colors.blueGrey.shade400),
+            ),
           ),
         ),
       ],
