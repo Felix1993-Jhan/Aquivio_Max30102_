@@ -78,8 +78,15 @@ enum K2DrinkRule {
 
 /// 一款飲品在對方知識庫裡的定位（`infusion-knowledge.ts` 的摘要）。
 class K2Infusion {
-  const K2Infusion(this.slug, this.zh, this.category, this.bestForRules,
-      {this.avoidRules = const []});
+  const K2Infusion({
+    required this.slug,
+    required this.zh,
+    required this.category,
+    required this.bestForZh,
+    required this.bestForRules,
+    this.avoidWhenZh,
+    this.avoidRules = const [],
+  });
 
   /// 對方知識庫裡的鍵值，**一個字母都不能改**（含大小寫）——
   /// 它是兩邊對帳的唯一識別碼，改了就對不回去。
@@ -91,6 +98,12 @@ class K2Infusion {
   /// 對方知識庫裡的分類，**原文照搬不翻譯** —— 它是用來對帳的技術名詞，
   /// 翻譯之後就對不回他們的 `infusion-knowledge.ts` 了。
   final String category;
+
+  /// 為什麼入圍：對方 `bestFor` 的中文濃縮。
+  final String bestForZh;
+
+  /// 為什麼被排除：對方 `avoidWhen` 的中文濃縮。null = **對方根本沒寫這欄**。
+  final String? avoidWhenZh;
 
   /// 這款飲品適合哪些主導訊號。
   final List<K2DrinkRule> bestForRules;
@@ -104,37 +117,104 @@ class K2Infusion {
 /// ⚠️ 這是**快照**，不是即時讀取 —— 對方改了知識庫這裡不會自動跟著動。
 ///    畫面上有標明，而且它只用來解釋傾向，不會真的決定任何事。
 const List<K2Infusion> kK2Infusions = [
-  K2Infusion('electrolytes', '電解質', 'hydration & minerals',
-      [K2DrinkRule.elevatedHr, K2DrinkRule.sympathetic]),
-  // ⚠️ 駝峰,不是 multivitamins —— 對方的鍵值就是這樣寫的。
-  K2Infusion('multiVitamins', '綜合維生素', 'micronutrient support',
-      [K2DrinkRule.neutral],
-      avoidRules: [K2DrinkRule.sympathetic, K2DrinkRule.parasympathetic]),
-  K2Infusion('caffeine', '咖啡因', 'stimulant / energy',
-      [K2DrinkRule.parasympathetic],
-      avoidRules: [K2DrinkRule.sympathetic, K2DrinkRule.elevatedHr]),
-  K2Infusion('cascara', '咖啡果皮', 'gentle botanical lift',
-      [K2DrinkRule.parasympathetic],
-      avoidRules: [K2DrinkRule.sympathetic, K2DrinkRule.elevatedHr]),
-  K2Infusion('collagen', '膠原蛋白', 'recovery & connective support',
-      [K2DrinkRule.parasympathetic]),
+  // ⚠️ electrolytes 的依據**有兩條來源而且不一致**：它自己的 bestFor 只講
+  //    「心率偏高、脫水/運動後」，但提示詞的交感規則又寫「Favor
+  //    hydration/mineral…」把它包進去。所以它實際上幾乎永遠是候選。
   K2Infusion(
-      'lutein', '葉黃素', 'antioxidant / eye support', [K2DrinkRule.sympathetic]),
-  K2Infusion('bcaa', '支鏈胺基酸', 'amino-acid recovery',
-      [K2DrinkRule.parasympathetic],
-      avoidRules: [K2DrinkRule.sympathetic]),
-  K2Infusion('whey', '乳清蛋白', 'protein & satiety', [K2DrinkRule.parasympathetic],
-      avoidRules: [K2DrinkRule.sympathetic]),
-  // creatine 是唯一兩端都適合的 —— 對方寫明它「also defensible for
-  // stressed / sleep-deprived readings（認知韌性）」。
-  K2Infusion('creatine', '肌酸', 'strength, power & cognitive resilience',
-      [K2DrinkRule.parasympathetic, K2DrinkRule.sympathetic]),
-  K2Infusion('fiber', '膳食纖維', 'digestive & gut–heart support',
-      [K2DrinkRule.neutral, K2DrinkRule.sympathetic]),
+    slug: 'electrolytes',
+    zh: '電解質',
+    category: 'hydration & minerals',
+    bestForZh: '心率偏高、有脫水或運動後的跡象 —— 補水優先的選擇',
+    bestForRules: [K2DrinkRule.elevatedHr, K2DrinkRule.sympathetic],
+  ),
+  // ⚠️ 駝峰,不是 multivitamins —— 對方的鍵值就是這樣寫的。
+  K2Infusion(
+    slug: 'multiVitamins',
+    zh: '綜合維生素',
+    category: 'micronutrient support',
+    bestForZh: '中性或耗損、沒有單一主導訊號時的一般支持',
+    avoidWhenZh: '有明確的強訊號（高壓力、恢復良好、心率偏高）時，該用更針對性的',
+    bestForRules: [K2DrinkRule.neutral],
+    avoidRules: [K2DrinkRule.sympathetic, K2DrinkRule.parasympathetic],
+  ),
+  K2Infusion(
+    slug: 'caffeine',
+    zh: '咖啡因',
+    category: 'stimulant / energy',
+    bestForZh: '恢復良好、副交感的讀數：高 PNS、高 HRV、低 stress —— 身體承受得起刺激',
+    avoidWhenZh: '高 stress、低 PNS、交感主導（LF/HF > 1.5）或心率偏高 —— '
+        '預防性迴避，不要在已經活化的狀態上再加喚起',
+    bestForRules: [K2DrinkRule.parasympathetic],
+    avoidRules: [K2DrinkRule.sympathetic, K2DrinkRule.elevatedHr],
+  ),
+  K2Infusion(
+    slug: 'cascara',
+    zh: '咖啡果皮',
+    category: 'gentle botanical lift',
+    bestForZh: '中度恢復、想要軟性提振而不是強刺激',
+    avoidWhenZh: '高 stress、低 PNS 或心率偏高',
+    bestForRules: [K2DrinkRule.parasympathetic],
+    avoidRules: [K2DrinkRule.sympathetic, K2DrinkRule.elevatedHr],
+  ),
+  K2Infusion(
+    slug: 'collagen',
+    zh: '膠原蛋白',
+    category: 'recovery & connective support',
+    bestForZh: '恢復導向或活動後的讀數 —— 運動後與恢復良好的狀態',
+    bestForRules: [K2DrinkRule.parasympathetic],
+  ),
+  K2Infusion(
+    slug: 'lutein',
+    zh: '葉黃素',
+    category: 'antioxidant / eye support',
+    bestForZh: '高壓力或交感主導的讀數，依據是抗氧化／氧化負荷的論點'
+        '（**不是**直接宣稱能改善 HRV）',
+    bestForRules: [K2DrinkRule.sympathetic],
+  ),
+  K2Infusion(
+    slug: 'bcaa',
+    zh: '支鏈胺基酸',
+    category: 'amino-acid recovery',
+    bestForZh: '恢復良好、偏活動的讀數（PNS/HRV 佳），或運動後恢復',
+    avoidWhenZh: '高壓力且低恢復 —— 那時候鎮靜支持比表現支持合適',
+    bestForRules: [K2DrinkRule.parasympathetic],
+    avoidRules: [K2DrinkRule.sympathetic],
+  ),
+  K2Infusion(
+    slug: 'whey',
+    zh: '乳清蛋白',
+    category: 'protein & satiety',
+    bestForZh: '已恢復、表現或營養導向的讀數',
+    avoidWhenZh: '急性壓力、低恢復 —— 那時候該先給鎮靜補水',
+    bestForRules: [K2DrinkRule.parasympathetic],
+    avoidRules: [K2DrinkRule.sympathetic],
+  ),
+  K2Infusion(
+    slug: 'creatine',
+    zh: '肌酸',
+    category: 'strength, power & cognitive resilience',
+    // 唯一在知識庫**自己的文字裡**就寫明兩端都適合的。
+    bestForZh: '強恢復、準備好表現的讀數 —— 而且**獨特地**也適用於'
+        '壓力／睡眠不足的讀數（認知韌性的論點）',
+    bestForRules: [K2DrinkRule.parasympathetic, K2DrinkRule.sympathetic],
+  ),
+  K2Infusion(
+    slug: 'fiber',
+    zh: '膳食纖維',
+    category: 'digestive & gut–heart support',
+    bestForZh: '中性／一般健康的讀數，也可當高壓力讀數的溫和腸－迷走支持',
+    bestForRules: [K2DrinkRule.neutral, K2DrinkRule.sympathetic],
+  ),
   // ⚠️ 是 lCarnitine(左旋肉鹼),不是 metabolic —— metabolic 是它的分類名。
-  K2Infusion('lCarnitine', '左旋肉鹼', 'metabolic / fat-to-energy',
-      [K2DrinkRule.parasympathetic],
-      avoidRules: [K2DrinkRule.sympathetic]),
+  K2Infusion(
+    slug: 'lCarnitine',
+    zh: '左旋肉鹼',
+    category: 'metabolic / fat-to-energy',
+    bestForZh: '恢復良好、偏活動、以健身為目標的讀數',
+    avoidWhenZh: '高壓力或低恢復',
+    bestForRules: [K2DrinkRule.parasympathetic],
+    avoidRules: [K2DrinkRule.sympathetic],
+  ),
 ];
 
 /// 一條資料可信度的警示。
@@ -168,6 +248,10 @@ class K2DrinkPreview {
   final List<String> favored;
 
   /// 會被排除的飲品 slug。
+  ///
+  /// ⚠️ **11 款裡有 5 款永遠不會出現在這裡**（`electrolytes` / `collagen` /
+  ///    `lutein` / `creatine` / `fiber`）—— 它們在對方知識庫裡根本沒有
+  ///    `avoidWhen` 欄位。所以「不在排除清單」不等於「被評估過且通過」。
   final List<String> avoided;
 
   /// 資料可不可信的警示。空的代表沒看出問題。
@@ -177,11 +261,20 @@ class K2DrinkPreview {
   ///
   /// [perfusionPct] 是灌流指數 AC/DC（百分比），由呼叫端從波形算。
   /// [sd1] / [sd2] 來自 HRV，用來抓「SD1 > SD2」這個白雜訊特徵。
+  ///
+  /// [stocked] 給了就只留機器真的有的那幾款（模擬現場的實際庫存）；
+  /// 給 null 就是把 11 款全部當成有貨。
+  ///
+  /// ⚠️ 過濾只影響**顯示**。真實情況是對方的 `loadMachineInfusions()` 在
+  ///    組提示詞之前就先把這台機器的清單撈出來，所以 **LLM 根本看不到
+  ///    沒進貨的那幾款** —— 不是挑完再刪掉。這個差別很重要：
+  ///    少一款不是「少一個選項」，而是整個推薦會改挑別的組合。
   factory K2DrinkPreview.from(
     Map<String, dynamic> vitals, {
     double? perfusionPct,
     double? sd1,
     double? sd2,
+    Set<String>? stocked,
   }) {
     double? num_(String k) {
       final v = vitals[k];
@@ -236,13 +329,14 @@ class K2DrinkPreview {
     }
 
     // ── ③ 依規則分出偏好 / 排除 ──────────────────────────────────────
+    bool inStock(K2Infusion i) => stocked == null || stocked.contains(i.slug);
     final favored = [
       for (final i in kK2Infusions)
-        if (i.bestForRules.contains(rule)) i.slug
+        if (i.bestForRules.contains(rule) && inStock(i)) i.slug
     ];
     final avoided = [
       for (final i in kK2Infusions)
-        if (i.avoidRules.contains(rule)) i.slug
+        if (i.avoidRules.contains(rule) && inStock(i)) i.slug
     ];
 
     // ── ④ 這筆資料到底可不可信 ───────────────────────────────────────
@@ -310,22 +404,35 @@ String k2DrinkRuleKey(K2DrinkRule r) => switch (r) {
 ///
 /// [compute] 回 null（例如手指離開、一拍都不剩）時**保留上一份**，
 /// 不要把畫面清空 —— 內容突然消失比停在舊值更難理解。
+/// [applyStock] 是「只看機器實際有的」那個開關。對話框裡也放一份，
+/// 可以開著視窗直接比對「全部有貨」和「現場庫存」兩種結果。
+/// 它和主畫面共用同一個 notifier，所以兩邊永遠一致。
 Future<void> showK2DrinkPreview(
   BuildContext context, {
   required Listenable listenable,
   required K2DrinkPreview? Function() compute,
+  ValueNotifier<bool>? applyStock,
 }) {
   return showDialog<void>(
     context: context,
-    builder: (ctx) => _K2DrinkLive(listenable: listenable, compute: compute),
+    builder: (ctx) => _K2DrinkLive(
+      listenable: listenable,
+      compute: compute,
+      applyStock: applyStock,
+    ),
   );
 }
 
 class _K2DrinkLive extends StatefulWidget {
-  const _K2DrinkLive({required this.listenable, required this.compute});
+  const _K2DrinkLive({
+    required this.listenable,
+    required this.compute,
+    this.applyStock,
+  });
 
   final Listenable listenable;
   final K2DrinkPreview? Function() compute;
+  final ValueNotifier<bool>? applyStock;
 
   @override
   State<_K2DrinkLive> createState() => _K2DrinkLiveState();
@@ -342,16 +449,17 @@ class _K2DrinkLiveState extends State<_K2DrinkLive> {
         _last = widget.compute() ?? _last;
         final p = _last;
         if (p == null) return const SizedBox.shrink();
-        return _K2DrinkDialog(preview: p);
+        return _K2DrinkDialog(preview: p, applyStock: widget.applyStock);
       },
     );
   }
 }
 
 class _K2DrinkDialog extends StatelessWidget {
-  const _K2DrinkDialog({required this.preview});
+  const _K2DrinkDialog({required this.preview, this.applyStock});
 
   final K2DrinkPreview preview;
+  final ValueNotifier<bool>? applyStock;
 
   @override
   Widget build(BuildContext context) {
@@ -426,13 +534,36 @@ class _K2DrinkDialog extends StatelessWidget {
               ),
               const SizedBox(height: 14),
 
-              _head(tr('k2_drink_sec_picks')),
-              if (p.favored.isNotEmpty)
-                _chips(tr('k2_drink_favored'), p.favored, Colors.green),
-              if (p.avoided.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                _chips(tr('k2_drink_avoided'), p.avoided, Colors.red),
-              ],
+              Row(
+                children: [
+                  Expanded(child: _head(tr('k2_drink_sec_picks'))),
+                  // 只看機器實際有的。和主畫面共用同一個 notifier,
+                  // 所以開著視窗切換也會兩邊一致。
+                  if (applyStock != null)
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Checkbox(
+                        value: applyStock!.value,
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize:
+                            MaterialTapTargetSize.shrinkWrap,
+                        onChanged: (b) => applyStock!.value = b ?? false,
+                      ),
+                      Text(tr('k2_drink_apply_stock'),
+                          style: const TextStyle(fontSize: 12)),
+                    ]),
+                ],
+              ),
+              if (p.favored.isEmpty && p.avoided.isEmpty)
+                Text(tr('k2_drink_none_stocked'),
+                    style:
+                        TextStyle(fontSize: 12, color: Colors.orange.shade800)),
+              for (final s in p.favored) _pickRow(s, true),
+              for (final s in p.avoided) _pickRow(s, false),
+              const SizedBox(height: 10),
+              // 5 款沒有 avoidWhen —— 「不在排除清單」不等於「評估過且通過」。
+              Text(tr('k2_drink_no_avoid_note'),
+                  style: TextStyle(
+                      fontSize: 11, color: Colors.grey.shade600, height: 1.4)),
               const SizedBox(height: 16),
 
               // ── 免責:哪些是精確的、哪些是我們猜的 ────────────────────
@@ -474,55 +605,66 @@ class _K2DrinkDialog extends StatelessWidget {
         child: child,
       );
 
-  Widget _chips(String label, List<String> slugs, MaterialColor c) => Row(
+  /// 一款飲品一列：標記 + slug + 中文 + 分類，底下一行「為什麼」。
+  ///
+  /// 理由直接取自對方知識庫的 `bestFor` / `avoidWhen`（中文濃縮）——
+  /// 這才是真正的判斷依據，光給一個 slug 等於沒解釋。
+  Widget _pickRow(String slug, bool favored) {
+    final info = kK2Infusions.firstWhere((i) => i.slug == slug,
+        orElse: () => K2Infusion(
+            slug: slug,
+            zh: '',
+            category: '',
+            bestForZh: '',
+            bestForRules: const []));
+    final c = favored ? Colors.green : Colors.red;
+    final why = favored ? info.bestForZh : (info.avoidWhenZh ?? '');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 56,
-            child: Text(label,
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-          ),
+          Icon(favored ? Icons.check_circle : Icons.cancel,
+              size: 15, color: c.shade600),
+          const SizedBox(width: 6),
           Expanded(
-            child: Wrap(
-              spacing: 4,
-              runSpacing: 4,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (final s in slugs)
-                  Builder(builder: (_) {
-                    final info = kK2Infusions.firstWhere((i) => i.slug == s,
-                        orElse: () => K2Infusion(s, '', '', const []));
-                    return Tooltip(
-                      // 滑過去看對方知識庫裡的分類,方便對帳。
-                      message: info.category,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: c.shade50,
-                          border: Border.all(color: c.shade200),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        // slug 在前、中文在後:slug 才是對帳用的識別碼,
-                        // 中文只是讓人看得懂,所以不能喧賓奪主。
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Text(info.slug,
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  fontFamily: 'Consolas',
-                                  color: c.shade800)),
-                          if (info.zh.isNotEmpty) ...[
-                            const SizedBox(width: 5),
-                            Text(info.zh,
-                                style: TextStyle(
-                                    fontSize: 11, color: c.shade600)),
-                          ],
-                        ]),
-                      ),
-                    );
-                  }),
+                Row(children: [
+                  // slug 在前、等寬字體:它才是對帳用的識別碼。
+                  Text(info.slug,
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'Consolas',
+                          fontWeight: FontWeight.bold,
+                          color: c.shade800)),
+                  if (info.zh.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Text(info.zh, style: const TextStyle(fontSize: 12)),
+                  ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(info.category,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 10.5, color: Colors.grey.shade500)),
+                  ),
+                ]),
+                if (why.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(why,
+                        style: TextStyle(
+                            fontSize: 11,
+                            height: 1.4,
+                            color: Colors.grey.shade700)),
+                  ),
               ],
             ),
           ),
         ],
-      );
+      ),
+    );
+  }
 }

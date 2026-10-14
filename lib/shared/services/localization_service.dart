@@ -733,6 +733,14 @@ class LocalizationService {
       'k2_drink_favored': '偏好',
       'k2_drink_avoided': '排除',
       'k2_drink_close': '關閉',
+      'k2_drink_apply_stock': '只看機器有的',
+      'k2_drink_stock_row': '機器庫存（模擬）',
+      'k2_drink_none_stocked': '⚠️ 機器裡沒有任何入圍的營養劑 —— 實際上對方會拿不到可選的 slug',
+      'k2_drink_no_avoid_note': 'ℹ️ 11 款裡有 5 款（electrolytes / collagen / lutein / creatine / fiber）'
+          '在對方知識庫裡**根本沒有 avoidWhen 欄位**，所以永遠不會出現在「排除」。\n'
+          '「不在排除清單」不等於「被評估過而且通過」。\n'
+          '另外 electrolytes 的依據有兩條來源且不一致（自己的 bestFor 只講心率偏高，\n'
+          '但提示詞的交感規則又把 hydration/mineral 包進去），實際上幾乎永遠是候選。',
       'k2_drink_rule_hr': '心率偏高 → 一律補水、非氣泡、非刺激性（對方寫明這條**不管其他訊號**）',
       'k2_drink_rule_sym': '交感主導／壓力 → 恢復與鎮靜類：補水礦物、抗氧化、恢復。**禁咖啡因與任何刺激物**',
       'k2_drink_rule_para': '副交感／恢復良好 → 能量與表現類：刺激物、胺基酸、蛋白質、代謝',
@@ -1467,6 +1475,16 @@ class LocalizationService {
       'k2_drink_favored': 'Favored',
       'k2_drink_avoided': 'Excluded',
       'k2_drink_close': 'Close',
+      'k2_drink_apply_stock': 'Only what the machine has',
+      'k2_drink_stock_row': 'Machine stock (simulated)',
+      'k2_drink_none_stocked':
+          '⚠️ None of the shortlisted infusions are stocked — their side would get no usable slug',
+      'k2_drink_no_avoid_note':
+          'ℹ️ 5 of the 11 (electrolytes / collagen / lutein / creatine / fiber) have **no avoidWhen field at all**\n'
+              'in their knowledge base, so they can never appear under "Excluded".\n'
+              '"Not excluded" does not mean "evaluated and passed".\n'
+              'electrolytes also has two inconsistent sources (its own bestFor names only elevated HR,\n'
+              'while the prompt\'s sympathetic rule pulls in hydration/mineral), so it is a candidate almost always.',
       'k2_drink_rule_hr':
           'Elevated heart rate → hydrating, non-fizzy, non-stimulant. Their prompt says this applies **regardless of the other signals**',
       'k2_drink_rule_sym':

@@ -118,6 +118,42 @@ void main() {
       expect(p.trustIssues, isEmpty, reason: '沒有資料不等於資料有問題');
     });
 
+    test('⑧ 只看機器有的：沒進貨的不會出現在任何一邊', () {
+      final v = vitals(
+          meanHr: 88, sdnn: 18, rmssd: 12, lfHf: 3.2, pns: 20, stress: 80);
+
+      final all = K2DrinkPreview.from(v, perfusionPct: 6.0);
+      expect(all.favored, contains('lutein'));
+      expect(all.avoided, contains('caffeine'));
+
+      // 這台機器只有電解質和纖維
+      final some = K2DrinkPreview.from(v,
+          perfusionPct: 6.0, stocked: {'electrolytes', 'fiber'});
+      expect(some.favored, ['electrolytes', 'fiber']);
+      expect(some.avoided, isEmpty,
+          reason: 'caffeine 沒進貨,連「排除」都不該列 —— 對方根本看不到它');
+
+      // 一款都沒有 → 兩邊都空,畫面要能講出這件事
+      final none = K2DrinkPreview.from(v, perfusionPct: 6.0, stocked: {});
+      expect(none.favored, isEmpty);
+      expect(none.avoided, isEmpty);
+    });
+
+    test('⑨ 每一款都要有入圍理由；有 avoidRules 的就一定要有迴避理由', () {
+      for (final i in kK2Infusions) {
+        expect(i.bestForZh, isNotEmpty, reason: '${i.slug} 少了入圍理由');
+        if (i.avoidRules.isNotEmpty) {
+          expect(i.avoidWhenZh, isNotNull,
+              reason: '${i.slug} 有迴避規則卻沒有理由,畫面會列出一條空的');
+        }
+      }
+      // 對方知識庫裡**沒有** avoidWhen 的那 5 款,我們也不可以自己編一個出來
+      final noAvoid =
+          kK2Infusions.where((i) => i.avoidWhenZh == null).map((i) => i.slug);
+      expect(noAvoid, containsAll(
+          ['electrolytes', 'collagen', 'lutein', 'creatine', 'fiber']));
+    });
+
     test('⑦ slug 必須逐字對上對方 infusion-knowledge.ts 的鍵值', () {
       // ⚠️ 這 11 個是從對方原始碼抄來的,**含大小寫一個字母都不能改** ——
       //    slug 是兩邊對帳的唯一識別碼。

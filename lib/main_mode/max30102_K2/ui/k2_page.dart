@@ -884,6 +884,17 @@ class _K2PageState extends State<K2Page> {
   // 推薦飲品預覽（離線推演，不連外）
   // ══════════════════════════════════════════════════════════════
 
+  /// 模擬這台機器實際有哪幾款營養劑。預設全有。
+  ///
+  /// ⚠️ 這只是**模擬**。真實情況是對方的 `loadMachineInfusions()` 在組提示詞
+  ///    之前就把這台機器的清單撈出來，所以 **LLM 根本看不到沒進貨的那幾款** ——
+  ///    不是挑完再刪。少一款不只是少一個選項，而是整個推薦會改挑別的組合。
+  final Set<String> _stocked = {for (final i in kK2Infusions) i.slug};
+
+  /// 「只看機器有的」開關。做成 notifier 是因為彈窗裡也有一份，
+  /// 共用同一個來源才不會兩邊不一致。
+  final ValueNotifier<bool> _applyStock = ValueNotifier(false);
+
   /// 從現在的狀態推演一次。對話框開著時每次 [K2SerialAdapter] 通知就重算。
   ///
   /// **兩種模式共用這一條路，不用判斷模式**：定長下 `fixedWindow.view()` 有
@@ -929,16 +940,75 @@ class _K2PageState extends State<K2Page> {
       perfusionPct: pi,
       sd1: hv?.sd1,
       sd2: hv?.sd2,
+      stocked: _applyStock.value ? _stocked : null,
     );
   }
 
   /// 彈窗。算不出來（還沒有拍）就不彈，避免跳出一個全是 n/a 的框。
+  ///
+  /// listenable 要把 [_applyStock] 併進去 —— 不然在彈窗裡切那個勾選框，
+  /// 畫面不會重算。
   void _showDrinkPreview() {
     if (_computeDrinkPreview() == null) return;
     showK2DrinkPreview(
       context,
-      listenable: _adapter,
+      listenable: Listenable.merge([_adapter, _applyStock]),
       compute: _computeDrinkPreview,
+      applyStock: _applyStock,
+    );
+  }
+
+  /// 機器庫存模擬列：一排可勾選的營養劑 + 「只看機器有的」開關。
+  Widget _stockRow() {
+    return ValueListenableBuilder<bool>(
+      valueListenable: _applyStock,
+      builder: (context, apply, _) => Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(top: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(tr('k2_drink_stock_row'),
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+            const SizedBox(width: 6),
+            Checkbox(
+              value: apply,
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              onChanged: (b) => _applyStock.value = b ?? false,
+            ),
+            Text(tr('k2_drink_apply_stock'),
+                style: const TextStyle(fontSize: 11)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  for (final i in kK2Infusions)
+                    FilterChip(
+                      label: Text('${i.slug} ${i.zh}',
+                          style: const TextStyle(fontSize: 10.5)),
+                      selected: _stocked.contains(i.slug),
+                      visualDensity: VisualDensity.compact,
+                      // 沒打開「只看機器有的」時，勾選不影響任何結果 ——
+                      // 用淡化提示這件事，不要讓人以為自己在調整推薦。
+                      showCheckmark: apply,
+                      onSelected: (on) => setState(() {
+                        on ? _stocked.add(i.slug) : _stocked.remove(i.slug);
+                      }),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1328,6 +1398,7 @@ class _K2PageState extends State<K2Page> {
         // 佔掉約 150px 的欄高。橫排之後側欄那段高度全部還給 HRV 與衍生指標,
         // 而且這五個值本來就該一眼掃過去,不需要垂直排列。
         _liveValuesBar(c, v, holding, shortPts.isNotEmpty),
+        _stockRow(),
         const SizedBox(height: 8),
         SizedBox(
           height: _sec1Height,
