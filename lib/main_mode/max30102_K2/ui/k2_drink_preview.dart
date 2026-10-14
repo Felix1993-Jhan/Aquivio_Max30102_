@@ -31,6 +31,8 @@
 // 下面 [K2DrinkThresholds] 的門檻**是我們訂的，不是對方的**，畫面上也會標明。
 // ============================================================================
 
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 
 import '../../../shared/services/localization_service.dart';
@@ -389,6 +391,16 @@ class K2DrinkPreview {
   }
 }
 
+/// 玻璃質感開關。`true` = 方案 B（玻璃外框 + 資料區維持實心），
+/// `false` = 原本的 Material `AlertDialog`。
+///
+/// 做成常數而**不是把舊版註解掉**：兩條路都保持可編譯，想比較就翻這個 bool。
+/// 註解掉的程式碼會隨著其他地方的改動默默爛掉，常數不會。
+///
+/// 關掉的時機：如果發現滾動模式下開著這個視窗會讓波形圖掉幀。
+/// `BackdropFilter` 會強制一個 save layer 並且每一幀重算模糊，它不是免費的。
+const bool _glass = true;
+
 /// 規則 → 翻譯 key。
 String k2DrinkRuleKey(K2DrinkRule r) => switch (r) {
       K2DrinkRule.elevatedHr => 'k2_drink_rule_hr',
@@ -419,6 +431,10 @@ Future<void> showK2DrinkPreview(
 }) {
   return showDialog<void>(
     context: context,
+    // 遮罩要調淡,否則背景被壓黑之後「模糊」就沒東西可模糊,玻璃感出不來。
+    // 代價是背後的波形圖會透出來 —— 所以模糊給得重(sigma 22),
+    // 讓它只剩色塊感、看不出形狀。
+    barrierColor: _glass ? const Color.fromRGBO(0, 0, 0, 0.28) : null,
     builder: (ctx) => _K2DrinkLive(
       listenable: listenable,
       compute: compute,
@@ -465,22 +481,95 @@ class _K2DrinkDialog extends StatelessWidget {
   final K2DrinkPreview preview;
   final ValueNotifier<bool>? applyStock;
 
+  // ── 玻璃用色 ────────────────────────────────────────────────────────
+  //
+  // 用 Color.fromRGBO 而不是 withOpacity / withValues：那兩個 API 在不同
+  // Flutter 版本之間一個被棄用、一個還不存在，fromRGBO 從以前到現在都一樣。
+  static const _shell = Color.fromRGBO(255, 255, 255, 0.72);
+  static const _shellEdge = Color.fromRGBO(255, 255, 255, 0.65);
+  static const _warnFill = Color.fromRGBO(255, 167, 38, 0.20);
+  static const _warnEdge = Color.fromRGBO(239, 108, 0, 0.50);
+  static const _ruleFill = Color.fromRGBO(0, 150, 136, 0.13);
+  static const _ruleEdge = Color.fromRGBO(0, 150, 136, 0.38);
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      _glass ? _glassDialog(context) : _materialDialog(context);
+
+  /// 方案 B：玻璃只做在「框」上，資料區（第①塊）維持深色實心。
+  ///
+  /// 玻璃感的本質是**降低對比**，而第①塊正好是最需要對比的東西
+  /// （那串等寬數字是拿來對帳的）。所以裝飾歸裝飾、資料歸資料。
+  Widget _glassDialog(BuildContext context) {
+    return Dialog(
+      // 不設透明的話 Material 自己的白底會擋在前面，模糊完全看不到。
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
+      child: ClipRRect(
+        // ⚠️ 一定要裁切。沒有 ClipRRect 的話模糊會溢出到整個畫面。
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 620),
+            decoration: BoxDecoration(
+              color: _shell,
+              border: Border.all(color: _shellEdge, width: 1.2),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            padding: const EdgeInsets.fromLTRB(22, 18, 22, 14),
+            child: _content(context),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 原本的 Material 版本。留著是為了能一鍵比較，見 [_glass]。
+  Widget _materialDialog(BuildContext context) => AlertDialog(
+        title: _titleRow(),
+        content: SizedBox(width: 560, child: _body(context)),
+        actions: [_closeButton(context)],
+      );
+
+  Widget _content(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _titleRow(),
+          const SizedBox(height: 14),
+          Flexible(child: _body(context)),
+          const SizedBox(height: 6),
+          Align(alignment: Alignment.centerRight, child: _closeButton(context)),
+        ],
+      );
+
+  Widget _titleRow() {
+    final warn = preview.trustIssues.isNotEmpty;
+    return Row(
+      children: [
+        Icon(warn ? Icons.warning_amber_rounded : Icons.local_cafe_outlined,
+            color: warn ? Colors.orange.shade800 : Colors.teal.shade700),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(tr('k2_drink_title'),
+              style: const TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.w600)),
+        ),
+      ],
+    );
+  }
+
+  Widget _closeButton(BuildContext context) => TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: Text(tr('k2_drink_close')),
+      );
+
+  Widget _body(BuildContext context) {
     final p = preview;
     final warn = p.trustIssues.isNotEmpty;
-    return AlertDialog(
-      title: Row(
-        children: [
-          Icon(warn ? Icons.warning_amber_rounded : Icons.local_cafe_outlined,
-              color: warn ? Colors.orange.shade700 : Colors.teal),
-          const SizedBox(width: 8),
-          Expanded(child: Text(tr('k2_drink_title'))),
-        ],
-      ),
-      content: SizedBox(
-        width: 560,
-        child: SingleChildScrollView(
+    return SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -488,8 +577,8 @@ class _K2DrinkDialog extends StatelessWidget {
               // ── 可信度警示擺最上面:它比推薦結果重要 ──────────────────
               if (warn) ...[
                 _box(
-                  color: Colors.orange.shade50,
-                  border: Colors.orange.shade300,
+                  color: _glass ? _warnFill : Colors.orange.shade50,
+                  border: _glass ? _warnEdge : Colors.orange.shade300,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -531,8 +620,8 @@ class _K2DrinkDialog extends StatelessWidget {
 
               _head(tr('k2_drink_sec_rule')),
               _box(
-                color: Colors.teal.shade50,
-                border: Colors.teal.shade200,
+                color: _glass ? _ruleFill : Colors.teal.shade50,
+                border: _glass ? _ruleEdge : Colors.teal.shade200,
                 child: Text(tr(k2DrinkRuleKey(p.rule)),
                     style: const TextStyle(fontSize: 13)),
               ),
@@ -576,15 +665,7 @@ class _K2DrinkDialog extends StatelessWidget {
                       fontSize: 11, color: Colors.grey.shade600, height: 1.5)),
             ],
           ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(tr('k2_drink_close')),
-        ),
-      ],
-    );
+        );
   }
 
   Widget _head(String s) => Padding(
