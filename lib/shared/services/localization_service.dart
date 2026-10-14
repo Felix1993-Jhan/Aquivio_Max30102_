@@ -724,6 +724,31 @@ class LocalizationService {
       // 量測日誌（adapter）
       'k2_log_parse_error': '⚠ 解析錯誤:{reason}',
       'k2_log_start': '🟢 開始量測(探測板子中:0x31 優先,逾時退 0x30)',
+      // 推薦飲品預覽（離線推演，不連外）
+      'k2_drink_btn': '推薦飲品',
+      'k2_drink_title': '這組數字會換到哪一杯？',
+      'k2_drink_sec_payload': '① 會送出去的欄位（逐字照對方模板）',
+      'k2_drink_sec_rule': '② 會命中的規則',
+      'k2_drink_sec_picks': '③ 會被偏好 / 排除的飲品',
+      'k2_drink_favored': '偏好',
+      'k2_drink_avoided': '排除',
+      'k2_drink_close': '關閉',
+      'k2_drink_rule_hr': '心率偏高 → 一律補水、非氣泡、非刺激性（對方寫明這條**不管其他訊號**）',
+      'k2_drink_rule_sym': '交感主導／壓力 → 恢復與鎮靜類：補水礦物、抗氧化、恢復。**禁咖啡因與任何刺激物**',
+      'k2_drink_rule_para': '副交感／恢復良好 → 能量與表現類：刺激物、胺基酸、蛋白質、代謝',
+      'k2_drink_rule_neutral': '中性／混合，沒有主導訊號 → 一般支持類，但仍偏向現有最強的那個訊號',
+      'k2_drink_trust_head': '⚠️ 這筆數據可能不可信 —— 但對方**不會擋**',
+      'k2_drink_trust_pi': '灌流指數過低，訊號不像脈搏（實測木頭桌面 0.149%、真手指 10.1%）',
+      'k2_drink_trust_sd': 'SD1 > SD2，生理上幾乎不可能，是白雜訊的特徵',
+      'k2_drink_trust_hr': '心率超出生理可能範圍',
+      'k2_drink_trust_direction':
+          '⚠️ 而且方向危險：雜訊會把 HRV 推高 → 被讀成「恢復良好」→ 推刺激類飲品',
+      'k2_drink_disclaimer': '① 是精確的（照對方 k2-recommend-prompts.ts 的模板逐字排版）。\n'
+          '②③ 是本地推演的近似值：對方提示詞裡**只有 LF/HF > 1.5 是硬數字**，\n'
+          '其餘「高 stress / 低 PNS / 低 HRV / 心率偏高」都交給 LLM 自由心證，\n'
+          '所以這裡用的門檻是我們自己訂的（見 K2DrinkThresholds），不是對方的行為。\n'
+          '飲品清單是 infusion-knowledge.ts 的快照，對方改了這裡不會自動跟著動。\n'
+          '本頁不連外、不發送任何資料。',
       'k2_log_stop': '⏸ 停止量測',
       'k2_log_round_late': '⏳ 送出後 {ms}ms 內沒有完整回應(通訊延遲;連續多輪才會重開串口)',
       'k2_log_cleared_core': '🧹 已清空核心 + 波形',
@@ -1433,6 +1458,39 @@ class LocalizationService {
       'k2_log_parse_error': '⚠ Parse error: {reason}',
       'k2_log_start':
           '🟢 Measuring (probing board: 0x31 first, falls back to 0x30 on timeout)',
+      // Drink recommendation preview (offline, no network)
+      'k2_drink_btn': 'Drink pick',
+      'k2_drink_title': 'What drink would these numbers produce?',
+      'k2_drink_sec_payload': '① Fields that get sent (verbatim, their template)',
+      'k2_drink_sec_rule': '② Rule this reading hits',
+      'k2_drink_sec_picks': '③ Infusions favored / excluded',
+      'k2_drink_favored': 'Favored',
+      'k2_drink_avoided': 'Excluded',
+      'k2_drink_close': 'Close',
+      'k2_drink_rule_hr':
+          'Elevated heart rate → hydrating, non-fizzy, non-stimulant. Their prompt says this applies **regardless of the other signals**',
+      'k2_drink_rule_sym':
+          'Sympathetic / stressed → recovery and calm: hydration-mineral, antioxidant, recovery. **No caffeine or any stimulant**',
+      'k2_drink_rule_para':
+          'Parasympathetic / well-recovered → energy and performance: stimulant, amino-acid, protein, metabolic',
+      'k2_drink_rule_neutral':
+          'Neutral / mixed, no dominant signal → general-support, still leaning toward the strongest signal present',
+      'k2_drink_trust_head':
+          '⚠️ This reading may not be trustworthy — and their side **does not gate on it**',
+      'k2_drink_trust_pi':
+          'Perfusion index too low; the signal does not look like a pulse (measured: wooden desk 0.149%, real finger 10.1%)',
+      'k2_drink_trust_sd':
+          'SD1 > SD2 — physiologically near-impossible, the signature of white noise',
+      'k2_drink_trust_hr': 'Heart rate outside the physiologically possible range',
+      'k2_drink_trust_direction':
+          '⚠️ And the bias is dangerous: noise inflates HRV → read as "well recovered" → pushes stimulants',
+      'k2_drink_disclaimer':
+          '① is exact (laid out verbatim from their k2-recommend-prompts.ts template).\n'
+              '②③ are a local approximation: their prompt pins down **only LF/HF > 1.5**;\n'
+              '"high stress / low PNS / low HRV / elevated HR" are left to the LLM,\n'
+              'so the thresholds here are ours (see K2DrinkThresholds), not their behaviour.\n'
+              'The infusion list is a snapshot of infusion-knowledge.ts and will not track their edits.\n'
+              'This page makes no network calls and sends nothing.',
       'k2_log_stop': '⏸ Stopped',
       'k2_log_round_late':
           '⏳ No complete reply within {ms}ms (comm delay; port reopens only after several in a row)',

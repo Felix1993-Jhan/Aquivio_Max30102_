@@ -25,6 +25,7 @@ import '../k2_hrv_calculator.dart';
 import '../k2_protocol.dart';
 import '../k2_setting_limits.dart';
 import '../k2_vitals_metrics.dart';
+import 'k2_drink_preview.dart';
 import 'k2_fixed_window.dart';
 import 'k2_hrv_chart.dart';
 import 'k2_breathhold_chart.dart';
@@ -704,14 +705,26 @@ class _K2PageState extends State<K2Page> {
             ),
           if (!_adapter.measuring)
             FilledButton(
-              onPressed: connected ? () => _adapter.start() : null,
+              // 開始新的一次 → 清掉上一次的推演結果。留著的話那顆按鈕會
+              // 讓人以為看到的是這一次的,而它其實是上一位使用者的。
+              onPressed: connected
+                  ? () {
+                      _adapter.start();
+                      setState(() => _drinkPreview = null);
+                    }
+                  : null,
               style: small.copyWith(
                   backgroundColor: WidgetStatePropertyAll(Colors.teal)),
               child: Text(tr('k2_start_measure')),
             )
           else
             FilledButton(
-              onPressed: () => _adapter.stop(),
+              // 停止量測 = 這次量完了 → 順手把「這組數字會換到哪一杯」彈出來。
+              // 關掉之後還能從即時數值列最右邊那顆按鈕重開（見 _liveValuesBar）。
+              onPressed: () {
+                _adapter.stop();
+                _showDrinkPreview();
+              },
               style: small.copyWith(
                   backgroundColor: WidgetStatePropertyAll(Colors.orange)),
               child: Text(tr('k2_stop_measure')),
@@ -871,6 +884,67 @@ class _K2PageState extends State<K2Page> {
     );
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // 推薦飲品預覽（離線推演，不連外）
+  // ══════════════════════════════════════════════════════════════
+
+  /// 最近一次推演的結果。停止量測時算一次並彈窗，之後按鈕用它重開；
+  /// **開始新的量測就清掉** —— 留著舊的會讓人以為是這一次的結果。
+  K2DrinkPreview? _drinkPreview;
+
+  /// 從現在的狀態推演一次。
+  ///
+  /// 這裡刻意**重算一份** `metrics` 而不是從 build() 傳進來：按鈕可能在任何
+  /// 時候被按，build 當下那份未必還是最新的。算一次的成本（Lomb-Scargle
+  /// 約 250 個頻率 × 幾十拍）本來就是每秒在跑的，可忽略。
+  K2DrinkPreview? _computeDrinkPreview() {
+    final fx = _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null;
+    final pts = fx?.pts ?? _adapter.pointsRecentSeconds(_shortSec);
+    if (pts.isEmpty) return null; // 一拍都沒有就沒東西好推演
+    final hv = fx != null ? fx.hv : _adapter.hrvRecentSeconds(_shortSec);
+    final c = _adapter.latest;
+    final metrics = fx?.metrics ??
+        Max30102VitalsMetrics.compute(
+          pts: pts,
+          hv: hv,
+          sqiOk: c?.sqiOk ?? false,
+          settling: c?.settling ?? false,
+          bpm: _adapter.displayCompute?.bpm,
+          ir: _adapter.waveIr,
+        );
+
+    // 灌流指數 PI = AC/DC。核心沒算這個（它不在交接契約裡），所以在這裡
+    // 從波形現算 —— 這是「這到底是不是手指」最有鑑別力的一個數字：
+    // 實測木頭桌面 0.149%、真手指 10.1%，差兩個量級。
+    final ir = fx?.ir ?? _adapter.waveIr;
+    double? pi;
+    if (ir.isNotEmpty) {
+      var lo = ir.first, hi = ir.first, sum = 0.0;
+      for (final s in ir) {
+        if (s < lo) lo = s;
+        if (s > hi) hi = s;
+        sum += s;
+      }
+      final dc = sum / ir.length;
+      if (dc > 0) pi = (hi - lo) / dc * 100;
+    }
+
+    return K2DrinkPreview.from(
+      metrics.toStrapiJson(),
+      perfusionPct: pi,
+      sd1: hv?.sd1,
+      sd2: hv?.sd2,
+    );
+  }
+
+  /// 算一次並彈窗。算不出來（還沒有拍）就不彈，避免跳出一個全是 n/a 的框。
+  void _showDrinkPreview() {
+    final p = _computeDrinkPreview();
+    if (p == null) return;
+    setState(() => _drinkPreview = p);
+    showK2DrinkPreview(context, p);
+  }
+
   /// 即時數值列:心率 / 血氧 / 手指 / SQI / spike **橫排**,擺在區塊最上面。
   ///
   /// [c] 看狀態旗標(原始結果),[v] 看數值(手指離開時是保留的舊值)。
@@ -964,6 +1038,23 @@ class _K2PageState extends State<K2Page> {
             )
           else
             const Spacer(),
+          // ── 推薦飲品:這一列最右邊 ──────────────────────────────────
+          //
+          // 停止量測時會自動彈窗,這顆是給「關掉之後想再看一次」用的。
+          // 沒有推演結果(還沒量過 / 剛開始新的一次)就 disabled,
+          // 不要讓人點開一個空的或上一次的框。
+          const SizedBox(width: 10),
+          OutlinedButton.icon(
+            onPressed: _drinkPreview == null
+                ? null
+                : () => showK2DrinkPreview(context, _drinkPreview!),
+            icon: const Icon(Icons.local_cafe_outlined, size: 15),
+            label: Text(tr('k2_drink_btn')),
+            style: OutlinedButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              textStyle: const TextStyle(fontSize: 12),
+            ),
+          ),
         ],
       ),
     );
