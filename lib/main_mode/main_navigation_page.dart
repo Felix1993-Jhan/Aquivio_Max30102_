@@ -20,6 +20,7 @@ import 'package:flutter_firmware_tester_unified/shared/services/localization_ser
 
 import 'controllers/serial_controller.dart';
 import 'services/ur_command_builder.dart';
+import '../shared/ui/glass.dart';
 import 'max30102_K2/ui/k2_page.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/ur_panel.dart';
@@ -177,7 +178,10 @@ class _MainNavigationPageState extends State<MainNavigationPage>
         return Scaffold(
           appBar: _buildAppBar(),
           drawer: _buildDrawer(),
-          body: _buildBody(),
+          // 漸層底鋪在最外層,三頁共用一份 —— 玻璃要有東西可以模糊才成立,
+          // 白色半透明疊在白色背景上和原本完全一樣。玻璃關掉時它會自動
+          // 退回單色底(見 GlassBackground)。
+          body: GlassBackground(child: _buildBody()),
         );
       },
     );

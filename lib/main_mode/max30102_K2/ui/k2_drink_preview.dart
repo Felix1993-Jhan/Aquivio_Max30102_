@@ -36,6 +36,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 
 import '../../../shared/services/localization_service.dart';
+import '../../../shared/ui/glass.dart';
 
 /// 本地推演用的門檻。**這些數字是我們訂的，不是對方的。**
 ///
@@ -144,7 +145,8 @@ const List<K2Infusion> kK2Infusions = [
     zh: '咖啡因',
     category: 'stimulant / energy',
     bestForZh: '恢復良好、副交感的讀數：高 PNS、高 HRV、低 stress —— 身體承受得起刺激',
-    avoidWhenZh: '高 stress、低 PNS、交感主導（LF/HF > 1.5）或心率偏高 —— '
+    avoidWhenZh:
+        '高 stress、低 PNS、交感主導（LF/HF > 1.5）或心率偏高 —— '
         '預防性迴避，不要在已經活化的狀態上再加喚起',
     bestForRules: [K2DrinkRule.parasympathetic],
     avoidRules: [K2DrinkRule.sympathetic, K2DrinkRule.elevatedHr],
@@ -169,7 +171,8 @@ const List<K2Infusion> kK2Infusions = [
     slug: 'lutein',
     zh: '葉黃素',
     category: 'antioxidant / eye support',
-    bestForZh: '高壓力或交感主導的讀數，依據是抗氧化／氧化負荷的論點'
+    bestForZh:
+        '高壓力或交感主導的讀數，依據是抗氧化／氧化負荷的論點'
         '（**不是**直接宣稱能改善 HRV）',
     bestForRules: [K2DrinkRule.sympathetic],
   ),
@@ -196,7 +199,8 @@ const List<K2Infusion> kK2Infusions = [
     zh: '肌酸',
     category: 'strength, power & cognitive resilience',
     // 唯一在知識庫**自己的文字裡**就寫明兩端都適合的。
-    bestForZh: '強恢復、準備好表現的讀數 —— 而且**獨特地**也適用於'
+    bestForZh:
+        '強恢復、準備好表現的讀數 —— 而且**獨特地**也適用於'
         '壓力／睡眠不足的讀數（認知韌性的論點）',
     bestForRules: [K2DrinkRule.parasympathetic, K2DrinkRule.sympathetic],
   ),
@@ -334,11 +338,11 @@ class K2DrinkPreview {
     bool inStock(K2Infusion i) => stocked == null || stocked.contains(i.slug);
     final favored = [
       for (final i in kK2Infusions)
-        if (i.bestForRules.contains(rule) && inStock(i)) i.slug
+        if (i.bestForRules.contains(rule) && inStock(i)) i.slug,
     ];
     final avoided = [
       for (final i in kK2Infusions)
-        if (i.avoidRules.contains(rule) && inStock(i)) i.slug
+        if (i.avoidRules.contains(rule) && inStock(i)) i.slug,
     ];
 
     // ── ④ 這筆資料到底可不可信 ───────────────────────────────────────
@@ -348,10 +352,13 @@ class K2DrinkPreview {
     final issues = <K2TrustIssue>[];
     if (perfusionPct != null &&
         perfusionPct < K2DrinkThresholds.minPerfusionPct) {
-      issues.add(K2TrustIssue(
+      issues.add(
+        K2TrustIssue(
           'k2_drink_trust_pi',
           '${perfusionPct.toStringAsFixed(3)}%'
-              ' < ${K2DrinkThresholds.minPerfusionPct}%'));
+              ' < ${K2DrinkThresholds.minPerfusionPct}%',
+        ),
+      );
     }
     // ⚠️ SD1 > SD2 **刻意不列成一條說明**。
     //    SD1/SD2 不在送出去的 8 個欄位裡,對方看不到也不會用,
@@ -363,11 +370,14 @@ class K2DrinkPreview {
     if (meanHr != null &&
         (meanHr < K2DrinkThresholds.hrMinPlausible ||
             meanHr > K2DrinkThresholds.hrMaxPlausible)) {
-      issues.add(K2TrustIssue(
+      issues.add(
+        K2TrustIssue(
           'k2_drink_trust_hr',
           '${_trim(meanHr)} bpm'
               '（${_trim(K2DrinkThresholds.hrMinPlausible)}'
-              '~${_trim(K2DrinkThresholds.hrMaxPlausible)}）'));
+              '~${_trim(K2DrinkThresholds.hrMaxPlausible)}）',
+        ),
+      );
     }
     // 雜訊會把 HRV 推高 → 落在「恢復良好」端 → 推刺激類。
     // 這個方向性是這整件事最危險的地方,所以單獨標出來。
@@ -391,23 +401,13 @@ class K2DrinkPreview {
   }
 }
 
-/// 玻璃質感開關。`true` = 方案 B（玻璃外框 + 資料區維持實心），
-/// `false` = 原本的 Material `AlertDialog`。
-///
-/// 做成常數而**不是把舊版註解掉**：兩條路都保持可編譯，想比較就翻這個 bool。
-/// 註解掉的程式碼會隨著其他地方的改動默默爛掉，常數不會。
-///
-/// 關掉的時機：如果發現滾動模式下開著這個視窗會讓波形圖掉幀。
-/// `BackdropFilter` 會強制一個 save layer 並且每一幀重算模糊，它不是免費的。
-const bool _glass = true;
-
 /// 規則 → 翻譯 key。
 String k2DrinkRuleKey(K2DrinkRule r) => switch (r) {
-      K2DrinkRule.elevatedHr => 'k2_drink_rule_hr',
-      K2DrinkRule.sympathetic => 'k2_drink_rule_sym',
-      K2DrinkRule.parasympathetic => 'k2_drink_rule_para',
-      K2DrinkRule.neutral => 'k2_drink_rule_neutral',
-    };
+  K2DrinkRule.elevatedHr => 'k2_drink_rule_hr',
+  K2DrinkRule.sympathetic => 'k2_drink_rule_sym',
+  K2DrinkRule.parasympathetic => 'k2_drink_rule_para',
+  K2DrinkRule.neutral => 'k2_drink_rule_neutral',
+};
 
 /// 彈出預覽對話框。
 ///
@@ -434,7 +434,9 @@ Future<void> showK2DrinkPreview(
     // 遮罩要調淡,否則背景被壓黑之後「模糊」就沒東西可模糊,玻璃感出不來。
     // 代價是背後的波形圖會透出來 —— 所以模糊給得重(sigma 22),
     // 讓它只剩色塊感、看不出形狀。
-    barrierColor: _glass ? const Color.fromRGBO(0, 0, 0, 0.28) : null,
+    barrierColor: globalGlassNotifier.value
+        ? const Color.fromRGBO(0, 0, 0, 0.28)
+        : null,
     builder: (ctx) => _K2DrinkLive(
       listenable: listenable,
       compute: compute,
@@ -481,20 +483,10 @@ class _K2DrinkDialog extends StatelessWidget {
   final K2DrinkPreview preview;
   final ValueNotifier<bool>? applyStock;
 
-  // ── 玻璃用色 ────────────────────────────────────────────────────────
-  //
-  // 用 Color.fromRGBO 而不是 withOpacity / withValues：那兩個 API 在不同
-  // Flutter 版本之間一個被棄用、一個還不存在，fromRGBO 從以前到現在都一樣。
-  static const _shell = Color.fromRGBO(255, 255, 255, 0.72);
-  static const _shellEdge = Color.fromRGBO(255, 255, 255, 0.65);
-  static const _warnFill = Color.fromRGBO(255, 167, 38, 0.20);
-  static const _warnEdge = Color.fromRGBO(239, 108, 0, 0.50);
-  static const _ruleFill = Color.fromRGBO(0, 150, 136, 0.13);
-  static const _ruleEdge = Color.fromRGBO(0, 150, 136, 0.38);
-
   @override
-  Widget build(BuildContext context) =>
-      _glass ? _glassDialog(context) : _materialDialog(context);
+  Widget build(BuildContext context) => globalGlassNotifier.value
+      ? _glassDialog(context)
+      : _materialDialog(context);
 
   /// 方案 B：玻璃只做在「框」上，資料區（第①塊）維持深色實心。
   ///
@@ -514,8 +506,8 @@ class _K2DrinkDialog extends StatelessWidget {
           child: Container(
             constraints: const BoxConstraints(maxWidth: 620),
             decoration: BoxDecoration(
-              color: _shell,
-              border: Border.all(color: _shellEdge, width: 1.2),
+              color: GlassColors.shell,
+              border: Border.all(color: GlassColors.shellEdge, width: 1.2),
               borderRadius: BorderRadius.circular(20),
             ),
             padding: const EdgeInsets.fromLTRB(22, 18, 22, 14),
@@ -526,182 +518,218 @@ class _K2DrinkDialog extends StatelessWidget {
     );
   }
 
-  /// 原本的 Material 版本。留著是為了能一鍵比較，見 [_glass]。
+  /// 原本的 Material 版本。留著是為了能一鍵比較，見 [globalGlassNotifier.value]。
   Widget _materialDialog(BuildContext context) => AlertDialog(
-        title: _titleRow(),
-        content: SizedBox(width: 560, child: _body(context)),
-        actions: [_closeButton(context)],
-      );
+    title: _titleRow(),
+    content: SizedBox(width: 560, child: _body(context)),
+    actions: [_closeButton(context)],
+  );
 
   Widget _content(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _titleRow(),
-          const SizedBox(height: 14),
-          Flexible(child: _body(context)),
-          const SizedBox(height: 6),
-          Align(alignment: Alignment.centerRight, child: _closeButton(context)),
-        ],
-      );
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      _titleRow(),
+      const SizedBox(height: 14),
+      Flexible(child: _body(context)),
+      const SizedBox(height: 6),
+      Align(alignment: Alignment.centerRight, child: _closeButton(context)),
+    ],
+  );
 
   Widget _titleRow() {
     final warn = preview.trustIssues.isNotEmpty;
     return Row(
       children: [
-        Icon(warn ? Icons.warning_amber_rounded : Icons.local_cafe_outlined,
-            color: warn ? Colors.orange.shade800 : Colors.teal.shade700),
+        Icon(
+          warn ? Icons.warning_amber_rounded : Icons.local_cafe_outlined,
+          color: warn ? Colors.orange.shade800 : Colors.teal.shade700,
+        ),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(tr('k2_drink_title'),
-              style: const TextStyle(
-                  fontSize: 17, fontWeight: FontWeight.w600)),
+          child: Text(
+            tr('k2_drink_title'),
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+          ),
         ),
       ],
     );
   }
 
   Widget _closeButton(BuildContext context) => TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: Text(tr('k2_drink_close')),
-      );
+    onPressed: () => Navigator.of(context).pop(),
+    child: Text(tr('k2_drink_close')),
+  );
 
   Widget _body(BuildContext context) {
     final p = preview;
     final warn = p.trustIssues.isNotEmpty;
     return SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // ── 可信度警示擺最上面:它比推薦結果重要 ──────────────────
-              if (warn) ...[
-                _box(
-                  color: _glass ? _warnFill : Colors.orange.shade50,
-                  border: _glass ? _warnEdge : Colors.orange.shade300,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(tr('k2_drink_trust_head'),
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.orange.shade900)),
-                      const SizedBox(height: 6),
-                      for (final i in p.trustIssues)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 3),
-                          child: Text(
-                            i.detail.isEmpty
-                                ? '• ${tr(i.titleKey)}'
-                                : '• ${tr(i.titleKey)}：${i.detail}',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 14),
-              ],
-
-              _head(tr('k2_drink_sec_payload')),
-              _box(
-                color: const Color(0xFF1E1E1E),
-                border: Colors.black26,
-                child: SelectableText(
-                  p.lines.join('\n'),
-                  style: const TextStyle(
-                      fontFamily: 'Consolas',
-                      fontSize: 12,
-                      height: 1.5,
-                      color: Color(0xFFD4D4D4)),
-                ),
-              ),
-              const SizedBox(height: 14),
-
-              _head(tr('k2_drink_sec_rule')),
-              _box(
-                color: _glass ? _ruleFill : Colors.teal.shade50,
-                border: _glass ? _ruleEdge : Colors.teal.shade200,
-                child: Text(tr(k2DrinkRuleKey(p.rule)),
-                    style: const TextStyle(fontSize: 13)),
-              ),
-              const SizedBox(height: 14),
-
-              Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── 可信度警示擺最上面:它比推薦結果重要 ──────────────────
+          if (warn) ...[
+            _box(
+              color: globalGlassNotifier.value
+                  ? GlassColors.warnFill
+                  : Colors.orange.shade50,
+              border: globalGlassNotifier.value
+                  ? GlassColors.warnEdge
+                  : Colors.orange.shade300,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: _head(tr('k2_drink_sec_picks'))),
-                  // 只看機器實際有的。和主畫面共用同一個 notifier,
-                  // 所以開著視窗切換也會兩邊一致。
-                  if (applyStock != null)
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(
-                        value: applyStock!.value,
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize:
-                            MaterialTapTargetSize.shrinkWrap,
-                        onChanged: (b) => applyStock!.value = b ?? false,
+                  Text(
+                    tr('k2_drink_trust_head'),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange.shade900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  for (final i in p.trustIssues)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Text(
+                        i.detail.isEmpty
+                            ? '• ${tr(i.titleKey)}'
+                            : '• ${tr(i.titleKey)}：${i.detail}',
+                        style: const TextStyle(fontSize: 12),
                       ),
-                      Text(tr('k2_drink_apply_stock'),
-                          style: const TextStyle(fontSize: 12)),
-                    ]),
+                    ),
                 ],
               ),
-              if (p.favored.isEmpty && p.avoided.isEmpty)
-                Text(tr('k2_drink_none_stocked'),
-                    style:
-                        TextStyle(fontSize: 12, color: Colors.orange.shade800)),
-              for (final s in p.favored) _pickRow(s, true),
-              for (final s in p.avoided) _pickRow(s, false),
-              const SizedBox(height: 10),
-              // 5 款沒有 avoidWhen —— 「不在排除清單」不等於「評估過且通過」。
-              Text(tr('k2_drink_no_avoid_note'),
-                  style: TextStyle(
-                      fontSize: 11, color: Colors.grey.shade600, height: 1.4)),
-              const SizedBox(height: 16),
+            ),
+            const SizedBox(height: 14),
+          ],
 
-              // ── 免責:哪些是精確的、哪些是我們猜的 ────────────────────
-              Text(tr('k2_drink_disclaimer'),
-                  style: TextStyle(
-                      fontSize: 11, color: Colors.grey.shade600, height: 1.5)),
+          _head(tr('k2_drink_sec_payload')),
+          _box(
+            color: const Color(0xFF1E1E1E),
+            border: Colors.black26,
+            child: SelectableText(
+              p.lines.join('\n'),
+              style: const TextStyle(
+                fontFamily: 'Consolas',
+                fontSize: 12,
+                height: 1.5,
+                color: Color(0xFFD4D4D4),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          _head(tr('k2_drink_sec_rule')),
+          _box(
+            color: globalGlassNotifier.value
+                ? GlassColors.tealFill
+                : Colors.teal.shade50,
+            border: globalGlassNotifier.value
+                ? GlassColors.tealEdge
+                : Colors.teal.shade200,
+            child: Text(
+              tr(k2DrinkRuleKey(p.rule)),
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          Row(
+            children: [
+              Expanded(child: _head(tr('k2_drink_sec_picks'))),
+              // 只看機器實際有的。和主畫面共用同一個 notifier,
+              // 所以開著視窗切換也會兩邊一致。
+              if (applyStock != null)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Checkbox(
+                      value: applyStock!.value,
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onChanged: (b) => applyStock!.value = b ?? false,
+                    ),
+                    Text(
+                      tr('k2_drink_apply_stock'),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
             ],
           ),
-        );
+          if (p.favored.isEmpty && p.avoided.isEmpty)
+            Text(
+              tr('k2_drink_none_stocked'),
+              style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+            ),
+          for (final s in p.favored) _pickRow(s, true),
+          for (final s in p.avoided) _pickRow(s, false),
+          const SizedBox(height: 10),
+          // 5 款沒有 avoidWhen —— 「不在排除清單」不等於「評估過且通過」。
+          Text(
+            tr('k2_drink_no_avoid_note'),
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey.shade600,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // ── 免責:哪些是精確的、哪些是我們猜的 ────────────────────
+          Text(
+            tr('k2_drink_disclaimer'),
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey.shade600,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _head(String s) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Text(s,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-      );
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(
+      s,
+      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+    ),
+  );
 
   Widget _box({
     required Color color,
     required Color border,
     required Widget child,
-  }) =>
-      Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: color,
-          border: Border.all(color: border),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: child,
-      );
+  }) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: color,
+      border: Border.all(color: border),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: child,
+  );
 
   /// 一款飲品一列：標記 + slug + 中文 + 分類，底下一行「為什麼」。
   ///
   /// 理由直接取自對方知識庫的 `bestFor` / `avoidWhen`（中文濃縮）——
   /// 這才是真正的判斷依據，光給一個 slug 等於沒解釋。
   Widget _pickRow(String slug, bool favored) {
-    final info = kK2Infusions.firstWhere((i) => i.slug == slug,
-        orElse: () => K2Infusion(
-            slug: slug,
-            zh: '',
-            category: '',
-            bestForZh: '',
-            bestForRules: const []));
+    final info = kK2Infusions.firstWhere(
+      (i) => i.slug == slug,
+      orElse: () => K2Infusion(
+        slug: slug,
+        zh: '',
+        category: '',
+        bestForZh: '',
+        bestForRules: const [],
+      ),
+    );
     final c = favored ? Colors.green : Colors.red;
     final why = favored ? info.bestForZh : (info.avoidWhenZh ?? '');
     return Padding(
@@ -709,41 +737,56 @@ class _K2DrinkDialog extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(favored ? Icons.check_circle : Icons.cancel,
-              size: 15, color: c.shade600),
+          Icon(
+            favored ? Icons.check_circle : Icons.cancel,
+            size: 15,
+            color: c.shade600,
+          ),
           const SizedBox(width: 6),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(children: [
-                  // slug 在前、等寬字體:它才是對帳用的識別碼。
-                  Text(info.slug,
+                Row(
+                  children: [
+                    // slug 在前、等寬字體:它才是對帳用的識別碼。
+                    Text(
+                      info.slug,
                       style: TextStyle(
-                          fontSize: 12,
-                          fontFamily: 'Consolas',
-                          fontWeight: FontWeight.bold,
-                          color: c.shade800)),
-                  if (info.zh.isNotEmpty) ...[
-                    const SizedBox(width: 6),
-                    Text(info.zh, style: const TextStyle(fontSize: 12)),
-                  ],
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(info.category,
+                        fontSize: 12,
+                        fontFamily: 'Consolas',
+                        fontWeight: FontWeight.bold,
+                        color: c.shade800,
+                      ),
+                    ),
+                    if (info.zh.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      Text(info.zh, style: const TextStyle(fontSize: 12)),
+                    ],
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        info.category,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                            fontSize: 10.5, color: Colors.grey.shade500)),
-                  ),
-                ]),
+                          fontSize: 10.5,
+                          color: Colors.grey.shade500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
                 if (why.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
-                    child: Text(why,
-                        style: TextStyle(
-                            fontSize: 11,
-                            height: 1.4,
-                            color: Colors.grey.shade700)),
+                    child: Text(
+                      why,
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.4,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
                   ),
               ],
             ),

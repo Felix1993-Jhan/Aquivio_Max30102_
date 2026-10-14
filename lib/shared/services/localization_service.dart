@@ -725,6 +725,10 @@ class LocalizationService {
       'k2_log_parse_error': '⚠ 解析錯誤:{reason}',
       'k2_log_start': '🟢 開始量測(探測板子中:0x31 優先,逾時退 0x30)',
       // 推薦飲品預覽（離線推演，不連外）
+      'glass_setting': '玻璃質感',
+      'glass_setting_hint': '所有頁面改用半透明 + 背景模糊的樣式。'
+          '⚠️ 每一層模糊都會讓畫面每一幀多做一次重算 —— '
+          '如果量測中發現波形圖變頓，先把這個關掉。',
       'k2_drink_btn': '推薦飲品',
       'k2_drink_title': '這組數字會換到哪一杯？',
       'k2_drink_sec_payload': '① 會送出去的欄位（逐字照對方模板）',
@@ -1466,6 +1470,11 @@ class LocalizationService {
       'k2_log_start':
           '🟢 Measuring (probing board: 0x31 first, falls back to 0x30 on timeout)',
       // Drink recommendation preview (offline, no network)
+      'glass_setting': 'Glass look',
+      'glass_setting_hint':
+          'Translucent panels with a blurred backdrop, across every page. '
+              '⚠️ Each blur layer is recomputed every frame — '
+              'if the waveform starts stuttering while measuring, turn this off first.',
       'k2_drink_btn': 'Drink pick',
       'k2_drink_title': 'What drink would these numbers produce?',
       'k2_drink_sec_payload': '① Fields that get sent (verbatim, their template)',
