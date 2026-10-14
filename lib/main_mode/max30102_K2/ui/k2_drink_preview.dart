@@ -78,10 +78,15 @@ enum K2DrinkRule {
 
 /// 一款飲品在對方知識庫裡的定位（`infusion-knowledge.ts` 的摘要）。
 class K2Infusion {
-  const K2Infusion(this.slug, this.category, this.bestForRules,
+  const K2Infusion(this.slug, this.zh, this.category, this.bestForRules,
       {this.avoidRules = const []});
 
+  /// 對方知識庫裡的鍵值，**一個字母都不能改**（含大小寫）——
+  /// 它是兩邊對帳的唯一識別碼，改了就對不回去。
   final String slug;
+
+  /// 中文名，只為了讓人看得懂，不參與任何比對。
+  final String zh;
 
   /// 對方知識庫裡的分類，**原文照搬不翻譯** —— 它是用來對帳的技術名詞，
   /// 翻譯之後就對不回他們的 `infusion-knowledge.ts` 了。
@@ -99,28 +104,35 @@ class K2Infusion {
 /// ⚠️ 這是**快照**，不是即時讀取 —— 對方改了知識庫這裡不會自動跟著動。
 ///    畫面上有標明，而且它只用來解釋傾向，不會真的決定任何事。
 const List<K2Infusion> kK2Infusions = [
-  K2Infusion('electrolytes', 'hydration & minerals',
+  K2Infusion('electrolytes', '電解質', 'hydration & minerals',
       [K2DrinkRule.elevatedHr, K2DrinkRule.sympathetic]),
-  K2Infusion('multivitamins', 'micronutrient support', [K2DrinkRule.neutral],
+  // ⚠️ 駝峰,不是 multivitamins —— 對方的鍵值就是這樣寫的。
+  K2Infusion('multiVitamins', '綜合維生素', 'micronutrient support',
+      [K2DrinkRule.neutral],
       avoidRules: [K2DrinkRule.sympathetic, K2DrinkRule.parasympathetic]),
-  K2Infusion('caffeine', 'stimulant / energy', [K2DrinkRule.parasympathetic],
+  K2Infusion('caffeine', '咖啡因', 'stimulant / energy',
+      [K2DrinkRule.parasympathetic],
       avoidRules: [K2DrinkRule.sympathetic, K2DrinkRule.elevatedHr]),
-  K2Infusion('cascara', 'gentle botanical lift', [K2DrinkRule.parasympathetic],
+  K2Infusion('cascara', '咖啡果皮', 'gentle botanical lift',
+      [K2DrinkRule.parasympathetic],
       avoidRules: [K2DrinkRule.sympathetic, K2DrinkRule.elevatedHr]),
-  K2Infusion('collagen', 'recovery & connective support',
+  K2Infusion('collagen', '膠原蛋白', 'recovery & connective support',
       [K2DrinkRule.parasympathetic]),
-  K2Infusion('lutein', 'antioxidant / eye support', [K2DrinkRule.sympathetic]),
-  K2Infusion('bcaa', 'amino-acid recovery', [K2DrinkRule.parasympathetic],
+  K2Infusion(
+      'lutein', '葉黃素', 'antioxidant / eye support', [K2DrinkRule.sympathetic]),
+  K2Infusion('bcaa', '支鏈胺基酸', 'amino-acid recovery',
+      [K2DrinkRule.parasympathetic],
       avoidRules: [K2DrinkRule.sympathetic]),
-  K2Infusion('whey', 'protein & satiety', [K2DrinkRule.parasympathetic],
+  K2Infusion('whey', '乳清蛋白', 'protein & satiety', [K2DrinkRule.parasympathetic],
       avoidRules: [K2DrinkRule.sympathetic]),
   // creatine 是唯一兩端都適合的 —— 對方寫明它「also defensible for
   // stressed / sleep-deprived readings（認知韌性）」。
-  K2Infusion('creatine', 'strength, power & cognitive resilience',
+  K2Infusion('creatine', '肌酸', 'strength, power & cognitive resilience',
       [K2DrinkRule.parasympathetic, K2DrinkRule.sympathetic]),
-  K2Infusion('fiber', 'digestive & gut–heart support',
+  K2Infusion('fiber', '膳食纖維', 'digestive & gut–heart support',
       [K2DrinkRule.neutral, K2DrinkRule.sympathetic]),
-  K2Infusion('metabolic', 'metabolic / fat-to-energy',
+  // ⚠️ 是 lCarnitine(左旋肉鹼),不是 metabolic —— metabolic 是它的分類名。
+  K2Infusion('lCarnitine', '左旋肉鹼', 'metabolic / fat-to-energy',
       [K2DrinkRule.parasympathetic],
       avoidRules: [K2DrinkRule.sympathetic]),
 ];
@@ -476,24 +488,38 @@ class _K2DrinkDialog extends StatelessWidget {
               runSpacing: 4,
               children: [
                 for (final s in slugs)
-                  Tooltip(
-                    // 滑過去看對方知識庫裡的分類,方便對帳。
-                    message: kK2Infusions
-                        .firstWhere((i) => i.slug == s,
-                            orElse: () => const K2Infusion('', '', []))
-                        .category,
-                    child: Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: c.shade50,
-                        border: Border.all(color: c.shade200),
-                        borderRadius: BorderRadius.circular(4),
+                  Builder(builder: (_) {
+                    final info = kK2Infusions.firstWhere((i) => i.slug == s,
+                        orElse: () => K2Infusion(s, '', '', const []));
+                    return Tooltip(
+                      // 滑過去看對方知識庫裡的分類,方便對帳。
+                      message: info.category,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: c.shade50,
+                          border: Border.all(color: c.shade200),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        // slug 在前、中文在後:slug 才是對帳用的識別碼,
+                        // 中文只是讓人看得懂,所以不能喧賓奪主。
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Text(info.slug,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  fontFamily: 'Consolas',
+                                  color: c.shade800)),
+                          if (info.zh.isNotEmpty) ...[
+                            const SizedBox(width: 5),
+                            Text(info.zh,
+                                style: TextStyle(
+                                    fontSize: 11, color: c.shade600)),
+                          ],
+                        ]),
                       ),
-                      child: Text(s,
-                          style: TextStyle(fontSize: 11, color: c.shade800)),
-                    ),
-                  ),
+                    );
+                  }),
               ],
             ),
           ),

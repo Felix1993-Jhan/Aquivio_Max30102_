@@ -102,7 +102,7 @@ void main() {
       expect(p.rule, K2DrinkRule.sympathetic);
       expect(p.favored, contains('lutein'));
       expect(p.favored, contains('electrolytes'));
-      for (final s in ['caffeine', 'cascara', 'bcaa', 'whey', 'metabolic']) {
+      for (final s in ['caffeine', 'cascara', 'bcaa', 'whey', 'lCarnitine']) {
         expect(p.avoided, contains(s), reason: '$s 在交感主導時應該被排除');
       }
       // creatine 是唯一兩端都適合的（對方寫明壓力/睡眠不足也站得住腳）
@@ -116,6 +116,28 @@ void main() {
       expect(p.lines.join('\n'), contains('n/a'));
       expect(p.lines.length, 6, reason: '六行都要在,缺值用 n/a 表達');
       expect(p.trustIssues, isEmpty, reason: '沒有資料不等於資料有問題');
+    });
+
+    test('⑦ slug 必須逐字對上對方 infusion-knowledge.ts 的鍵值', () {
+      // ⚠️ 這 11 個是從對方原始碼抄來的,**含大小寫一個字母都不能改** ——
+      //    slug 是兩邊對帳的唯一識別碼。
+      //    寫這份工具時我靠猜錯了兩個(multivitamins → multiVitamins、
+      //    metabolic → lCarnitine,後者其實是分類名不是鍵值),所以把它釘住。
+      expect(kK2Infusions.map((i) => i.slug).toList(), [
+        'electrolytes',
+        'multiVitamins',
+        'caffeine',
+        'cascara',
+        'collagen',
+        'lutein',
+        'bcaa',
+        'whey',
+        'creatine',
+        'fiber',
+        'lCarnitine',
+      ]);
+      // 每一款都要有中文,否則畫面上會只剩英文 slug
+      expect(kK2Infusions.every((i) => i.zh.isNotEmpty), isTrue);
     });
 
     test('⑥ 送出的欄位要逐字照對方模板', () {
