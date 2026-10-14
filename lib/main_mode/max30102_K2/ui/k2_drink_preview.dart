@@ -288,11 +288,52 @@ String k2DrinkRuleKey(K2DrinkRule r) => switch (r) {
     };
 
 /// 彈出預覽對話框。
-Future<void> showK2DrinkPreview(BuildContext context, K2DrinkPreview p) {
+///
+/// [listenable] 變動時重算一次 [compute]，所以**兩種模式自動分流、不用判斷**：
+///   · 定長 —— `fixedWindow.view()` 有 memo，重算回同一份 ⇒ 畫面凍結
+///   · 滾動 —— 每秒重算 ⇒ 持續更新
+///
+/// 看著它在滾動模式下更新，會直接看出**推薦有多不穩定** —— 同一個人同一次
+/// 量測，截在不同秒數可能換一杯。那件事靜態截圖看不出來。
+///
+/// [compute] 回 null（例如手指離開、一拍都不剩）時**保留上一份**，
+/// 不要把畫面清空 —— 內容突然消失比停在舊值更難理解。
+Future<void> showK2DrinkPreview(
+  BuildContext context, {
+  required Listenable listenable,
+  required K2DrinkPreview? Function() compute,
+}) {
   return showDialog<void>(
     context: context,
-    builder: (ctx) => _K2DrinkDialog(preview: p),
+    builder: (ctx) => _K2DrinkLive(listenable: listenable, compute: compute),
   );
+}
+
+class _K2DrinkLive extends StatefulWidget {
+  const _K2DrinkLive({required this.listenable, required this.compute});
+
+  final Listenable listenable;
+  final K2DrinkPreview? Function() compute;
+
+  @override
+  State<_K2DrinkLive> createState() => _K2DrinkLiveState();
+}
+
+class _K2DrinkLiveState extends State<_K2DrinkLive> {
+  K2DrinkPreview? _last;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.listenable,
+      builder: (context, _) {
+        _last = widget.compute() ?? _last;
+        final p = _last;
+        if (p == null) return const SizedBox.shrink();
+        return _K2DrinkDialog(preview: p);
+      },
+    );
+  }
 }
 
 class _K2DrinkDialog extends StatelessWidget {

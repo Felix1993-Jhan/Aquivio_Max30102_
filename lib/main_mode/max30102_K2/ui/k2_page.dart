@@ -705,14 +705,10 @@ class _K2PageState extends State<K2Page> {
             ),
           if (!_adapter.measuring)
             FilledButton(
-              // 開始新的一次 → 清掉上一次的推演結果。留著的話那顆按鈕會
-              // 讓人以為看到的是這一次的,而它其實是上一位使用者的。
-              onPressed: connected
-                  ? () {
-                      _adapter.start();
-                      setState(() => _drinkPreview = null);
-                    }
-                  : null,
+              // 推演結果不另外存 —— 它是從當下的緩衝區即時算的,所以
+              // 開始新的一次、核心歸零之後自然就跟著換掉,沒有「殘留上一位
+              // 使用者的結果」這個問題。
+              onPressed: connected ? () => _adapter.start() : null,
               style: small.copyWith(
                   backgroundColor: WidgetStatePropertyAll(Colors.teal)),
               child: Text(tr('k2_start_measure')),
@@ -888,15 +884,14 @@ class _K2PageState extends State<K2Page> {
   // 推薦飲品預覽（離線推演，不連外）
   // ══════════════════════════════════════════════════════════════
 
-  /// 最近一次推演的結果。停止量測時算一次並彈窗，之後按鈕用它重開；
-  /// **開始新的量測就清掉** —— 留著舊的會讓人以為是這一次的結果。
-  K2DrinkPreview? _drinkPreview;
-
-  /// 從現在的狀態推演一次。
+  /// 從現在的狀態推演一次。對話框開著時每次 [K2SerialAdapter] 通知就重算。
   ///
-  /// 這裡刻意**重算一份** `metrics` 而不是從 build() 傳進來：按鈕可能在任何
-  /// 時候被按，build 當下那份未必還是最新的。算一次的成本（Lomb-Scargle
-  /// 約 250 個頻率 × 幾十拍）本來就是每秒在跑的，可忽略。
+  /// **兩種模式共用這一條路，不用判斷模式**：定長下 `fixedWindow.view()` 有
+  /// memo，重算回同一份 ⇒ 畫面凍結；滾動下每秒重算 ⇒ 持續更新。
+  ///
+  /// 成本：對話框開著時每秒多算一份 metrics（Lomb-Scargle 約 250 個頻率）。
+  /// 頁面本來就每秒算一份，等於多一倍 —— 這個量級可忽略，所以不另外做快取。
+  /// 對話框關著就完全沒有這筆開銷。
   K2DrinkPreview? _computeDrinkPreview() {
     final fx = _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null;
     final pts = fx?.pts ?? _adapter.pointsRecentSeconds(_shortSec);
@@ -937,12 +932,14 @@ class _K2PageState extends State<K2Page> {
     );
   }
 
-  /// 算一次並彈窗。算不出來（還沒有拍）就不彈，避免跳出一個全是 n/a 的框。
+  /// 彈窗。算不出來（還沒有拍）就不彈，避免跳出一個全是 n/a 的框。
   void _showDrinkPreview() {
-    final p = _computeDrinkPreview();
-    if (p == null) return;
-    setState(() => _drinkPreview = p);
-    showK2DrinkPreview(context, p);
+    if (_computeDrinkPreview() == null) return;
+    showK2DrinkPreview(
+      context,
+      listenable: _adapter,
+      compute: _computeDrinkPreview,
+    );
   }
 
   /// 即時數值列:心率 / 血氧 / 手指 / SQI / spike **橫排**,擺在區塊最上面。
@@ -950,7 +947,10 @@ class _K2PageState extends State<K2Page> {
   /// [c] 看狀態旗標(原始結果),[v] 看數值(手指離開時是保留的舊值)。
   /// 兩個狀態橫幅(保留中 / 沉澱期)接在同一列右側 —— 它們互斥,
   /// 而且放右邊剛好用掉本來空著的水平空間,不再另外吃掉一列高度。
-  Widget _liveValuesBar(K2Compute? c, K2Compute? v, bool holding) {
+  /// [canPreview] 由呼叫端用 build() 已經算好的 `shortPts` 判斷，
+  /// 避免為了決定一顆按鈕要不要 enable 而每秒多跑一次完整的 metrics。
+  Widget _liveValuesBar(
+      K2Compute? c, K2Compute? v, bool holding, bool canPreview) {
     final settling = c?.settling ?? false;
     return Container(
       width: double.infinity,
@@ -1040,14 +1040,12 @@ class _K2PageState extends State<K2Page> {
             const Spacer(),
           // ── 推薦飲品:這一列最右邊 ──────────────────────────────────
           //
-          // 停止量測時會自動彈窗,這顆是給「關掉之後想再看一次」用的。
-          // 沒有推演結果(還沒量過 / 剛開始新的一次)就 disabled,
-          // 不要讓人點開一個空的或上一次的框。
+          // 停止量測時會自動彈窗,這顆是給「關掉之後再看一次」以及
+          // 「量測中想即時盯著它變」用的 —— 所以**只要有拍就能開**,
+          // 不必等量完。一拍都沒有時 disabled,免得開出一個全是 n/a 的框。
           const SizedBox(width: 10),
           OutlinedButton.icon(
-            onPressed: _drinkPreview == null
-                ? null
-                : () => showK2DrinkPreview(context, _drinkPreview!),
+            onPressed: canPreview ? _showDrinkPreview : null,
             icon: const Icon(Icons.local_cafe_outlined, size: 15),
             label: Text(tr('k2_drink_btn')),
             style: OutlinedButton.styleFrom(
@@ -1329,7 +1327,7 @@ class _K2PageState extends State<K2Page> {
         // 心率 / 血氧 / 手指 / SQI / spike 原本是直向擠在側欄最上方,
         // 佔掉約 150px 的欄高。橫排之後側欄那段高度全部還給 HRV 與衍生指標,
         // 而且這五個值本來就該一眼掃過去,不需要垂直排列。
-        _liveValuesBar(c, v, holding),
+        _liveValuesBar(c, v, holding, shortPts.isNotEmpty),
         const SizedBox(height: 8),
         SizedBox(
           height: _sec1Height,
