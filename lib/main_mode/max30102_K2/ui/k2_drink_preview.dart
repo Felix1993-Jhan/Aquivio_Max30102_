@@ -351,10 +351,13 @@ class K2DrinkPreview {
           '${perfusionPct.toStringAsFixed(3)}%'
               ' < ${K2DrinkThresholds.minPerfusionPct}%'));
     }
-    if (sd1 != null && sd2 != null && sd1 > sd2) {
-      issues.add(K2TrustIssue('k2_drink_trust_sd',
-          'SD1 ${sd1.toStringAsFixed(1)} > SD2 ${sd2.toStringAsFixed(1)}'));
-    }
+    // ⚠️ SD1 > SD2 **刻意不列成一條說明**。
+    //    SD1/SD2 不在送出去的 8 個欄位裡,對方看不到也不會用,
+    //    在這個「對方會怎麼判讀」的畫面上講它只會造成混淆。
+    //    但它仍然是判斷「這段 RR 是不是白雜訊」最有力的依據
+    //    （逐拍變異大於整體變異,生理上幾乎不可能）,
+    //    所以留著當下面方向性警告的觸發條件之一,只是不寫出來。
+    final looksLikeNoise = sd1 != null && sd2 != null && sd1 > sd2;
     if (meanHr != null &&
         (meanHr < K2DrinkThresholds.hrMinPlausible ||
             meanHr > K2DrinkThresholds.hrMaxPlausible)) {
@@ -366,7 +369,8 @@ class K2DrinkPreview {
     }
     // 雜訊會把 HRV 推高 → 落在「恢復良好」端 → 推刺激類。
     // 這個方向性是這整件事最危險的地方,所以單獨標出來。
-    if (rule == K2DrinkRule.parasympathetic && issues.isNotEmpty) {
+    if (rule == K2DrinkRule.parasympathetic &&
+        (issues.isNotEmpty || looksLikeNoise)) {
       issues.add(const K2TrustIssue('k2_drink_trust_direction', ''));
     }
 

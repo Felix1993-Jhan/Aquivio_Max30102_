@@ -747,7 +747,6 @@ class LocalizationService {
       'k2_drink_rule_neutral': '中性／混合，沒有主導訊號 → 一般支持類，但仍偏向現有最強的那個訊號',
       'k2_drink_trust_head': '⚠️ 這筆數據可能不可信 —— 但對方**不會擋**',
       'k2_drink_trust_pi': '灌流指數過低，訊號不像脈搏（實測木頭桌面 0.149%、真手指 10.1%）',
-      'k2_drink_trust_sd': 'SD1 > SD2，生理上幾乎不可能，是白雜訊的特徵',
       'k2_drink_trust_hr': '心率超出生理可能範圍',
       'k2_drink_trust_direction':
           '⚠️ 而且方向危險：雜訊會把 HRV 推高 → 被讀成「恢復良好」→ 推刺激類飲品',
@@ -1497,8 +1496,6 @@ class LocalizationService {
           '⚠️ This reading may not be trustworthy — and their side **does not gate on it**',
       'k2_drink_trust_pi':
           'Perfusion index too low; the signal does not look like a pulse (measured: wooden desk 0.149%, real finger 10.1%)',
-      'k2_drink_trust_sd':
-          'SD1 > SD2 — physiologically near-impossible, the signature of white noise',
       'k2_drink_trust_hr': 'Heart rate outside the physiologically possible range',
       'k2_drink_trust_direction':
           '⚠️ And the bias is dangerous: noise inflates HRV → read as "well recovered" → pushes stimulants',

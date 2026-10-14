@@ -67,10 +67,13 @@ void main() {
           reason: '這就是危險所在:量壞的那次反而推刺激物');
 
       final keys = p.trustIssues.map((e) => e.titleKey).toList();
-      expect(keys, contains('k2_drink_trust_sd'),
-          reason: 'SD1 > SD2 生理上幾乎不可能,是白雜訊特徵');
       expect(keys, contains('k2_drink_trust_direction'),
-          reason: '**方向性警告不可以消音** —— 它比單項警示更重要');
+          reason: '**方向性警告不可以消音** —— 它是這個畫面最重要的一條');
+      // SD1 > SD2 **刻意不列成說明**(對方看不到 SD1/SD2,講了只會混淆),
+      // 但它必須繼續當雜訊的判斷依據 —— 上面那條警告就是只靠它觸發的:
+      // 這組的灌流指數 10.1%、心率 61 都正常,唯一的異常就是 SD1 > SD2。
+      expect(keys, isNot(contains('k2_drink_trust_sd')));
+      expect(keys.length, 1, reason: '只該有方向性那一條');
     });
 
     test('③ 正常健康的一筆 → 不可以亂喊狼來了', () {
