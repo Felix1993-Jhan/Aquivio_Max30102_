@@ -938,8 +938,6 @@ class _K2PageState extends State<K2Page> {
     return K2DrinkPreview.from(
       metrics.toStrapiJson(),
       perfusionPct: pi,
-      sd1: hv?.sd1,
-      sd2: hv?.sd2,
       stocked: _applyStock.value ? _stocked : null,
     );
   }

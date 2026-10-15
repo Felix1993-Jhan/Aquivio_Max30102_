@@ -266,7 +266,8 @@ class K2DrinkPreview {
   /// 從 `toStrapiJson()` 的欄位推演。
   ///
   /// [perfusionPct] 是灌流指數 AC/DC（百分比），由呼叫端從波形算。
-  /// [sd1] / [sd2] 來自 HRV，用來抓「SD1 > SD2」這個白雜訊特徵。
+  /// 它是目前唯一的可信度依據 —— 而且是**有量過的**：
+  /// 實測木頭桌面 0.149%、真手指 10.1%，差兩個量級，門檻怎麼挑都對。
   ///
   /// [stocked] 給了就只留機器真的有的那幾款（模擬現場的實際庫存）；
   /// 給 null 就是把 11 款全部當成有貨。
@@ -278,8 +279,6 @@ class K2DrinkPreview {
   factory K2DrinkPreview.from(
     Map<String, dynamic> vitals, {
     double? perfusionPct,
-    double? sd1,
-    double? sd2,
     Set<String>? stocked,
   }) {
     double? num_(String k) {
@@ -360,13 +359,18 @@ class K2DrinkPreview {
         ),
       );
     }
-    // ⚠️ SD1 > SD2 **刻意不列成一條說明**。
-    //    SD1/SD2 不在送出去的 8 個欄位裡,對方看不到也不會用,
-    //    在這個「對方會怎麼判讀」的畫面上講它只會造成混淆。
-    //    但它仍然是判斷「這段 RR 是不是白雜訊」最有力的依據
-    //    （逐拍變異大於整體變異,生理上幾乎不可能）,
-    //    所以留著當下面方向性警告的觸發條件之一,只是不寫出來。
-    final looksLikeNoise = sd1 != null && sd2 != null && sd1 > sd2;
+    // ⚠️⚠️ 不要再加「SD1 > SD2 ⇒ 雜訊」這條判斷。**在我們的視窗長度下它是錯的。**
+    //
+    //    數學上 SD1 = RMSSD/√2、SD2² = 2·SDNN² − SD1²，
+    //    所以 SD2 > SD1 等價於 SDNN > RMSSD/√2。
+    //    而 SD2 量的是**長期變異** —— 12~30 秒、約 30 拍的窗裡根本沒有長期
+    //    變異可以量，SD2 在結構上就被低估。於是呼吸性竇性心律不整明顯的人
+    //    （年輕、休息、呼吸深）在短窗裡出現 SD1 > SD2 是**正常的**。
+    //
+    //    「SD1 > SD2 幾乎不可能」那個說法成立的前提是**五分鐘的標準量測**，
+    //    拿到這裡來用等於拿錯尺。實測使用者本人的正常量測就會一直觸發，
+    //    每秒重算一次還會讓警告框閃爍。移除，而且不要用別的啟發式補上去 ——
+    //    沒驗證過的判斷比沒有判斷更糟。
     if (meanHr != null &&
         (meanHr < K2DrinkThresholds.hrMinPlausible ||
             meanHr > K2DrinkThresholds.hrMaxPlausible)) {
@@ -381,8 +385,7 @@ class K2DrinkPreview {
     }
     // 雜訊會把 HRV 推高 → 落在「恢復良好」端 → 推刺激類。
     // 這個方向性是這整件事最危險的地方,所以單獨標出來。
-    if (rule == K2DrinkRule.parasympathetic &&
-        (issues.isNotEmpty || looksLikeNoise)) {
+    if (rule == K2DrinkRule.parasympathetic && issues.isNotEmpty) {
       issues.add(const K2TrustIssue('k2_drink_trust_direction', ''));
     }
 

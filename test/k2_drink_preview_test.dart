@@ -53,27 +53,24 @@ void main() {
           reason: '灌流指數兩個量級的差距必須被抓到');
     });
 
-    test('② 被停滯汙染：RMSSD 188.8 + SD1 > SD2 → 推到刺激類，而且要明講這個方向', () {
+    test('② 訊號強度正常的高 HRV → 推到刺激類，但**不可以**跳警告', () {
+      // 這組原本是「被停滯汙染」的案例,靠 SD1 > SD2 觸發警告。
+      // ⚠️ 那條判斷已經移除:SD2 量的是長期變異,12~30 秒的窗裡根本沒有
+      //    長期變異可量,SD2 在結構上被低估 —— 呼吸性竇性心律不整明顯的人
+      //    在短窗裡 SD1 > SD2 是**正常的**。實測使用者本人就會一直觸發。
+      //    「SD1 > SD2 幾乎不可能」成立的前提是五分鐘的標準量測。
       final p = K2DrinkPreview.from(
         vitals(meanHr: 61, sdnn: 123.8, rmssd: 188.8, pns: 99, stress: 20),
-        perfusionPct: 10.1, // 訊號強度本身沒問題 —— 壞的是拍
-        sd1: 133.5,
-        sd2: 113.3, // 實測:SD1 > SD2
+        perfusionPct: 10.1, // 訊號強度沒問題
       );
 
       expect(p.rule, K2DrinkRule.parasympathetic,
           reason: '高 HRV + 高 PNS + 低 stress 會被讀成「恢復良好」');
       expect(p.favored, contains('caffeine'),
-          reason: '這就是危險所在:量壞的那次反而推刺激物');
+          reason: '這個傾向本身還在 —— 只是我們沒有可靠的依據去警告它');
 
-      final keys = p.trustIssues.map((e) => e.titleKey).toList();
-      expect(keys, contains('k2_drink_trust_direction'),
-          reason: '**方向性警告不可以消音** —— 它是這個畫面最重要的一條');
-      // SD1 > SD2 **刻意不列成說明**(對方看不到 SD1/SD2,講了只會混淆),
-      // 但它必須繼續當雜訊的判斷依據 —— 上面那條警告就是只靠它觸發的:
-      // 這組的灌流指數 10.1%、心率 61 都正常,唯一的異常就是 SD1 > SD2。
-      expect(keys, isNot(contains('k2_drink_trust_sd')));
-      expect(keys.length, 1, reason: '只該有方向性那一條');
+      expect(p.trustIssues, isEmpty,
+          reason: '灌流指數正常就不該跳警告 —— **誤報會讓人以後忽略真正的警告**');
     });
 
     test('③ 正常健康的一筆 → 不可以亂喊狼來了', () {
@@ -87,8 +84,6 @@ void main() {
             stress: 40,
             confidence: 'high'),
         perfusionPct: 8.0,
-        sd1: 25,
-        sd2: 60,
       );
 
       expect(p.trustIssues, isEmpty,
