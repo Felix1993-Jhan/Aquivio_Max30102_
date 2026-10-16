@@ -746,7 +746,10 @@ class LocalizationService {
       'k2_drink_eff_sdnn': 'HRV 之一（規則寫 high HRV — SDNN/RMSSD）。高 → 副交感票；低 → 交感票。雜訊同樣會把它推高',
       'k2_drink_eff_ans': '由 LF/HF 換算（> 64.6 ⇔ LF/HF > 1.5），規則只用 LF/HF 的寫法，再投一次就是同一票算兩次。低 = 偏副交感，但模型可能誤讀成「分數不足」',
       'k2_drink_eff_conf': '規則與程式都沒有引用，不影響命中哪一條',
-      'k2_fx_title': '公式帶入（送給 LLM 的欄位）',
+      'k2_fx_title': '公式帶入（送給 LLM 的欄位與它們的來源）',
+      'k2_fx_note_power': 'P(f) = Lomb-Scargle 週期圖；k 讓三個頻帶加起來等於 RR 的變異數：VLF {vlf} + LF {lf} + HF {hf} = {total} ≈ SDNN² = {s2}',
+      'k2_fx_note_hf_cyc': 'HF 下緣（0.15 Hz）在這段裡有 {cyc} 個週期',
+      'k2_fx_note_not_sent': '不送給 LLM，只是 lf_hf 的分子分母。JSON 另有 {api} = 本值 × 1.024e-3（換成對方的單位）',
       'k2_fx_rolling': '滾動模式：最近 {sec} 秒，每秒重算',
       'k2_fx_fixed': '定長模式：與左側同一段，收滿後停在量測結束那一刻',
       'k2_fx_round': '畫面四捨五入顯示，實際送出的是完整浮點數',
@@ -1539,7 +1542,13 @@ class LocalizationService {
           'Derived from LF/HF (> 64.6 ⇔ LF/HF > 1.5); the rules only use the LF/HF form, so voting again would count the same signal twice. Low = parasympathetic-leaning, but a model may misread it as a low score',
       'k2_drink_eff_conf':
           'Referenced by neither the rules nor the code; it does not change which rule hits',
-      'k2_fx_title': 'Formulas with live values (fields sent to the LLM)',
+      'k2_fx_title':
+          'Formulas with live values (fields sent to the LLM and where they come from)',
+      'k2_fx_note_power':
+          'P(f) = Lomb-Scargle periodogram; k scales the three bands to sum to the RR variance: VLF {vlf} + LF {lf} + HF {hf} = {total} ≈ SDNN² = {s2}',
+      'k2_fx_note_hf_cyc': 'This segment holds {cyc} cycles of the HF lower edge (0.15 Hz)',
+      'k2_fx_note_not_sent':
+          'Not sent to the LLM — only the numerator / denominator of lf_hf. The JSON also carries {api} = this × 1.024e-3 (their unit)',
       'k2_fx_rolling': 'Rolling: last {sec} s, recomputed every second',
       'k2_fx_fixed':
           'Fixed window: same segment as the side panel, frozen at the end of the measurement',

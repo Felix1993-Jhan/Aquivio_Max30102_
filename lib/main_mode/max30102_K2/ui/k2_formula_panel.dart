@@ -161,22 +161,38 @@ List<K2FormulaRow> k2FormulaRows(VitalsMetrics m, {required int beats}) {
     );
   }
 
-  // ── lf_hf ────────────────────────────────────────────────────────
-  final lfFormula =
-      'LF[${HrvBands.lfLow}–${HrvBands.lfHigh} Hz] / HF[${HrvBands.hfLow}–${HrvBands.hfHigh.toStringAsFixed(2)} Hz]';
+  // ── lf_ms2 / hf_ms2 ← RR ────────────────────────────────────────
+  // 頻帶功率 = 該頻帶內 Lomb-Scargle 週期圖的積分 × k。
+  // k 把整條頻譜的積分縮放成 RR 的變異數(= SDNN²),所以三個頻帶加起來
+  // 對得上 SDNN² —— 附註把這筆帳攤開,可以直接跟上面的 sdnn 列對。
+  // 這兩個**不送給 LLM**,它們只是 lf_hf 的分子分母。
+  const naSpec = <K2FormulaNote>[(key: 'k2_fx_na_spec', params: {})];
+  String band(double lo, double hi) =>
+      'k · Σ P(f)·Δf ,  $lo ≤ f < ${hi.toStringAsFixed(2)} Hz';
+  final sdnn = m.sdnn;
   rows.add(
     K2FormulaRow(
-      api: 'lf_hf',
+      api: 'lf_ms2',
       inputs: const ['RR'],
-      formula: lfFormula,
+      formula: band(HrvBands.lfLow, HrvBands.lfHigh),
       sub: spec == null
           ? null
-          : '${_f(spec.lf, 1)} ms² / ${_f(spec.hf, 1)} ms²',
-      value: m.lfHf,
-      result: spec == null ? '—' : _f(m.lfHf, 2),
+          : 'LFnu = LF / (LF + HF) = ${_f(spec.lfNu, 1)} %',
+      value: spec?.lf,
+      result: spec == null ? '—' : '${_f(spec.lf, 1)} ms²',
       notes: spec == null
-          ? const [(key: 'k2_fx_na_spec', params: {})]
+          ? naSpec
           : [
+              (
+                key: 'k2_fx_note_power',
+                params: {
+                  'vlf': _f(spec.vlf, 1),
+                  'lf': _f(spec.lf, 1),
+                  'hf': _f(spec.hf, 1),
+                  'total': _f(spec.totalPower, 1),
+                  's2': _f(sdnn == null ? null : sdnn * sdnn, 1),
+                },
+              ),
               (
                 key: 'k2_fx_note_lfhf',
                 params: {
@@ -184,7 +200,41 @@ List<K2FormulaRow> k2FormulaRows(VitalsMetrics m, {required int beats}) {
                   'cyc': _f(spec.lfCycles, 1),
                 },
               ),
+              (key: 'k2_fx_note_not_sent', params: {'api': 'lf'}),
             ],
+    ),
+  );
+  rows.add(
+    K2FormulaRow(
+      api: 'hf_ms2',
+      inputs: const ['RR'],
+      formula: band(HrvBands.hfLow, HrvBands.hfHigh),
+      sub: spec == null
+          ? null
+          : 'HFnu = HF / (LF + HF) = ${_f(spec.hfNu, 1)} %',
+      value: spec?.hf,
+      result: spec == null ? '—' : '${_f(spec.hf, 1)} ms²',
+      notes: spec == null
+          ? naSpec
+          : [
+              (key: 'k2_fx_note_hf_cyc', params: {'cyc': _f(spec.hfCycles, 1)}),
+              (key: 'k2_fx_note_not_sent', params: {'api': 'hf'}),
+            ],
+    ),
+  );
+
+  // ── lf_hf ← lf_ms2, hf_ms2 ──────────────────────────────────────
+  rows.add(
+    K2FormulaRow(
+      api: 'lf_hf',
+      inputs: const ['lf_ms2', 'hf_ms2'],
+      formula: 'LF / HF',
+      sub: spec == null
+          ? null
+          : '${_f(spec.lf, 1)} ms² / ${_f(spec.hf, 1)} ms²',
+      value: m.lfHf,
+      result: spec == null ? '—' : _f(m.lfHf, 2),
+      notes: spec == null ? naSpec : const [],
     ),
   );
 

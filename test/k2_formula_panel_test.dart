@@ -83,6 +83,8 @@ void main() {
         'mean_hr',
         'sdnn',
         'rmssd',
+        'lf_ms2',
+        'hf_ms2',
         'lf_hf',
         'pns',
         'ans',
@@ -93,6 +95,7 @@ void main() {
       Map<String, List<String>> inputs = {
         for (final r in rows) r.api: r.inputs,
       };
+      expect(inputs['lf_hf'], ['lf_ms2', 'hf_ms2']);
       expect(inputs['pns'], ['rmssd']);
       expect(inputs['ans'], ['lf_hf']);
       expect(inputs['stress'], ['pns', 'ans']);
@@ -116,6 +119,27 @@ void main() {
       expect(a + b, closeTo(m.stressScore!, 1e-9));
       expect(stress.sub, contains(a.toStringAsFixed(1)));
       expect(stress.sub, contains(b.toStringAsFixed(1)));
+    });
+
+    test('⑥ LF、HF:比值對得上 lf_hf,三個頻帶加起來對得上 SDNN²', () {
+      final m = metricsOf(normalRr);
+      final rows = k2FormulaRows(m, beats: 30);
+      final lf = rows.firstWhere((r) => r.api == 'lf_ms2').value as double;
+      final hf = rows.firstWhere((r) => r.api == 'hf_ms2').value as double;
+      expect(lf / hf, closeTo(m.lfHf!, 1e-12));
+      final s = m.spectrum!;
+      // 附註裡攤開的帳:VLF + LF + HF ≈ SDNN²(歸一化讓總和 = RR 變異數)
+      expect(
+        s.vlf + s.lf + s.hf,
+        closeTo(m.sdnn! * m.sdnn!, m.sdnn! * m.sdnn! * 0.02),
+      );
+      // 兩列都要標明「不送給 LLM」
+      for (final api in ['lf_ms2', 'hf_ms2']) {
+        expect(
+          rows.firstWhere((r) => r.api == api).notes.map((n) => n.key),
+          contains('k2_fx_note_not_sent'),
+        );
+      }
     });
 
     test('④ 高 HRV 撞頂時要標出「夾到 100」', () {
