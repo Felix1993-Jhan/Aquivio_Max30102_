@@ -11,7 +11,11 @@ import 'dart:math' as math;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_hrv_calculator.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_vitals_metrics.dart';
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/ui/k2_field_help.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/ui/k2_formula_panel.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/ui/glass.dart';
+import 'package:flutter/material.dart';
 
 /// 由一串 RR(ms) 組出連續的 HrvRrPoint(100 Hz 取樣 → 1 個樣本 = 10ms)。
 List<HrvRrPoint> pointsOf(List<double> rr) {
@@ -170,6 +174,58 @@ void main() {
       expect(v('hf'), closeTo(v('hf_ms2') * 1e-6 * 1024, 1e-12));
       // 比值不受單位影響
       expect(v('lf') / v('hf'), closeTo(m.lfHf!, 1e-12));
+    });
+
+    test('⑧ 每一列的「?」說明視窗:必填段落兩種語言都要有', () {
+      final rows = k2FormulaRows(metricsOf(normalRr), beats: 30);
+      final loc = LocalizationService();
+      final before = loc.currentLanguage;
+      try {
+        for (final lang in AppLanguage.values) {
+          loc.setLanguage(lang);
+          for (final r in rows) {
+            for (final s in k2HelpRequired) {
+              final k = k2HelpKey(r.api, s);
+              expect(tr(k), isNot(k), reason: '$lang 缺 $k');
+            }
+          }
+          for (final s in k2HelpSections) {
+            expect(tr('k2_help_sec_$s'), isNot('k2_help_sec_$s'));
+          }
+        }
+      } finally {
+        loc.setLanguage(before);
+      }
+    });
+
+    testWidgets('⑨ 每一個「?」視窗都打得開(玻璃開 / 關),不會排版爆掉', (tester) async {
+      final rows = k2FormulaRows(metricsOf(normalRr), beats: 30);
+      final glassBefore = globalGlassNotifier.value;
+      try {
+        for (final glass in [true, false]) {
+          globalGlassNotifier.value = glass;
+          for (final r in rows) {
+            await tester.pumpWidget(
+              MaterialApp(
+                home: Builder(
+                  builder: (ctx) => TextButton(
+                    onPressed: () => showK2FieldHelp(ctx, r),
+                    child: const Text('open'),
+                  ),
+                ),
+              ),
+            );
+            await tester.tap(find.text('open'));
+            await tester.pumpAndSettle();
+            expect(find.text(r.api), findsOneWidget, reason: r.api);
+            expect(tester.takeException(), isNull, reason: r.api);
+            Navigator.of(tester.element(find.text(r.api))).pop();
+            await tester.pumpAndSettle();
+          }
+        }
+      } finally {
+        globalGlassNotifier.value = glassBefore;
+      }
     });
 
     test('④ 高 HRV 撞頂時要標出「夾到 100」', () {

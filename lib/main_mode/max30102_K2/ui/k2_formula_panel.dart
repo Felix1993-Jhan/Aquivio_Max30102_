@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 import '../../../shared/services/localization_service.dart';
 import '../k2_hrv_calculator.dart';
 import '../k2_vitals_metrics.dart';
+import 'k2_field_help.dart';
 
 /// 一條附註：翻譯 key + 參數（翻譯留給畫面層做，資料層保持可測）。
 typedef K2FormulaNote = ({String key, Map<String, dynamic> params});
@@ -453,7 +454,7 @@ class K2FormulaPanel extends StatelessWidget {
   final int seconds;
 
   static const _mono = 'Consolas';
-  static const double _wField = 92;
+  static const double _wField = 108; // 欄位名 + 「?」
   static const double _wInputs = 96;
   static const double _wResult = 96;
 
@@ -527,13 +528,13 @@ class K2FormulaPanel extends StatelessWidget {
             ],
           ),
           const Divider(height: 8),
-          for (final r in rows) _row(r),
+          for (final r in rows) _row(context, r),
         ],
       ),
     );
   }
 
-  Widget _row(K2FormulaRow r) {
+  Widget _row(BuildContext context, K2FormulaRow r) {
     final grey = Colors.grey.shade600;
     final na = r.value == null;
     // 中間量(不在 LLM 提示詞裡)整列用淡色、結果不加粗 ——
@@ -549,14 +550,36 @@ class K2FormulaPanel extends StatelessWidget {
             children: [
               SizedBox(
                 width: _wField,
-                child: Text(
-                  r.api,
-                  style: TextStyle(
-                    fontFamily: _mono,
-                    fontSize: 12,
-                    fontWeight: r.llm ? FontWeight.bold : FontWeight.normal,
-                    color: faint,
-                  ),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        r.api,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: _mono,
+                          fontSize: 12,
+                          fontWeight: r.llm
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          color: faint,
+                        ),
+                      ),
+                    ),
+                    // 「?」→ 這個欄位的說明視窗(外框同推薦飲品視窗)
+                    InkWell(
+                      onTap: () => showK2FieldHelp(context, r),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: Icon(
+                          Icons.help_outline,
+                          size: 14,
+                          color: faint ?? Colors.teal.shade600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               SizedBox(

@@ -772,6 +772,87 @@ class LocalizationService {
       'k2_fx_na_snr': '波形不足 5 秒，或還沒有心率',
       'k2_fx_na_dep': '依賴的 {dep} 還沒有數值',
       'k2_fx_na_pairs': '沒有任何連續相鄰對，RMSSD = 0，對數無定義',
+      // ---------- 公式帶入面板的「?」說明視窗 ----------
+      'k2_help_tag_llm': 'LLM 提示詞裡的欄位',
+      'k2_help_tag_mid': '中間量（不在 LLM 提示詞裡）',
+      'k2_help_sec_what': '這是什麼',
+      'k2_help_sec_how': '怎麼算',
+      'k2_help_sec_use': '在推薦裡的角色',
+      'k2_help_sec_note': '要注意的地方',
+      'k2_help_sec_ref': '參考值',
+
+      'k2_help_mean_hr_what': '平均心率：這一段裡所有 RR 間隔（兩拍之間的時間）取平均，換算成每分鐘幾下。',
+      'k2_help_mean_hr_how': '1. 從 IR 波形找出每一拍的谷底\n2. 相鄰兩個谷底的時間差 = 一個 RR 間隔（ms）\n3. 濾掉漏拍、切拍造成的離群值\n4. 心率 = 60000 ÷ 平均 RR',
+      'k2_help_mean_hr_use': '提示詞的「Heart rate: X bpm」。對方規則「Elevated heart rate」是否決權：心率偏高時不管其他訊號，只給補水、非氣泡、非刺激性的飲品，也是 caffeine / cascara 的迴避條件。對方沒寫多少算偏高，由 LLM 自己判斷；我們 ② 的推演用 100 bpm。',
+      'k2_help_mean_hr_note': '它量的是「當下」，不是靜息心率：量測前剛走動、說話、緊張，都會讓它偏高，進而觸發否決權。是由平均 RR 換算的，與畫面上逐拍的即時心率可能差 1~2 bpm。',
+      'k2_help_mean_hr_ref': '成人靜息 60~100 bpm；> 100 bpm 為心搏過速（臨床定義）。',
+
+      'k2_help_sdnn_what': 'RR 間隔的標準差：整段心跳快慢起伏的「總量」，同時包含呼吸造成的快速起伏，以及更慢的變化。',
+      'k2_help_sdnn_how': '1. 取這一段的 N 個 RR 間隔\n2. 算平均\n3. 每個 RR 減平均、平方、全部加總\n4. 除以 N − 1（樣本標準差），再開根號',
+      'k2_help_sdnn_use': '提示詞的「HRV SDNN: X ms」。對方規則把它和 RMSSD 並列為 HRV：high HRV — SDNN/RMSSD → 副交感／恢復良好；low HRV → 交感／壓力。',
+      'k2_help_sdnn_note': '短窗下最不可靠的 HRV 指標：SDNN 含有慢變化，窗越短量到的越少。文獻建議至少 30 秒，PPG 研究要 240 秒才穩定，我們的窗是 12~30 秒。漏拍或雜訊也會把它推高。',
+      'k2_help_sdnn_ref': 'Nunan 2010 短時（5 分鐘）常模：平均 50 ± 16 ms（範圍 32~93）。隨年齡下降。',
+
+      'k2_help_rmssd_what': '相鄰兩拍差值的均方根：只看「這一拍到下一拍」的快速變化，主要反映迷走神經（副交感）的活性。',
+      'k2_help_rmssd_how': '1. 只取時間上相鄰（中間沒有漏拍）的兩拍\n2. 後一拍 − 前一拍，平方，全部加總\n3. 除以相鄰對數 P，再開根號',
+      'k2_help_rmssd_use': '提示詞的「RMSSD: X ms」。它也是 pns 的唯一來源，又透過 pns 決定 stress 的 60%——一個 RMSSD 會同時影響提示詞裡的三行。',
+      'k2_help_rmssd_note': '對雜訊非常敏感：一個誤判的谷底會造成兩個很大的相鄰差，平方後把 RMSSD 大幅推高 → 被讀成「恢復良好」→ 推向刺激類飲品。刻意深呼吸、慢呼吸也會讓它暴增（呼吸性竇性心律不整）。',
+      'k2_help_rmssd_ref': 'Nunan 2010：平均 42 ± 15 ms（範圍 19~75）。10~30 秒的超短時 RMSSD 有文獻驗證（Munoz 2015，與 5 分鐘相關 r = 0.94）。隨年齡下降。',
+
+      'k2_help_lf_ms2_what': '低頻（0.04~0.15 Hz，週期約 7~25 秒）的心率變化功率，單位 ms²。主要來自血壓調節（壓力反射），交感與副交感都有參與。',
+      'k2_help_lf_ms2_how': '1. 把 RR 依發生的時間排成序列（不等間隔，所以不能直接 FFT）\n2. 用 Lomb-Scargle 週期圖估計每個頻率的功率 P(f)\n3. 0.04~0.15 Hz 內的 P(f)·Δf 加總\n4. 乘上 k，讓 VLF + LF + HF 剛好等於 RR 的變異數（SDNN²）',
+      'k2_help_lf_ms2_use': '不送給 LLM。它只是 lf_hf 的分子；換成對方單位後以 lf 欄位送進 JSON。',
+      'k2_help_lf_ms2_note': '0.04 Hz 一個週期就要 25 秒，12~30 秒的窗連一個完整的慢波都裝不下，所以這個值在我們的窗長下很不可靠。短時 HRV 的標準量測長度是 5 分鐘，原因就在這裡。',
+
+      'k2_help_hf_ms2_what': '高頻（0.15~0.40 Hz，週期 2.5~6.7 秒）的心率變化功率，單位 ms²。對應每分鐘 9~24 次的呼吸，也就是呼吸性竇性心律不整，主要反映迷走神經。',
+      'k2_help_hf_ms2_how': '與 lf_ms2 相同，只是頻帶換成 0.15~0.40 Hz。',
+      'k2_help_hf_ms2_use': '不送給 LLM。它只是 lf_hf 的分母；換成對方單位後以 hf 欄位送進 JSON。',
+      'k2_help_hf_ms2_note': '呼吸頻率決定它落在哪裡：呼吸慢於每分鐘 9 次（例如刻意深呼吸）時，呼吸造成的變化會掉進 LF 頻帶 → LF/HF 變大 → 被誤讀成「交感」。30 秒窗約有 4.5 個 HF 週期，比 LF 可靠。',
+
+      'k2_help_lf_what': 'lf_ms2 換成對方（攝影機端 aquivio-vitals）的單位，是 JSON 裡 lf 欄位實際送出的值，與左側欄「LF (lf)」同一個數。',
+      'k2_help_lf_how': 'lf_ms2 × 1e-6 × 1024\n· × 1e-6：ms² → s²（對方的 RR 用秒）\n· × 1024：對方用 Welch 頻譜（fs = 4 Hz、nfft = 4096）時直接把各格加總、沒有乘上格寬 Δf = 4 / 4096 Hz，等於多乘了 1/Δf = 1024',
+      'k2_help_lf_use': '送進軟體端的 JSON，但不在 LLM 提示詞裡。換單位的目的是讓同名欄位在攝影機機台和我們這邊的數量級一致，下游比較時才不會差一千倍。',
+      'k2_help_lf_note': '1024 綁定對方 nfft = 4096、fs = 4 的設定，對方改了設定，這個係數也要跟著改。兩邊估計頻譜的方法不同（Welch 對 Lomb-Scargle），只保證數量級一致，不保證相等。',
+
+      'k2_help_hf_what': 'hf_ms2 換成對方的單位，是 JSON 裡 hf 欄位實際送出的值，與左側欄「HF (hf)」同一個數。',
+      'k2_help_hf_how': 'hf_ms2 × 1e-6 × 1024，換算方式與 lf 相同。',
+      'k2_help_hf_use': '送進軟體端的 JSON，但不在 LLM 提示詞裡。',
+      'k2_help_hf_note': '與 lf 相同：係數綁定對方的頻譜設定，只保證數量級一致。',
+
+      'k2_help_lf_hf_what': 'LF 功率 ÷ HF 功率。傳統上被當成「交感／副交感平衡」的指標：大於 1 偏交感、小於 1 偏副交感。',
+      'k2_help_lf_hf_how': 'lf_ms2 ÷ hf_ms2。單位在比值裡約掉，所以用 lf ÷ hf 算出來也一樣。',
+      'k2_help_lf_hf_use': '提示詞的「ANS balance (LF/HF X)」。這是對方規則裡唯一寫死的數字：LF/HF > 1.5 → 交感主導，也是 caffeine 的迴避條件。它也是 ans 的唯一來源。',
+      'k2_help_lf_hf_note': '三個問題疊在一起：\n① 窗長：LF 在 12~30 秒的窗裡量不準（見 lf_ms2）\n② 生理意義有爭議：Billman 2013 指出 LF/HF 不能準確代表交感／副交感平衡\n③ 門檻：健康人靜息平均約 2.8，用 1.5 當門檻，大多數健康、放鬆的人都會被判成交感主導\n我們有送 lf_reliable 旗標說明可信度，但對方沒有讀它。',
+      'k2_help_lf_hf_ref': 'Nunan 2010 短時（5 分鐘）常模：平均 2.8 ± 2.6（範圍 1.1~11.6）。',
+
+      'k2_help_pns_what': '對方的「副交感／恢復」分數（0~100，對方畫面上叫 Recovery）。它就是 RMSSD 換成對數尺度，沒有加入任何新資訊。',
+      'k2_help_pns_how': '(log₁₀ RMSSD − 1) ÷ (log₁₀ 80 − 1)，夾在 0~1 之間，再 × 100。\nRMSSD 10 ms → 0 分、80 ms → 100 分，超出兩端就夾住。',
+      'k2_help_pns_use': '提示詞的「PNS / recovery: X/100」。對方規則：low PNS → 交感；high PNS → 副交感。它也占 stress 的 60%。',
+      'k2_help_pns_note': 'RMSSD ≥ 80 ms 一律 100 分（撞頂），分不出「真的很好」和「被雜訊推高」。公式來自 aquivio-vitals，原始註解自稱 heuristic、not clinical。與左側欄的「副交感 z」（Kubios 式 z-score）是不同的東西，尺度不能互相比較。',
+      'k2_help_pns_ref': '常模平均 RMSSD 42 ms 換算約 69 分。',
+
+      'k2_help_ans_what': '對方的「自律神經平衡」分數（0~100）。它就是 LF/HF 取對數後縮放，分數越高越偏交感。',
+      'k2_help_ans_how': '0.5 + log₂(LF/HF) ÷ 4，夾在 0~1 之間，再 × 100。\nLF/HF 0.25 → 0 分、1 → 50 分、4 → 100 分。',
+      'k2_help_ans_use': '提示詞的「ANS score X/100」，與 LF/HF 印在同一行。對方規則沒有直接點名它，但它占 stress 的 40%。',
+      'k2_help_ans_note': '方向容易誤讀：低分代表偏副交感（放鬆），不是「分數不足」。LF/HF 的所有問題它全部繼承。LF/HF > 1.5 等於 ans > 64.6。',
+
+      'k2_help_stress_what': '對方的「壓力」分數（0~100）。由 pns 和 ans 加權混合而成，不是獨立的量測。',
+      'k2_help_stress_how': '0.6 × (100 − PNS) + 0.4 × ANS，夾在 0~100。',
+      'k2_help_stress_use': '提示詞的「Stress: X/100」。對方規則：high stress → 交感，排除 caffeine、cascara、bcaa、whey、lCarnitine；low stress → 副交感。',
+      'k2_help_stress_note': '展開來就是 60% RMSSD + 40% LF/HF，所以它和 rmssd、pns 不是三個獨立的證據。RMSSD ≥ 80 ms 時 PNS = 100，stress 最高只剩 40，一定被讀成低壓力。左側欄另有一個 Baevsky 壓力指數（stress_baevsky），那是不同的東西，也不送給 LLM。',
+      'k2_help_stress_ref': '對方的量表沒有文獻依據。可參考 Garmin 的 0~100 壓力分段：0~25 休息、26~50 低、51~75 中、76~100 高（② 的推演門檻即採用此分段）。',
+
+      'k2_help_snr_db_what': '波形的訊噪比（dB）：脈搏頻率上的功率，和其他頻率上的功率之比。衡量波形「乾不乾淨」。',
+      'k2_help_snr_db_how': '1. IR 原始波形減平均、乘 Hann 窗\n2. FFT（補零到 2 的冪次）\n3. 在 0.5~4 Hz 內，f₀（= 心率 ÷ 60）與 2f₀ 各 ±0.2 Hz 的功率算「訊號」，其餘算「雜訊」\n4. 10 · log₁₀(訊號 ÷ 雜訊)',
+      'k2_help_snr_db_use': '不送給 LLM，但 confidence 完全由它決定。',
+      'k2_help_snr_db_note': '它其實也在量「心率穩不穩」：訊號窗只有 ±0.2 Hz（約 ±12 bpm），整段心率起伏超過這個範圍，脈搏能量就會落到窗外被算成雜訊——深呼吸造成的心率擺動就會讓 SNR 下降。頻帶與門檻照抄攝影機端 aquivio-vitals，是為 rPPG 校準的，和我們的接觸式 PPG 不一定對應。',
+      'k2_help_snr_db_ref': 'aquivio-vitals 原始註解：低於約 6 dB 時，RMSSD 的雜訊底線會超過典型的靜息 HRV。',
+
+      'k2_help_confidence_what': '讀數可信度：good / rough / very rough。',
+      'k2_help_confidence_how': '只看 snr_db：\n≥ 6 dB → good\n≥ 1 dB → rough\n其餘 → very rough\nsnr_db 算不出來 → null',
+      'k2_help_confidence_use': '提示詞的「Reading confidence: X」。但對方的規則和程式都沒有任何一處用到它——模型看得到，卻沒有被告知該怎麼用。',
+      'k2_help_confidence_note': '與拍數無關。看拍數的是另一個欄位 confidence_by_beats，不送給 LLM。所以「good」不代表樣本夠多，只代表波形的頻譜乾淨。',
+
       'k2_drink_btn': '推薦飲品',
       'k2_drink_title': '這組數字會換到哪一杯？',
       'k2_drink_sec_payload': '① 會送出去的欄位（逐字照對方模板）',
@@ -1583,6 +1664,139 @@ class LocalizationService {
       'k2_fx_na_snr': 'Less than 5 s of waveform, or no heart rate yet',
       'k2_fx_na_dep': 'Depends on {dep}, which has no value yet',
       'k2_fx_na_pairs': 'No adjacent pairs at all — RMSSD = 0, log undefined',
+      // ---------- "?" help dialogs of the formula panel ----------
+      'k2_help_tag_llm': 'Field in the LLM prompt',
+      'k2_help_tag_mid': 'Intermediate (not in the LLM prompt)',
+      'k2_help_sec_what': 'What it is',
+      'k2_help_sec_how': 'How it is computed',
+      'k2_help_sec_use': 'Role in the recommendation',
+      'k2_help_sec_note': 'Caveats',
+      'k2_help_sec_ref': 'Reference values',
+
+      'k2_help_mean_hr_what':
+          'Mean heart rate: the average of all RR intervals (time between beats) in this segment, converted to beats per minute.',
+      'k2_help_mean_hr_how':
+          '1. Find the trough of every beat in the IR waveform\n2. Time between adjacent troughs = one RR interval (ms)\n3. Drop outliers caused by missed or split beats\n4. Heart rate = 60000 ÷ mean RR',
+      'k2_help_mean_hr_use':
+          '"Heart rate: X bpm" in the prompt. Their "Elevated heart rate" rule is an override: when HR is elevated, all other signals are ignored and only hydrating, non-fizzy, non-stimulant drinks are allowed; it is also an avoid condition for caffeine / cascara. They never say how high is elevated, so the LLM decides; our preview in ② uses 100 bpm.',
+      'k2_help_mean_hr_note':
+          'It measures right now, not resting HR: walking, talking or nerves just before the reading push it up and can trip the override. It is derived from the mean RR, so it may differ from the beat-by-beat live HR by 1–2 bpm.',
+      'k2_help_mean_hr_ref':
+          'Adult resting 60–100 bpm; > 100 bpm is tachycardia (clinical definition).',
+
+      'k2_help_sdnn_what':
+          'Standard deviation of RR intervals: the total amount of beat-to-beat variation in the segment, including both fast breathing-driven swings and slower changes.',
+      'k2_help_sdnn_how':
+          '1. Take the N RR intervals of this segment\n2. Compute their mean\n3. Subtract the mean from each, square, sum\n4. Divide by N − 1 (sample SD) and take the square root',
+      'k2_help_sdnn_use':
+          '"HRV SDNN: X ms" in the prompt. Their rules pair it with RMSSD as HRV: high HRV — SDNN/RMSSD → parasympathetic / recovered; low HRV → sympathetic / stressed.',
+      'k2_help_sdnn_note':
+          'The least reliable HRV metric in short windows: SDNN includes slow variation, and a short window captures less of it. Literature suggests at least 30 s; a PPG study needed 240 s to stabilise; our window is 12–30 s. Missed beats and noise also inflate it.',
+      'k2_help_sdnn_ref':
+          'Nunan 2010 short-term (5-min) norms: mean 50 ± 16 ms (range 32–93). Declines with age.',
+
+      'k2_help_rmssd_what':
+          'Root mean square of successive differences: only the fast change from one beat to the next, mainly reflecting vagal (parasympathetic) activity.',
+      'k2_help_rmssd_how':
+          '1. Take only pairs adjacent in time (no missed beat in between)\n2. Next beat − previous beat, square, sum\n3. Divide by the number of pairs P and take the square root',
+      'k2_help_rmssd_use':
+          '"RMSSD: X ms" in the prompt. It is also the sole source of pns, and through pns drives 60% of stress — one RMSSD moves three lines of the prompt.',
+      'k2_help_rmssd_note':
+          'Very sensitive to noise: one misplaced trough creates two large successive differences which, squared, inflate RMSSD → read as well-recovered → pushes towards stimulants. Deliberate slow, deep breathing also makes it spike (respiratory sinus arrhythmia).',
+      'k2_help_rmssd_ref':
+          'Nunan 2010: mean 42 ± 15 ms (range 19–75). Ultra-short 10–30 s RMSSD is validated (Munoz 2015, r = 0.94 vs 5 min). Declines with age.',
+
+      'k2_help_lf_ms2_what':
+          'Power of heart-rate variation at low frequency (0.04–0.15 Hz, periods of about 7–25 s), in ms². Mostly blood-pressure regulation (baroreflex), with both sympathetic and parasympathetic input.',
+      'k2_help_lf_ms2_how':
+          '1. Lay out RR by the time each occurred (unevenly spaced, so no plain FFT)\n2. Estimate the power P(f) at each frequency with a Lomb-Scargle periodogram\n3. Sum P(f)·Δf over 0.04–0.15 Hz\n4. Multiply by k so that VLF + LF + HF equals the RR variance (SDNN²)',
+      'k2_help_lf_ms2_use':
+          'Not sent to the LLM. It is only the numerator of lf_hf; converted to their unit it goes into the JSON as lf.',
+      'k2_help_lf_ms2_note':
+          'One cycle at 0.04 Hz takes 25 s — a 12–30 s window cannot hold even one full slow wave, so this value is unreliable at our window length. That is exactly why standard short-term HRV uses 5 minutes.',
+
+      'k2_help_hf_ms2_what':
+          'Power of heart-rate variation at high frequency (0.15–0.40 Hz, periods of 2.5–6.7 s), in ms². Matches breathing at 9–24 breaths per minute (respiratory sinus arrhythmia), mainly vagal.',
+      'k2_help_hf_ms2_how': 'Same as lf_ms2, with the band changed to 0.15–0.40 Hz.',
+      'k2_help_hf_ms2_use':
+          'Not sent to the LLM. It is only the denominator of lf_hf; converted to their unit it goes into the JSON as hf.',
+      'k2_help_hf_ms2_note':
+          'Breathing rate decides where it lands: breathing slower than 9 per minute (e.g. deliberate deep breathing) moves the breathing-driven swing into the LF band → LF/HF rises → misread as sympathetic. A 30 s window holds about 4.5 HF cycles, more reliable than LF.',
+
+      'k2_help_lf_what':
+          'lf_ms2 converted to their unit (the camera-side aquivio-vitals): the value actually sent as lf in the JSON, the same number as "LF (lf)" in the side panel.',
+      'k2_help_lf_how':
+          'lf_ms2 × 1e-6 × 1024\n· × 1e-6: ms² → s² (their RR is in seconds)\n· × 1024: their Welch spectrum (fs = 4 Hz, nfft = 4096) sums the bins without multiplying by the bin width Δf = 4 / 4096 Hz, i.e. an extra 1/Δf = 1024',
+      'k2_help_lf_use':
+          'Sent in the JSON to the software side, but not part of the LLM prompt. The conversion keeps the same-named field on the same scale on the camera machine and ours, so downstream comparisons are not off by a thousand.',
+      'k2_help_lf_note':
+          'The 1024 is tied to their nfft = 4096 and fs = 4; if they change those, this factor must change too. The two sides estimate the spectrum differently (Welch vs Lomb-Scargle), so only the order of magnitude is guaranteed to match.',
+
+      'k2_help_hf_what':
+          'hf_ms2 converted to their unit: the value actually sent as hf in the JSON, the same number as "HF (hf)" in the side panel.',
+      'k2_help_hf_how': 'hf_ms2 × 1e-6 × 1024, same conversion as lf.',
+      'k2_help_hf_use': 'Sent in the JSON to the software side, but not part of the LLM prompt.',
+      'k2_help_hf_note':
+          'Same as lf: the factor is tied to their spectrum settings and only the order of magnitude is guaranteed.',
+
+      'k2_help_lf_hf_what':
+          'LF power ÷ HF power. Traditionally read as sympatho-vagal balance: above 1 leans sympathetic, below 1 leans parasympathetic.',
+      'k2_help_lf_hf_how':
+          'lf_ms2 ÷ hf_ms2. Units cancel in the ratio, so lf ÷ hf gives the same result.',
+      'k2_help_lf_hf_use':
+          '"ANS balance (LF/HF X)" in the prompt. It carries the only hard number in their rules: LF/HF > 1.5 → sympathetic-dominant, also an avoid condition for caffeine. It is also the sole source of ans.',
+      'k2_help_lf_hf_note':
+          'Three problems stack up:\n① Window: LF cannot be measured properly in 12–30 s (see lf_ms2)\n② Disputed meaning: Billman 2013 argues LF/HF does not accurately measure sympatho-vagal balance\n③ Threshold: healthy people at rest average about 2.8, so with 1.5 most healthy, relaxed people are labelled sympathetic-dominant\nWe send an lf_reliable flag about this, but they do not read it.',
+      'k2_help_lf_hf_ref':
+          'Nunan 2010 short-term (5-min) norms: mean 2.8 ± 2.6 (range 1.1–11.6).',
+
+      'k2_help_pns_what':
+          'Their parasympathetic / recovery score (0–100, called Recovery on their screen). It is RMSSD on a log scale and adds no new information.',
+      'k2_help_pns_how':
+          '(log₁₀ RMSSD − 1) ÷ (log₁₀ 80 − 1), clamped to 0–1, then × 100.\nRMSSD 10 ms → 0, 80 ms → 100, clamped beyond either end.',
+      'k2_help_pns_use':
+          '"PNS / recovery: X/100" in the prompt. Their rules: low PNS → sympathetic; high PNS → parasympathetic. It also makes up 60% of stress.',
+      'k2_help_pns_note':
+          'Any RMSSD ≥ 80 ms scores 100 (hits the ceiling), so "genuinely great" and "inflated by noise" look the same. The formula comes from aquivio-vitals, whose own comment calls it heuristic, not clinical. It is not the same thing as "PNS z" in the side panel (a Kubios-style z-score); the scales are not comparable.',
+      'k2_help_pns_ref': 'The norm-average RMSSD of 42 ms maps to about 69.',
+
+      'k2_help_ans_what':
+          'Their autonomic balance score (0–100): LF/HF on a log scale. Higher means more sympathetic.',
+      'k2_help_ans_how':
+          '0.5 + log₂(LF/HF) ÷ 4, clamped to 0–1, then × 100.\nLF/HF 0.25 → 0, 1 → 50, 4 → 100.',
+      'k2_help_ans_use':
+          '"ANS score X/100" in the prompt, printed on the same line as LF/HF. Their rules never name it directly, but it makes up 40% of stress.',
+      'k2_help_ans_note':
+          'Easy to misread: a low score means parasympathetic-leaning (relaxed), not "a poor score". It inherits every problem of LF/HF. LF/HF > 1.5 is the same as ans > 64.6.',
+
+      'k2_help_stress_what':
+          'Their stress score (0–100): a weighted mix of pns and ans, not an independent measurement.',
+      'k2_help_stress_how': '0.6 × (100 − PNS) + 0.4 × ANS, clamped to 0–100.',
+      'k2_help_stress_use':
+          '"Stress: X/100" in the prompt. Their rules: high stress → sympathetic, excludes caffeine, cascara, bcaa, whey, lCarnitine; low stress → parasympathetic.',
+      'k2_help_stress_note':
+          'Expanded, it is 60% RMSSD + 40% LF/HF, so stress, rmssd and pns are not three independent pieces of evidence. With RMSSD ≥ 80 ms, PNS = 100 and stress can be at most 40 — always read as low stress. The side panel also shows a Baevsky stress index (stress_baevsky); that is a different thing and is not sent to the LLM.',
+      'k2_help_stress_ref':
+          'Their scale has no literature basis. For comparison, Garmin 0–100 stress bands: 0–25 rest, 26–50 low, 51–75 medium, 76–100 high (the preview in ② uses these bands).',
+
+      'k2_help_snr_db_what':
+          'Waveform signal-to-noise ratio (dB): power at the pulse frequency versus power elsewhere. Measures how clean the waveform is.',
+      'k2_help_snr_db_how':
+          '1. Remove the mean of the raw IR waveform and apply a Hann window\n2. FFT (zero-padded to a power of two)\n3. Within 0.5–4 Hz, power within ±0.2 Hz of f₀ (= HR ÷ 60) and 2f₀ counts as signal, the rest as noise\n4. 10 · log₁₀(signal ÷ noise)',
+      'k2_help_snr_db_use': 'Not sent to the LLM, but it alone decides confidence.',
+      'k2_help_snr_db_note':
+          'It also measures how steady the heart rate is: the signal window is only ±0.2 Hz (about ±12 bpm), so if HR swings beyond that during the segment, pulse energy falls outside and counts as noise — HR swings from deep breathing lower the SNR. Bands and thresholds are copied from the camera-side aquivio-vitals and were calibrated for rPPG, not necessarily for our contact PPG.',
+      'k2_help_snr_db_ref':
+          'aquivio-vitals source comment: below about 6 dB the RMSSD noise floor exceeds typical resting HRV.',
+
+      'k2_help_confidence_what': 'Reading confidence: good / rough / very rough.',
+      'k2_help_confidence_how':
+          'Depends only on snr_db:\n≥ 6 dB → good\n≥ 1 dB → rough\notherwise → very rough\nno snr_db → null',
+      'k2_help_confidence_use':
+          '"Reading confidence: X" in the prompt. But neither their rules nor their code use it anywhere — the model sees it without being told what to do with it.',
+      'k2_help_confidence_note':
+          'Unrelated to beat count. The beat-based one is a separate field, confidence_by_beats, which the LLM never sees. So "good" does not mean enough beats, only a clean spectrum.',
+
       'k2_drink_btn': 'Drink pick',
       'k2_drink_title': 'What drink would these numbers produce?',
       'k2_drink_sec_payload': '① Fields that get sent (verbatim, their template)',
