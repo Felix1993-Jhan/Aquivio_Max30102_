@@ -44,6 +44,13 @@ class GlassColors {
   static const shell = Color.fromRGBO(255, 255, 255, 0.72);
   static const shellEdge = Color.fromRGBO(255, 255, 255, 0.65);
 
+  /// 彈窗用的玻璃底色 —— 比 [shell] 不透明。
+  ///
+  /// 彈窗會蓋在 K2 頁的波形圖 / RR 趨勢圖上，那兩張是深色底。模糊不會改變
+  /// 明暗，0.72 的白底會讓深色圖透出來，視窗中段變成一塊灰（實測很難看）。
+  /// 0.85 時「後面黑 vs 後面白」約 217 vs 255，顏色接近一致，邊緣仍有霧面感。
+  static const dialogShell = Color.fromRGBO(255, 255, 255, 0.85);
+
   /// 帶色玻璃：警示（橘）。
   static const warnFill = Color.fromRGBO(255, 167, 38, 0.20);
   static const warnEdge = Color.fromRGBO(239, 108, 0, 0.50);

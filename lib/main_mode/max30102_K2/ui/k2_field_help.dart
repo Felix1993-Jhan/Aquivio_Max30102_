@@ -127,7 +127,7 @@ class _K2FieldHelpDialog extends StatelessWidget {
           child: Container(
             constraints: const BoxConstraints(maxWidth: 680),
             decoration: BoxDecoration(
-              color: GlassColors.shell,
+              color: GlassColors.dialogShell,
               border: Border.all(color: GlassColors.shellEdge, width: 1.2),
               borderRadius: BorderRadius.circular(20),
             ),

@@ -754,7 +754,7 @@ class _K2DrinkDialog extends StatelessWidget {
           child: Container(
             constraints: const BoxConstraints(maxWidth: 620),
             decoration: BoxDecoration(
-              color: GlassColors.shell,
+              color: GlassColors.dialogShell,
               border: Border.all(color: GlassColors.shellEdge, width: 1.2),
               borderRadius: BorderRadius.circular(20),
             ),
