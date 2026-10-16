@@ -11,6 +11,7 @@
 // ============================================================================
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_vitals_metrics.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/ui/k2_drink_preview.dart';
 
 /// 組一份 toStrapiJson() 形狀的欄位。沒給的就是 null（真實情況常常有 null）。
@@ -261,6 +262,57 @@ void main() {
         K2VoteSide.unused,
       );
       expect(hiAns.symVotes, 0);
+    });
+
+    test('⑬ PNS 門檻由 RMSSD 換算、Stress 照 Garmin 分段', () {
+      // PNS 是 RMSSD 換算來的,門檻必須對齊 —— 同一個量測不可以兩邊投不同票
+      expect(
+        K2DrinkThresholds.lowPns,
+        closeTo(
+          Max30102VitalsMetrics.pnsScore(K2DrinkThresholds.lowRmssd)!,
+          1e-9,
+        ),
+      );
+      expect(
+        K2DrinkThresholds.highPns,
+        closeTo(
+          Max30102VitalsMetrics.pnsScore(K2DrinkThresholds.highRmssd)!,
+          1e-9,
+        ),
+      );
+      for (final rm in [12.0, 20.5, 35.0, 49.0, 50.5, 97.0]) {
+        final p = K2DrinkPreview.from(
+          vitals(rmssd: rm, pns: Max30102VitalsMetrics.pnsScore(rm)),
+        );
+        K2VoteSide side(String f) =>
+            p.votes.firstWhere((e) => e.field == f).side;
+        expect(
+          side('PNS'),
+          side('RMSSD'),
+          reason: 'RMSSD $rm:PNS 與 RMSSD 必須投同一邊',
+        );
+      }
+      // 舊門檻 40/60 下 RMSSD 35 會讓 PNS 投副交感、RMSSD 不投 —— 現在兩者都不投
+      final avg = K2DrinkPreview.from(
+        vitals(rmssd: 35, pns: Max30102VitalsMetrics.pnsScore(35)),
+      );
+      expect(avg.paraVotes, 0);
+
+      K2VoteSide stressSide(double s) => K2DrinkPreview.from(
+        vitals(stress: s),
+      ).votes.firstWhere((e) => e.field == 'Stress').side;
+      expect(
+        stressSide(50),
+        K2VoteSide.parasympathetic,
+        reason: 'Garmin 26~50 = 低',
+      );
+      expect(stressSide(60), K2VoteSide.none, reason: '51~75 中間帶,原本 60 會投票');
+      expect(stressSide(75), K2VoteSide.none);
+      expect(
+        stressSide(76),
+        K2VoteSide.sympathetic,
+        reason: 'Garmin 76~100 = 高',
+      );
     });
 
     test('⑪ 規則必須從投票算出來（顯示與判定同源）', () {

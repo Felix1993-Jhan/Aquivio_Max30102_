@@ -37,6 +37,7 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/services/localization_service.dart';
 import '../../../shared/ui/glass.dart';
+import '../k2_vitals_metrics.dart';
 
 /// 本地推演用的門檻。**這些數字是我們訂的，不是對方的。**
 ///
@@ -48,9 +49,14 @@ class K2DrinkThresholds {
   static const double sympatheticLfHf = 1.5;
 
   /// 以下皆為**我們自訂**的近似門檻。
-  static const double highStress = 60;
-  static const double lowPns = 40;
-  static const double highPns = 60;
+  ///
+  /// Stress 參考 Garmin 公開的 0~100 壓力分段（0~25 休息、26~50 低、
+  /// 51~75 中、76~100 高）：≤ 50 投副交感、> 75 投交感、中間不投。
+  /// 對方的 stress 是自創量表沒有文獻,選消費級裝置的通行分段,
+  /// 是因為 LLM 讀到 `high stress` 時最可能套用的就是這類印象。
+  static const double lowStress = 50;
+  static const double highStress = 75;
+
   // HRV 兩個欄位的門檻都參考 Nunan 2010 的短時（5 分鐘）常模：
   // RMSSD 正常範圍約 19~75ms、SDNN 約 32~93ms（平均約 50）。
   // 對方規則寫的是 `high HRV — SDNN/RMSSD` 與 `low HRV`，沒有數字。
@@ -58,6 +64,15 @@ class K2DrinkThresholds {
   static const double highRmssd = 50;
   static const double lowSdnn = 30;
   static const double highSdnn = 50;
+
+  /// PNS 是 RMSSD 換算來的（對數縮放），所以門檻**直接由 RMSSD 門檻換算**
+  /// （= 33.3 / 77.4），不另外手訂。
+  ///
+  /// ⚠️ 原本手訂 40 / 60 時，換算回去是 RMSSD 23 / 35ms，與 RMSSD 自己的
+  ///    20 / 50 對不上 —— RMSSD 35~50 的人會「PNS 投副交感、RMSSD 不投」，
+  ///    同一個量測自相矛盾。改 RMSSD 門檻時 PNS 會跟著動。
+  static final double lowPns = Max30102VitalsMetrics.pnsScore(lowRmssd)!;
+  static final double highPns = Max30102VitalsMetrics.pnsScore(highRmssd)!;
   static const double elevatedHr = 100; // 成人休息上緣
 
   /// 灌流指數下限：低於這個值就不像是手指。
@@ -419,18 +434,19 @@ class K2DrinkPreview {
       ),
     );
 
-    // Stress:沒有中間帶 —— 不是高就投副交感(剛好等於門檻才不投)
+    // Stress:照 Garmin 分段 —— ≤ 50 投副交感、> 75 投交感、50 ~ 75 不投
     K2VoteSide stressSide = K2VoteSide.none;
     String stressCrit = '—';
     if (stress != null) {
       if (stress > K2DrinkThresholds.highStress) {
         stressSide = K2VoteSide.sympathetic;
         stressCrit = '> ${n(K2DrinkThresholds.highStress)}';
-      } else if (stress < K2DrinkThresholds.highStress) {
+      } else if (stress <= K2DrinkThresholds.lowStress) {
         stressSide = K2VoteSide.parasympathetic;
-        stressCrit = '< ${n(K2DrinkThresholds.highStress)}';
+        stressCrit = '≤ ${n(K2DrinkThresholds.lowStress)}';
       } else {
-        stressCrit = '= ${n(K2DrinkThresholds.highStress)}';
+        stressCrit =
+            '${n(K2DrinkThresholds.lowStress)} ~ ${n(K2DrinkThresholds.highStress)}';
       }
     }
     votes.add(
@@ -443,7 +459,7 @@ class K2DrinkPreview {
       ),
     );
 
-    // PNS:40 ~ 60 是中間帶
+    // PNS:門檻由 RMSSD 20 / 50ms 換算(33.3 ~ 77.4 是中間帶)
     K2VoteSide pnsSide = K2VoteSide.none;
     String pnsCrit = '—';
     if (pns != null) {

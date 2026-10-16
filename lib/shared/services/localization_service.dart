@@ -740,8 +740,8 @@ class LocalizationService {
       'k2_drink_tally_override': '心率偏高 → 否決權生效，其餘訊號一律不計',
       'k2_drink_eff_hr': '偏高是否決權：只給補水、非氣泡、非刺激（electrolytes），蓋掉其他所有訊號；也是 caffeine / cascara 的迴避條件',
       'k2_drink_eff_lfhf': '唯一的硬數字。> 1.5 投交感票，也是 caffeine 的迴避條件；≤ 1.5 只是不投交感，不會投副交感',
-      'k2_drink_eff_stress': '高 → 交感票，排除 caffeine / cascara / bcaa / whey / lCarnitine，偏向 lutein；低 → 副交感票（沒有中間帶）',
-      'k2_drink_eff_pns': '低 → 交感票，是 caffeine / cascara 的迴避條件；高 → 副交感票，解鎖能量與表現類',
+      'k2_drink_eff_stress': '高 → 交感票，排除 caffeine / cascara / bcaa / whey / lCarnitine，偏向 lutein；低 → 副交感票。門檻參考 Garmin 壓力分段（> 75 高、≤ 50 低）',
+      'k2_drink_eff_pns': '由 RMSSD 換算，門檻也由 RMSSD 20 / 50 ms 換算而來。低 → 交感票，是 caffeine / cascara 的迴避條件；高 → 副交感票，解鎖能量與表現類',
       'k2_drink_eff_rmssd': 'HRV 之一（規則寫 high HRV — SDNN/RMSSD）。高 → 副交感票；低 → 交感票。雜訊會把它推高',
       'k2_drink_eff_sdnn': 'HRV 之一（規則寫 high HRV — SDNN/RMSSD）。高 → 副交感票；低 → 交感票。雜訊同樣會把它推高',
       'k2_drink_eff_ans': '由 LF/HF 換算（> 64.6 ⇔ LF/HF > 1.5），規則只用 LF/HF 的寫法，再投一次就是同一票算兩次。低 = 偏副交感，但模型可能誤讀成「分數不足」',
@@ -1508,9 +1508,9 @@ class LocalizationService {
       'k2_drink_eff_lfhf':
           'The only hard number. > 1.5 votes sympathetic and is a caffeine avoid condition; ≤ 1.5 just withholds that vote — it never votes parasympathetic',
       'k2_drink_eff_stress':
-          'High → sympathetic vote, excludes caffeine / cascara / bcaa / whey / lCarnitine, favours lutein; low → parasympathetic vote (no middle band)',
+          'High → sympathetic vote, excludes caffeine / cascara / bcaa / whey / lCarnitine, favours lutein; low → parasympathetic vote. Bands follow Garmin\'s stress scale (> 75 high, ≤ 50 low)',
       'k2_drink_eff_pns':
-          'Low → sympathetic vote, an avoid condition for caffeine / cascara; high → parasympathetic vote, unlocks energy & performance',
+          'Derived from RMSSD, so its bands are converted from RMSSD 20 / 50 ms. Low → sympathetic vote, an avoid condition for caffeine / cascara; high → parasympathetic vote, unlocks energy & performance',
       'k2_drink_eff_rmssd':
           'One of the HRV pair (rule: high HRV — SDNN/RMSSD). High → parasympathetic vote; low → sympathetic vote. Noise pushes it up',
       'k2_drink_eff_sdnn':
