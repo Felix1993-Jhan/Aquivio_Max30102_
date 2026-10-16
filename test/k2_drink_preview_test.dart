@@ -213,7 +213,8 @@ void main() {
         expect(v('Stress').side, K2VoteSide.parasympathetic);
         expect(v('PNS').side, K2VoteSide.parasympathetic);
         expect(v('RMSSD').side, K2VoteSide.parasympathetic);
-        for (final f in ['SDNN', 'ANS score', 'Reading confidence']) {
+        expect(v('SDNN').side, K2VoteSide.none, reason: '47.8 落在 30 ~ 50 中間帶');
+        for (final f in ['ANS score', 'Reading confidence']) {
           expect(v(f).side, K2VoteSide.unused, reason: '$f 在 ① 裡但規則沒引用');
         }
         expect(p.symVotes, 0);
@@ -223,6 +224,44 @@ void main() {
         expect(p.votes.first.field, 'Heart rate');
       },
     );
+
+    test('⑫ SDNN 也投票（規則寫 high HRV — SDNN/RMSSD 與 low HRV）', () {
+      // 第二張截圖那組:HR 64.8 / LF/HF 1.3 / Stress 23.6 / PNS 100 / RMSSD 149.5 / SDNN 99.9
+      final p = K2DrinkPreview.from(
+        vitals(
+          meanHr: 64.8,
+          sdnn: 99.9,
+          rmssd: 149.5,
+          lfHf: 1.3,
+          ans: 59,
+          pns: 100,
+          stress: 23.6,
+          confidence: 'good',
+        ),
+        perfusionPct: 3.0,
+      );
+      K2DrinkVote v(String f) => p.votes.firstWhere((e) => e.field == f);
+
+      expect(v('SDNN').side, K2VoteSide.parasympathetic);
+      expect(p.paraVotes, 4, reason: 'Stress + PNS + RMSSD + SDNN');
+      expect(p.symVotes, 0);
+
+      // 低 HRV 那一端:SDNN < 30 投交感
+      final low = K2DrinkPreview.from(vitals(sdnn: 18));
+      expect(
+        low.votes.firstWhere((e) => e.field == 'SDNN').side,
+        K2VoteSide.sympathetic,
+      );
+      expect(low.rule, K2DrinkRule.sympathetic);
+
+      // ANS score 不投票:它是 LF/HF 換算來的,投了就是同一票算兩次
+      final hiAns = K2DrinkPreview.from(vitals(ans: 90));
+      expect(
+        hiAns.votes.firstWhere((e) => e.field == 'ANS score').side,
+        K2VoteSide.unused,
+      );
+      expect(hiAns.symVotes, 0);
+    });
 
     test('⑪ 規則必須從投票算出來（顯示與判定同源）', () {
       final cases = [

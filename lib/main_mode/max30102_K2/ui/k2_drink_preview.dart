@@ -51,8 +51,13 @@ class K2DrinkThresholds {
   static const double highStress = 60;
   static const double lowPns = 40;
   static const double highPns = 60;
+  // HRV 兩個欄位的門檻都參考 Nunan 2010 的短時（5 分鐘）常模：
+  // RMSSD 正常範圍約 19~75ms、SDNN 約 32~93ms（平均約 50）。
+  // 對方規則寫的是 `high HRV — SDNN/RMSSD` 與 `low HRV`，沒有數字。
   static const double lowRmssd = 20; // 成人休息典型 20~50ms
   static const double highRmssd = 50;
+  static const double lowSdnn = 30;
+  static const double highSdnn = 50;
   static const double elevatedHr = 100; // 成人休息上緣
 
   /// 灌流指數下限：低於這個值就不像是手指。
@@ -251,7 +256,7 @@ enum K2VoteSide {
   /// 落在中間帶（或缺值），兩邊都不投。
   none,
 
-  /// 這個欄位在 ① 裡，但四條規則**沒有引用**它。
+  /// 這個欄位在 ① 裡，但四條規則**沒有引用**它（ANS score、confidence）。
   unused,
 }
 
@@ -300,8 +305,8 @@ class K2DrinkPreview {
     required this.paraVotes,
   });
 
-  /// 每個欄位的投票，照判定順序排（心率 → LF/HF → Stress → PNS → RMSSD），
-  /// 後面接三個規則沒引用的（SDNN / ANS score / confidence）。
+  /// 每個欄位的投票，照判定順序排（心率 → LF/HF → Stress → PNS → RMSSD → SDNN），
+  /// 後面接兩個規則沒引用的（ANS score / confidence）。
   final List<K2DrinkVote> votes;
 
   /// 交感票數與副交感票數。心率偏高時兩者仍照實計算，但不參與判定。
@@ -463,41 +468,60 @@ class K2DrinkPreview {
       ),
     );
 
-    // RMSSD:20 ~ 50 ms 是中間帶
-    K2VoteSide rmSide = K2VoteSide.none;
-    String rmCrit = '—';
-    if (rmssd != null) {
-      if (rmssd < K2DrinkThresholds.lowRmssd) {
-        rmSide = K2VoteSide.sympathetic;
-        rmCrit = '< ${n(K2DrinkThresholds.lowRmssd)} ms';
-      } else if (rmssd > K2DrinkThresholds.highRmssd) {
-        rmSide = K2VoteSide.parasympathetic;
-        rmCrit = '> ${n(K2DrinkThresholds.highRmssd)} ms';
-      } else {
-        rmCrit =
-            '${n(K2DrinkThresholds.lowRmssd)} ~ ${n(K2DrinkThresholds.highRmssd)} ms';
+    // HRV:對方兩條規則都有寫(交感 low HRV、副交感 high HRV — SDNN/RMSSD),
+    // 所以 RMSSD 與 SDNN 各投一票。低於下限投交感、高於上限投副交感,中間不投。
+    K2DrinkVote hrvVote(
+      String field,
+      double? v,
+      double lo,
+      double hi,
+      String effectKey,
+    ) {
+      var side = K2VoteSide.none;
+      var crit = '—';
+      if (v != null) {
+        if (v < lo) {
+          side = K2VoteSide.sympathetic;
+          crit = '< ${n(lo)} ms';
+        } else if (v > hi) {
+          side = K2VoteSide.parasympathetic;
+          crit = '> ${n(hi)} ms';
+        } else {
+          crit = '${n(lo)} ~ ${n(hi)} ms';
+        }
       }
+      return K2DrinkVote(
+        field: field,
+        value: f(v, ' ms'),
+        criterion: crit,
+        side: side,
+        effectKey: effectKey,
+      );
     }
+
     votes.add(
-      K2DrinkVote(
-        field: 'RMSSD',
-        value: f(rmssd, ' ms'),
-        criterion: rmCrit,
-        side: rmSide,
-        effectKey: 'k2_drink_eff_rmssd',
+      hrvVote(
+        'RMSSD',
+        rmssd,
+        K2DrinkThresholds.lowRmssd,
+        K2DrinkThresholds.highRmssd,
+        'k2_drink_eff_rmssd',
+      ),
+    );
+    votes.add(
+      hrvVote(
+        'SDNN',
+        sdnn,
+        K2DrinkThresholds.lowSdnn,
+        K2DrinkThresholds.highSdnn,
+        'k2_drink_eff_sdnn',
       ),
     );
 
-    // 在 ① 裡、但規則沒引用的三個
-    votes.add(
-      K2DrinkVote(
-        field: 'SDNN',
-        value: f(sdnn, ' ms'),
-        criterion: '—',
-        side: K2VoteSide.unused,
-        effectKey: 'k2_drink_eff_sdnn',
-      ),
-    );
+    // 在 ① 裡、但規則沒引用的兩個:
+    //   · ANS score —— 規則只用 `LF/HF > 1.5` 的寫法。它是 LF/HF 換算來的
+    //     (ANS > 64.6 ⇔ LF/HF > 1.5),投票就等於同一票算兩次。
+    //   · Reading confidence —— 提示詞與程式都沒有任何一條用到它。
     votes.add(
       K2DrinkVote(
         field: 'ANS score',
