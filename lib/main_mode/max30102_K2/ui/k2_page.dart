@@ -83,8 +83,9 @@ class _K2PageState extends State<K2Page> {
 
   /// 視窗長度輸入框。用 controller 而不是 `initialValue` + `key` ——
   /// 整頁每秒 rebuild 一次,那種寫法會在打字打到一半時掉焦點。
-  late final TextEditingController _secCtl =
-      TextEditingController(text: '$_shortSec');
+  late final TextEditingController _secCtl = TextEditingController(
+    text: '$_shortSec',
+  );
   bool _secInvalid = false;
 
   /// 視窗長度上限 = 核心保留多久(dataHistoryMs,畫面上可改)。**不寫死 30** ——
@@ -142,7 +143,8 @@ class _K2PageState extends State<K2Page> {
     setState(() {
       _ports = list;
       // 已連線就跟著顯示目前那個埠
-      _selected = _manager.currentPortName ??
+      _selected =
+          _manager.currentPortName ??
           (_selected != null && list.contains(_selected)
               ? _selected
               : (list.isEmpty ? null : list.first));
@@ -164,12 +166,14 @@ class _K2PageState extends State<K2Page> {
     // 明確提示:成功/失敗都要講,不要默默失敗
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(ok
-            ? trParams('k2_snack_connected', {'port': _selected})
-            : trParams('k2_snack_connect_failed', {
-                'port': _selected,
-                'detail': err != null ? '：$err' : tr('k2_port_busy'),
-              })),
+        content: Text(
+          ok
+              ? trParams('k2_snack_connected', {'port': _selected})
+              : trParams('k2_snack_connect_failed', {
+                  'port': _selected,
+                  'detail': err != null ? '：$err' : tr('k2_port_busy'),
+                }),
+        ),
         backgroundColor: ok ? Colors.green.shade700 : Colors.red.shade700,
         duration: const Duration(seconds: 3),
       ),
@@ -192,12 +196,16 @@ class _K2PageState extends State<K2Page> {
     );
     if (!mounted) return;
     final name = path?.split(RegExp(r'[\\/]')).last;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(path != null
-          ? trParams('k2_snap_saved', {'name': name})
-          : tr('k2_snap_save_failed')),
-      duration: const Duration(seconds: 3),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          path != null
+              ? trParams('k2_snap_saved', {'name': name})
+              : tr('k2_snap_save_failed'),
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
     if (path != null) _reloadSnapshots();
   }
 
@@ -223,16 +231,20 @@ class _K2PageState extends State<K2Page> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(children: [
-          Text(tr('k2_snap_hint'),
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-          const Spacer(),
-          TextButton.icon(
-            onPressed: _snapLoading ? null : _reloadSnapshots,
-            icon: const Icon(Icons.refresh, size: 15),
-            label: Text(_snapLoading ? tr('k2_scanning') : tr('k2_refresh')),
-          ),
-        ]),
+        Row(
+          children: [
+            Text(
+              tr('k2_snap_hint'),
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: _snapLoading ? null : _reloadSnapshots,
+              icon: const Icon(Icons.refresh, size: 15),
+              label: Text(_snapLoading ? tr('k2_scanning') : tr('k2_refresh')),
+            ),
+          ],
+        ),
         const SizedBox(height: 6),
         if (_snapshots.isEmpty)
           Container(
@@ -277,7 +289,8 @@ class _K2PageState extends State<K2Page> {
                     final open = _openSnap?.path == s.path;
                     final t = s.time;
                     String two(int v) => v.toString().padLeft(2, '0');
-                    final label = '${two(t.month)}/${two(t.day)} '
+                    final label =
+                        '${two(t.month)}/${two(t.day)} '
                         '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
                     return ChoiceChip(
                       label: Text(label, style: const TextStyle(fontSize: 11)),
@@ -305,21 +318,29 @@ class _K2PageState extends State<K2Page> {
     final shortHv = s.rrPoints.isEmpty
         ? null
         : Max30102HrvCalculator.hrvFrom(s.rrPoints);
-    final marks = [for (final sec in _secOptions) if (sec < s.windowSeconds) sec];
+    final marks = [
+      for (final sec in _secOptions)
+        if (sec < s.windowSeconds) sec,
+    ];
 
     Widget kv(String k, String v) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 1),
-          child: Row(children: [
-            SizedBox(
-                width: 78,
-                child: Text(k,
-                    style:
-                        TextStyle(fontSize: 11, color: Colors.grey.shade600))),
-            Text(v,
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.bold)),
-          ]),
-        );
+      padding: const EdgeInsets.symmetric(vertical: 1),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 78,
+            child: Text(
+              k,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            ),
+          ),
+          Text(
+            v,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
 
     return Container(
       padding: const EdgeInsets.all(10),
@@ -331,28 +352,33 @@ class _K2PageState extends State<K2Page> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // 頂列:摘要 + 刪除
-          Row(children: [
-            Text(trParams('k2_snap_saved_at', {'time': s.time}),
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-            const SizedBox(width: 12),
-            Text(
+          Row(
+            children: [
+              Text(
+                trParams('k2_snap_saved_at', {'time': s.time}),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+              ),
+              const SizedBox(width: 12),
+              Text(
                 trParams('k2_snap_summary', {
                   'wave': s.ir.length,
                   'trough': s.goldTroughs.length,
                   'rr': s.rrPoints.length,
                 }),
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-            const Spacer(),
-            TextButton.icon(
-              onPressed: () async {
-                await K2SnapshotStore.delete(s.path);
-                _reloadSnapshots();
-              },
-              icon: const Icon(Icons.delete_outline, size: 15),
-              label: Text(tr('k2_delete')),
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-            ),
-          ]),
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () async {
+                  await K2SnapshotStore.delete(s.path);
+                  _reloadSnapshots();
+                },
+                icon: const Icon(Icons.delete_outline, size: 15),
+                label: Text(tr('k2_delete')),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
           // ── 30 秒視窗:左數值面板 + 右(上波形 / 下 RR趨勢+Poincaré)──
           SizedBox(
@@ -368,10 +394,12 @@ class _K2PageState extends State<K2Page> {
                       // 原本寫死「30 秒視窗」，改用快照自己的 windowSeconds
                       // （快照可能是 10s / 20s 存的，寫死會標錯）
                       Text(
-                          trParams(
-                              'k2_window_sec', {'sec': s.windowSeconds}),
-                          style: const TextStyle(
-                              fontSize: 12, fontWeight: FontWeight.bold)),
+                        trParams('k2_window_sec', {'sec': s.windowSeconds}),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 4),
                       kv(tr('k2_hr'), s.bpm?.toStringAsFixed(0) ?? '—'),
                       kv(tr('k2_spo2'), s.spo2?.toStringAsFixed(1) ?? '—'),
@@ -379,41 +407,46 @@ class _K2PageState extends State<K2Page> {
                       kv('RMSSD', shortHv?.rmssd.toStringAsFixed(1) ?? '—'),
                       kv('SD1', shortHv?.sd1.toStringAsFixed(1) ?? '—'),
                       kv('SD2', shortHv?.sd2.toStringAsFixed(1) ?? '—'),
-                      kv('pNN50',
-                          shortHv != null ? '${shortHv.pnn50.toStringAsFixed(0)}%' : '—'),
+                      kv(
+                        'pNN50',
+                        shortHv != null
+                            ? '${shortHv.pnn50.toStringAsFixed(0)}%'
+                            : '—',
+                      ),
                     ],
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Column(children: [
-                    Expanded(
-                      flex: 5,
-                      child: K2WaveChart(
-                        ir: s.ir,
-                        red: s.red,
-                        troughs: s.goldTroughs,
-                        version: s.tsMillis, // 靜態:固定值即可
-                        markSeconds: marks,
-                        displaySamples: s.windowSeconds * s.fs,
-                        windowSeconds: s.windowSeconds,
-                        baselineWindow:
-                            (100 / cfg.bandLowHz).round(),
-                        trimWindow: 9,
-                        promRatio: cfg.promRatio,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        flex: 5,
+                        child: K2WaveChart(
+                          ir: s.ir,
+                          red: s.red,
+                          troughs: s.goldTroughs,
+                          version: s.tsMillis, // 靜態:固定值即可
+                          markSeconds: marks,
+                          displaySamples: s.windowSeconds * s.fs,
+                          windowSeconds: s.windowSeconds,
+                          baselineWindow: (100 / cfg.bandLowHz).round(),
+                          trimWindow: 9,
+                          promRatio: cfg.promRatio,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Expanded(
-                      flex: 4,
-                      child: Max30102HrvChartView(
-                        rr: shortRr,
-                        cont: shortCont,
-                        hv: shortHv,
-                        markSeconds: marks,
+                      const SizedBox(height: 6),
+                      Expanded(
+                        flex: 4,
+                        child: Max30102HrvChartView(
+                          rr: shortRr,
+                          cont: shortCont,
+                          hv: shortHv,
+                          markSeconds: marks,
+                        ),
                       ),
-                    ),
-                  ]),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -447,29 +480,36 @@ class _K2PageState extends State<K2Page> {
     );
     final spec = m.spectrum;
 
-    String f(double? v, {int d = 2}) =>
-        v == null ? '—' : v.toStringAsFixed(d);
+    String f(double? v, {int d = 2}) => v == null ? '—' : v.toStringAsFixed(d);
 
     Widget stat(String k, String v, {Color? color, String? api}) => Padding(
-          padding: const EdgeInsets.only(right: 18, bottom: 2),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(k,
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
-            if (api != null)
-              Text(' ($api)',
-                  style: TextStyle(
-                      fontSize: 9,
-                      color: Colors.blueGrey.shade300,
-                      fontFamily: 'monospace')),
-            const SizedBox(width: 4),
-            Text(v,
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'monospace',
-                    color: color)),
-          ]),
-        );
+      padding: const EdgeInsets.only(right: 18, bottom: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(k, style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+          if (api != null)
+            Text(
+              ' ($api)',
+              style: TextStyle(
+                fontSize: 9,
+                color: Colors.blueGrey.shade300,
+                fontFamily: 'monospace',
+              ),
+            ),
+          const SizedBox(width: 4),
+          Text(
+            v,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'monospace',
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
 
     final lfColor = (spec?.lfUsable ?? false) ? null : Colors.grey.shade400;
     return Container(
@@ -483,75 +523,116 @@ class _K2PageState extends State<K2Page> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            const Text('軟體端衍生 (Strapi)',
-                style:
-                    TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-            const SizedBox(width: 8),
-            Text('開檔時從快照的 RR 與波形重算',
-                style: TextStyle(fontSize: 9.5, color: Colors.grey.shade600)),
-          ]),
+          Row(
+            children: [
+              const Text(
+                '軟體端衍生 (Strapi)',
+                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '開檔時從快照的 RR 與波形重算',
+                style: TextStyle(fontSize: 9.5, color: Colors.grey.shade600),
+              ),
+            ],
+          ),
           const SizedBox(height: 6),
           // 送出去的那一套(對齊 aquivio-vitals 的公式與單位)
-          Wrap(children: [
-            stat('ln(RMSSD)', f(m.lnRmssd), api: 'ln_rmssd'),
-            stat('副交感', f(m.pnsScore, d: 1), api: 'pns'),
-            stat('自律平衡', f(m.ansScore, d: 1), api: 'ans'),
-            stat('壓力', f(m.stressScore, d: 1), api: 'stress'),
-            stat('活動量', f(m.activityScore, d: 1), api: 'activity'),
-            stat('可信度', m.confidenceBySnr ?? '—', api: 'confidence'),
-            stat('訊噪比', m.snrDb == null ? '—' : '${f(m.snrDb, d: 1)} dB',
-                api: 'snr_db'),
-            // sqi 的輸入(sqiOk)舊快照沒存 → 算不出來就誠實留白
-            stat('SQI', qualityKnown ? '${m.sqi}' : '—',
-                api: 'sqi', color: qualityKnown ? null : Colors.grey.shade400),
-          ]),
-          Wrap(children: [
-            stat('LF', spec == null ? '—' : spec.lfAquivio.toStringAsFixed(3),
-                api: 'lf', color: lfColor),
-            stat('HF', spec == null ? '—' : spec.hfAquivio.toStringAsFixed(3),
+          Wrap(
+            children: [
+              stat('ln(RMSSD)', f(m.lnRmssd), api: 'ln_rmssd'),
+              stat('副交感', f(m.pnsScore, d: 1), api: 'pns'),
+              stat('自律平衡', f(m.ansScore, d: 1), api: 'ans'),
+              stat('壓力', f(m.stressScore, d: 1), api: 'stress'),
+              stat('活動量', f(m.activityScore, d: 1), api: 'activity'),
+              stat('可信度', m.confidenceBySnr ?? '—', api: 'confidence'),
+              stat(
+                '訊噪比',
+                m.snrDb == null ? '—' : '${f(m.snrDb, d: 1)} dB',
+                api: 'snr_db',
+              ),
+              // sqi 的輸入(sqiOk)舊快照沒存 → 算不出來就誠實留白
+              stat(
+                'SQI',
+                qualityKnown ? '${m.sqi}' : '—',
+                api: 'sqi',
+                color: qualityKnown ? null : Colors.grey.shade400,
+              ),
+            ],
+          ),
+          Wrap(
+            children: [
+              stat(
+                'LF',
+                spec == null ? '—' : spec.lfAquivio.toStringAsFixed(3),
+                api: 'lf',
+                color: lfColor,
+              ),
+              stat(
+                'HF',
+                spec == null ? '—' : spec.hfAquivio.toStringAsFixed(3),
                 api: 'hf',
-                color:
-                    (spec?.hfUsable ?? false) ? null : Colors.grey.shade400),
-            stat(
+                color: (spec?.hfUsable ?? false) ? null : Colors.grey.shade400,
+              ),
+              stat(
                 'LF/HF',
                 spec == null
                     ? '—'
                     : (spec.lfUsable ? f(spec.lfHf) : '${f(spec.lfHf)} ⚠'),
                 api: 'lf_hf',
-                color: lfColor),
-            if (spec != null)
-              stat('LF 圈數',
+                color: lfColor,
+              ),
+              if (spec != null)
+                stat(
+                  'LF 圈數',
                   '${spec.lfCycles.toStringAsFixed(1)} / 需 ≥'
                       '${HrvSpectrum.minBandCycles.toStringAsFixed(0)}',
-                  color: lfColor),
-          ]),
+                  color: lfColor,
+                ),
+            ],
+          ),
           // 我們自己的判讀 —— 同一批 RR,不同尺度,不送出去
           const Divider(height: 12),
-          Row(children: [
-            Text('我們自己的判讀',
+          Row(
+            children: [
+              Text(
+                '我們自己的判讀',
                 style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blueGrey.shade600)),
-            const SizedBox(width: 6),
-            Text('不送出 · Kubios 式 z-score,與上面尺度不同',
-                style: TextStyle(fontSize: 9, color: Colors.grey.shade500)),
-          ]),
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blueGrey.shade600,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '不送出 · Kubios 式 z-score,與上面尺度不同',
+                style: TextStyle(fontSize: 9, color: Colors.grey.shade500),
+              ),
+            ],
+          ),
           const SizedBox(height: 4),
-          Wrap(children: [
-            stat('副交感 z', f(m.pns)),
-            stat('交感 z', f(m.sns)),
-            stat('自律平衡', f(m.ansTimeDomain)),
-            stat('壓力(Baevsky)', f(m.stress, d: 1)),
-            stat('可信度(拍數)',
+          Wrap(
+            children: [
+              stat('副交感 z', f(m.pns)),
+              stat('交感 z', f(m.sns)),
+              stat('自律平衡', f(m.ansTimeDomain)),
+              stat('壓力(Baevsky)', f(m.stress, d: 1)),
+              stat(
+                '可信度(拍數)',
                 qualityKnown ? (m.confidence ?? '—') : '—',
-                color: qualityKnown ? null : Colors.grey.shade400),
-            stat('LF', spec == null ? '—' : '${spec.lf.toStringAsFixed(0)} ms²'),
-            stat('HF', spec == null ? '—' : '${spec.hf.toStringAsFixed(0)} ms²'),
-            // 通道方向 —— 存這個是為了事後還答得出「這筆是哪種板子量的」。
-            // 'swapped' 代表當時那片把兩顆 LED 裝反了(仿製品的指紋)。
-            stat(
+                color: qualityKnown ? null : Colors.grey.shade400,
+              ),
+              stat(
+                'LF',
+                spec == null ? '—' : '${spec.lf.toStringAsFixed(0)} ms²',
+              ),
+              stat(
+                'HF',
+                spec == null ? '—' : '${spec.hf.toStringAsFixed(0)} ms²',
+              ),
+              // 通道方向 —— 存這個是為了事後還答得出「這筆是哪種板子量的」。
+              // 'swapped' 代表當時那片把兩顆 LED 裝反了(仿製品的指紋)。
+              stat(
                 tr('k2_orient'),
                 switch (s.channelOrient) {
                   'normal' => tr('k2_orient_normal'),
@@ -561,8 +642,10 @@ class _K2PageState extends State<K2Page> {
                 },
                 color: s.channelOrient == 'swapped'
                     ? Colors.orange.shade800
-                    : (s.channelOrient == null ? Colors.grey.shade400 : null)),
-          ]),
+                    : (s.channelOrient == null ? Colors.grey.shade400 : null),
+              ),
+            ],
+          ),
           if (!qualityKnown)
             Padding(
               padding: const EdgeInsets.only(top: 2),
@@ -587,9 +670,10 @@ class _K2PageState extends State<K2Page> {
         titleSpacing: 12,
         title: Row(
           children: [
-            Text(tr('k2_title'),
-                style: const TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.bold)),
+            Text(
+              tr('k2_title'),
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(width: 14),
             Expanded(child: _connectionBar(connected)),
           ],
@@ -647,12 +731,14 @@ class _K2PageState extends State<K2Page> {
               color: connected ? Colors.green.shade50 : Colors.grey.shade200,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                  color: connected ? Colors.green : Colors.grey.shade400),
+                color: connected ? Colors.green : Colors.grey.shade400,
+              ),
             ),
             child: Text(
               connected
-                  ? trParams('k2_connected',
-                      {'port': _manager.currentPortName ?? ''})
+                  ? trParams('k2_connected', {
+                      'port': _manager.currentPortName ?? '',
+                    })
                   : tr('k2_not_connected'),
               style: TextStyle(
                 fontSize: 11,
@@ -671,16 +757,21 @@ class _K2PageState extends State<K2Page> {
               decoration: const InputDecoration(
                 isDense: true,
                 border: OutlineInputBorder(),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 6,
+                ),
               ),
               items: [
                 for (final p in _ports)
                   DropdownMenuItem(
-                      value: p,
-                      child: Text(p, style: const TextStyle(fontSize: 12))),
+                    value: p,
+                    child: Text(p, style: const TextStyle(fontSize: 12)),
+                  ),
               ],
-              onChanged: connected ? null : (v) => setState(() => _selected = v),
+              onChanged: connected
+                  ? null
+                  : (v) => setState(() => _selected = v),
             ),
           ),
           IconButton(
@@ -695,8 +786,7 @@ class _K2PageState extends State<K2Page> {
             FilledButton(
               onPressed: _connecting || _selected == null ? null : _connect,
               style: small,
-              child: Text(
-                  _connecting ? tr('k2_connecting') : tr('k2_connect')),
+              child: Text(_connecting ? tr('k2_connecting') : tr('k2_connect')),
             )
           else
             OutlinedButton(
@@ -711,7 +801,8 @@ class _K2PageState extends State<K2Page> {
               // 使用者的結果」這個問題。
               onPressed: connected ? () => _adapter.start() : null,
               style: small.copyWith(
-                  backgroundColor: WidgetStatePropertyAll(Colors.teal)),
+                backgroundColor: WidgetStatePropertyAll(Colors.teal),
+              ),
               child: Text(tr('k2_start_measure')),
             )
           else
@@ -723,7 +814,8 @@ class _K2PageState extends State<K2Page> {
                 _showDrinkPreview();
               },
               style: small.copyWith(
-                  backgroundColor: WidgetStatePropertyAll(Colors.orange)),
+                backgroundColor: WidgetStatePropertyAll(Colors.orange),
+              ),
               child: Text(tr('k2_stop_measure')),
             ),
           OutlinedButton(
@@ -755,8 +847,10 @@ class _K2PageState extends State<K2Page> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        Text(tr('k2_window'),
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+        Text(
+          tr('k2_window'),
+          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+        ),
         const SizedBox(width: 6),
         for (final s in _secOptions)
           Padding(
@@ -785,12 +879,15 @@ class _K2PageState extends State<K2Page> {
             ],
             decoration: InputDecoration(
               isDense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 4,
+                vertical: 6,
+              ),
               border: const OutlineInputBorder(),
               enabledBorder: _secInvalid
                   ? const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.red))
+                      borderSide: BorderSide(color: Colors.red),
+                    )
                   : null,
             ),
             // 落在範圍內就立刻套用(波形即時連動,手感好);超出只畫紅框**不套用**
@@ -813,8 +910,10 @@ class _K2PageState extends State<K2Page> {
           ),
         ),
         const SizedBox(width: 4),
-        Text(trParams('k2_window_range', {'max': _secMax}),
-            style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+        Text(
+          trParams('k2_window_range', {'max': _secMax}),
+          style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+        ),
         const SizedBox(width: 8),
         // 實際涵蓋時間 = 末拍終谷 − 首拍起谷(用絕對索引算,**含洞**)。
         // 它與「RR 加總」的差就是被過濾器剔掉的空窗長度 → 對照著看很有用。
@@ -830,8 +929,10 @@ class _K2PageState extends State<K2Page> {
         Tooltip(
           message: tr('k2_snap_full_tip'),
           child: FilterChip(
-            label: Text(tr('k2_snap_full'),
-                style: const TextStyle(fontSize: 11)),
+            label: Text(
+              tr('k2_snap_full'),
+              style: const TextStyle(fontSize: 11),
+            ),
             selected: _fullSnapshot,
             visualDensity: VisualDensity.compact,
             onSelected: (b) => setState(() => _fullSnapshot = b),
@@ -871,9 +972,10 @@ class _K2PageState extends State<K2Page> {
               overflow: TextOverflow.ellipsis,
               softWrap: false,
               style: TextStyle(
-                  fontSize: 11,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                  color: Colors.blueGrey.shade400),
+                fontSize: 11,
+                fontFeatures: const [FontFeature.tabularFigures()],
+                color: Colors.blueGrey.shade400,
+              ),
             ),
           ),
         ),
@@ -896,6 +998,28 @@ class _K2PageState extends State<K2Page> {
   /// 共用同一個來源才不會兩邊不一致。
   final ValueNotifier<bool> _applyStock = ValueNotifier(false);
 
+  /// 現在這一刻的 metrics —— 推薦飲品視窗與「?」說明視窗共用這一條路,
+  /// 與頁面上的公式帶入面板吃同一批資料(定長 → 凍結窗那份;滾動 → 最近 N 秒)。
+  /// 一拍都沒有就回 null。
+  ({VitalsMetrics metrics, int beats, K2FixedView? fx})? _currentMetrics() {
+    final fx = _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null;
+    final pts = fx?.pts ?? _adapter.pointsRecentSeconds(_shortSec);
+    if (pts.isEmpty) return null;
+    final hv = fx != null ? fx.hv : _adapter.hrvRecentSeconds(_shortSec);
+    final c = _adapter.latest;
+    final metrics =
+        fx?.metrics ??
+        Max30102VitalsMetrics.compute(
+          pts: pts,
+          hv: hv,
+          sqiOk: c?.sqiOk ?? false,
+          settling: c?.settling ?? false,
+          bpm: _adapter.displayCompute?.bpm,
+          ir: _adapter.waveIr,
+        );
+    return (metrics: metrics, beats: pts.length + 1, fx: fx);
+  }
+
   /// 從現在的狀態推演一次。對話框開著時每次 [K2SerialAdapter] 通知就重算。
   ///
   /// **兩種模式共用這一條路，不用判斷模式**：定長下 `fixedWindow.view()` 有
@@ -905,20 +1029,10 @@ class _K2PageState extends State<K2Page> {
   /// 頁面本來就每秒算一份，等於多一倍 —— 這個量級可忽略，所以不另外做快取。
   /// 對話框關著就完全沒有這筆開銷。
   K2DrinkPreview? _computeDrinkPreview() {
-    final fx = _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null;
-    final pts = fx?.pts ?? _adapter.pointsRecentSeconds(_shortSec);
-    if (pts.isEmpty) return null; // 一拍都沒有就沒東西好推演
-    final hv = fx != null ? fx.hv : _adapter.hrvRecentSeconds(_shortSec);
-    final c = _adapter.latest;
-    final metrics = fx?.metrics ??
-        Max30102VitalsMetrics.compute(
-          pts: pts,
-          hv: hv,
-          sqiOk: c?.sqiOk ?? false,
-          settling: c?.settling ?? false,
-          bpm: _adapter.displayCompute?.bpm,
-          ir: _adapter.waveIr,
-        );
+    final cur = _currentMetrics();
+    if (cur == null) return null; // 一拍都沒有就沒東西好推演
+    final fx = cur.fx;
+    final metrics = cur.metrics;
 
     // 灌流指數 PI = AC/DC。核心沒算這個（它不在交接契約裡），所以在這裡
     // 從波形現算 —— 這是「這到底是不是手指」最有鑑別力的一個數字：
@@ -972,8 +1086,10 @@ class _K2PageState extends State<K2Page> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Text(tr('k2_drink_stock_row'),
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+            Text(
+              tr('k2_drink_stock_row'),
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+            ),
             const SizedBox(width: 6),
             Checkbox(
               value: apply,
@@ -981,8 +1097,10 @@ class _K2PageState extends State<K2Page> {
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               onChanged: (b) => _applyStock.value = b ?? false,
             ),
-            Text(tr('k2_drink_apply_stock'),
-                style: const TextStyle(fontSize: 11)),
+            Text(
+              tr('k2_drink_apply_stock'),
+              style: const TextStyle(fontSize: 11),
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Wrap(
@@ -991,8 +1109,10 @@ class _K2PageState extends State<K2Page> {
                 children: [
                   for (final i in kK2Infusions)
                     FilterChip(
-                      label: Text('${i.slug} ${i.zh}',
-                          style: const TextStyle(fontSize: 10.5)),
+                      label: Text(
+                        '${i.slug} ${i.zh}',
+                        style: const TextStyle(fontSize: 10.5),
+                      ),
                       selected: _stocked.contains(i.slug),
                       visualDensity: VisualDensity.compact,
                       // 沒打開「只看機器有的」時，勾選不影響任何結果 ——
@@ -1019,7 +1139,11 @@ class _K2PageState extends State<K2Page> {
   /// [canPreview] 由呼叫端用 build() 已經算好的 `shortPts` 判斷，
   /// 避免為了決定一顆按鈕要不要 enable 而每秒多跑一次完整的 metrics。
   Widget _liveValuesBar(
-      K2Compute? c, K2Compute? v, bool holding, bool canPreview) {
+    K2Compute? c,
+    K2Compute? v,
+    bool holding,
+    bool canPreview,
+  ) {
     final settling = c?.settling ?? false;
     return Container(
       width: double.infinity,
@@ -1031,13 +1155,21 @@ class _K2PageState extends State<K2Page> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _bigValue(tr('k2_hr_new'), v?.bpm?.toStringAsFixed(0), 'bpm',
-              Colors.red,
-              dim: holding),
+          _bigValue(
+            tr('k2_hr_new'),
+            v?.bpm?.toStringAsFixed(0),
+            'bpm',
+            Colors.red,
+            dim: holding,
+          ),
           const SizedBox(width: 28),
-          _bigValue(tr('k2_spo2_new'), v?.spo2?.toStringAsFixed(1), '%',
-              Colors.blue,
-              dim: holding),
+          _bigValue(
+            tr('k2_spo2_new'),
+            v?.spo2?.toStringAsFixed(1),
+            '%',
+            Colors.blue,
+            dim: holding,
+          ),
           const SizedBox(width: 28),
           _flag(tr('k2_finger'), c?.fingerPresent ?? false),
           const SizedBox(width: 14),
@@ -1045,49 +1177,62 @@ class _K2PageState extends State<K2Page> {
           const SizedBox(width: 14),
           _orientFlag(c?.orient ?? K2ChannelOrient.unknown),
           const SizedBox(width: 14),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('spike',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
-            const SizedBox(height: 4),
-            Text(c?.spikeMax.toStringAsFixed(2) ?? '—',
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'spike',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                c?.spikeMax.toStringAsFixed(2) ?? '—',
                 style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.orange.shade800)),
-          ]),
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.orange.shade800,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(width: 16),
           // 手指離開 → 顯示保留的舊值,但一定要標示出來,
           // 不然會被當成這一次量測的即時數字。
           if (holding)
             Expanded(
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.blueGrey.shade50,
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(color: Colors.blueGrey.shade200),
                 ),
-                child: Row(children: [
-                  Icon(Icons.pause_circle_outline,
-                      size: 14, color: Colors.blueGrey.shade600),
-                  const SizedBox(width: 5),
-                  Expanded(
-                    child: Text(
-                      tr('k2_finger_off_hold'),
-                      style: TextStyle(
-                          fontSize: 10.5, color: Colors.blueGrey.shade700),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.pause_circle_outline,
+                      size: 14,
+                      color: Colors.blueGrey.shade600,
                     ),
-                  ),
-                ]),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        tr('k2_finger_off_hold'),
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: Colors.blueGrey.shade700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             )
           // 沉澱期:明確講「在等什麼」,不要放一個 0 或殘留的舊值誤導人
           else if (settling)
             Expanded(
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                 decoration: BoxDecoration(
                   color: Colors.amber.shade50,
                   borderRadius: BorderRadius.circular(4),
@@ -1100,8 +1245,7 @@ class _K2PageState extends State<K2Page> {
                     'settle': (_adapter.core.config.settleSamples / 100)
                         .toStringAsFixed(1),
                   }),
-                  style:
-                      TextStyle(fontSize: 11, color: Colors.amber.shade900),
+                  style: TextStyle(fontSize: 11, color: Colors.amber.shade900),
                 ),
               ),
             )
@@ -1155,15 +1299,20 @@ class _K2PageState extends State<K2Page> {
           ));
         } else {
           lines.add((
-            text: trParams('k2_fixed_collecting', {'got': got, 'sec': _shortSec}),
+            text: trParams('k2_fixed_collecting', {
+              'got': got,
+              'sec': _shortSec,
+            }),
             color: Colors.blue.shade700,
           ));
         }
         // SQI 在定長窗裡是「窗內多數票」,所以把原始比例一起亮出來讓人自己判斷。
         if (fx.rounds > 0) {
           lines.add((
-            text: trParams(
-                'k2_fixed_sqi_rounds', {'ok': fx.sqiOkRounds, 'n': fx.rounds}),
+            text: trParams('k2_fixed_sqi_rounds', {
+              'ok': fx.sqiOkRounds,
+              'n': fx.rounds,
+            }),
             color: Colors.grey.shade600,
           ));
         }
@@ -1196,9 +1345,13 @@ class _K2PageState extends State<K2Page> {
               ),
             ),
             const SizedBox(width: 10),
-            Text(tr('k2_fixed_mode'),
-                style: const TextStyle(
-                    fontSize: 11.5, fontWeight: FontWeight.bold)),
+            Text(
+              tr('k2_fixed_mode'),
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ],
         ),
         // 空轉段的開關:只有定長模式、而且真的還原到開頭時才出現。
@@ -1209,8 +1362,10 @@ class _K2PageState extends State<K2Page> {
             child: Tooltip(
               message: tr('k2_hide_dead_tip'),
               child: FilterChip(
-                label: Text(tr('k2_hide_dead'),
-                    style: const TextStyle(fontSize: 10)),
+                label: Text(
+                  tr('k2_hide_dead'),
+                  style: const TextStyle(fontSize: 10),
+                ),
                 selected: _hideDead,
                 visualDensity: VisualDensity.compact,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -1221,15 +1376,16 @@ class _K2PageState extends State<K2Page> {
         for (final l in lines)
           Padding(
             padding: const EdgeInsets.only(top: 1),
-            child: Text(l.text,
-                style: TextStyle(fontSize: 10, color: l.color)),
+            child: Text(l.text, style: TextStyle(fontSize: 10, color: l.color)),
           ),
         // 關閉時說明零點在哪 —— 沒有這句,第一個看到的人一定會以為漏算了 3.5 秒。
         if (!_fixedMode)
           Padding(
             padding: const EdgeInsets.only(top: 2),
-            child: Text(trParams('k2_fixed_hint', {'sec': _shortSec}),
-                style: TextStyle(fontSize: 9, color: Colors.grey.shade500)),
+            child: Text(
+              trParams('k2_fixed_hint', {'sec': _shortSec}),
+              style: TextStyle(fontSize: 9, color: Colors.grey.shade500),
+            ),
           ),
       ],
     );
@@ -1238,7 +1394,9 @@ class _K2PageState extends State<K2Page> {
   /// 滾動模式的開頭區塊 —— 定長窗沒開時也要看得到空轉 / 沉澱 / 方向判定。
   /// 索引相對「還原段 + waveIr」接起來之後的第 0 筆。
   List<({int from, int to, K2HeadBand kind})> _headBands(
-      K2FixedWindow fw, int total) {
+    K2FixedWindow fw,
+    int total,
+  ) {
     final pre = fw.preIr.length;
     final dead = fw.deadSamples < pre ? fw.deadSamples : pre;
     final orientEnd = (pre + fw.firstBatchLen).clamp(pre, total);
@@ -1255,7 +1413,8 @@ class _K2PageState extends State<K2Page> {
   /// 區塊語意([K2HeadBand])→ 畫面上的顏色與文字。
   /// 定長窗模組刻意不 import material(才能被純 Dart 測試直接用),所以配色在這裡。
   List<({int from, int to, String label, Color color})> _paintBands(
-      List<({int from, int to, K2HeadBand kind})> src) {
+    List<({int from, int to, K2HeadBand kind})> src,
+  ) {
     return [
       for (final b in src)
         (
@@ -1264,14 +1423,14 @@ class _K2PageState extends State<K2Page> {
           // 區塊上直接標它實際多長 —— 判定花了多久(0.5s 還是 3.2s)一眼看得到。
           label: switch (b.kind) {
             K2HeadBand.dead => trParams('k2_band_dead', {
-                'sec': ((b.to - b.from) / 100).toStringAsFixed(1),
-              }),
+              'sec': ((b.to - b.from) / 100).toStringAsFixed(1),
+            }),
             K2HeadBand.settle => trParams('k2_band_settle', {
-                'sec': ((b.to - b.from) / 100).toStringAsFixed(1),
-              }),
+              'sec': ((b.to - b.from) / 100).toStringAsFixed(1),
+            }),
             K2HeadBand.orientWait => trParams('k2_band_orient', {
-                'sec': ((b.to - b.from) / 100).toStringAsFixed(1),
-              }),
+              'sec': ((b.to - b.from) / 100).toStringAsFixed(1),
+            }),
             K2HeadBand.normal => tr('k2_band_normal'),
           },
           color: switch (b.kind) {
@@ -1294,14 +1453,14 @@ class _K2PageState extends State<K2Page> {
     //    刻意保持原樣,它是定長模式的對照組。
     final fx = _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null;
     final shortPts = fx?.pts ?? _adapter.pointsRecentSeconds(_shortSec);
-    final shortHrv =
-        fx != null ? fx.hv : _adapter.hrvRecentSeconds(_shortSec);
+    final shortHrv = fx != null ? fx.hv : _adapter.hrvRecentSeconds(_shortSec);
     final shortRr = [for (final p in shortPts) p.rr];
     // 軟體端(Strapi)要的衍生欄位 —— 用**同一批** shortPts/shortHrv 算,
     // 保證畫面上的 SDNN 跟 pns/stress 那些是同一段資料導出來的。
     // 每秒算一次:Lomb-Scargle 約 250 個頻率 × 35 拍、FFT 4096 點,都可忽略。
     // 定長模式下這一份是凍結窗自己算好的(而且有 memo,不會每秒重算)。
-    final metrics = fx?.metrics ??
+    final metrics =
+        fx?.metrics ??
         Max30102VitalsMetrics.compute(
           pts: shortPts,
           hv: shortHrv,
@@ -1316,7 +1475,8 @@ class _K2PageState extends State<K2Page> {
     // 滾動模式只在「這次量測還沒長到超過視窗長度」時成立,一旦超過,畫面本來
     // 就只剩尾端那 N 秒,開頭沒有東西可畫(下面的條件會自動不成立)。
     final fw = _adapter.fixedWindow;
-    final headInRolling = fx == null &&
+    final headInRolling =
+        fx == null &&
         fw.preIr.isNotEmpty &&
         _adapter.waveBase == fw.base && // 波形沒被裁過 → 頭還在陣列裡
         _adapter.waveIr.length <= _shortSec * 100;
@@ -1355,38 +1515,43 @@ class _K2PageState extends State<K2Page> {
     final chartEvents = !showEvents
         ? const <({int at, String label, Color color})>[]
         : <({int at, String label, Color color})>[
-      if (headLen > 0) ...[
-        (
-          at: headLen,
-          label: trParams('k2_ev_settled', {
-            'sec': (preLen / 100).toStringAsFixed(2),
-          }),
-          color: Colors.lightBlueAccent.withValues(alpha: 0.75),
-        ),
-        if (fw.firstBatchLen > 0)
-          (
-            at: headLen + fw.firstBatchLen,
-            label: trParams('k2_ev_release', {
-              'sec': ((preLen + fw.firstBatchLen) / 100).toStringAsFixed(2),
-            }),
-            color: Colors.greenAccent.withValues(alpha: 0.75),
-          ),
-      ],
-      (
-        at: baselineWin ~/ 2,
-        label: trParams('k2_ev_baseline_ok', {
-          'sec': (baselineWin / 2 / 100).toStringAsFixed(2),
-        }),
-        color: Colors.white.withValues(alpha: 0.45),
-      ),
-    ];
+            if (headLen > 0) ...[
+              (
+                at: headLen,
+                label: trParams('k2_ev_settled', {
+                  'sec': (preLen / 100).toStringAsFixed(2),
+                }),
+                color: Colors.lightBlueAccent.withValues(alpha: 0.75),
+              ),
+              if (fw.firstBatchLen > 0)
+                (
+                  at: headLen + fw.firstBatchLen,
+                  label: trParams('k2_ev_release', {
+                    'sec': ((preLen + fw.firstBatchLen) / 100).toStringAsFixed(
+                      2,
+                    ),
+                  }),
+                  color: Colors.greenAccent.withValues(alpha: 0.75),
+                ),
+            ],
+            (
+              at: baselineWin ~/ 2,
+              label: trParams('k2_ev_baseline_ok', {
+                'sec': (baselineWin / 2 / 100).toStringAsFixed(2),
+              }),
+              color: Colors.white.withValues(alpha: 0.45),
+            ),
+          ];
     // 多了開頭段 → 圖要變寬才放得下(裁掉空轉段之後就再縮回來)
     final waveSamples =
         (fx != null ? preLen + fx.needSamples : preLen + _shortSec * 100) -
-            dropHead;
+        dropHead;
     // 「N 秒前」參考線:比目前視窗小的那幾檔(視窗 30s → 畫 10s/20s 線,
     //  最左緣本身就是 30s,不另外畫)。波形圖與 RR 趨勢圖用同一組 → 兩張圖對得起來。
-    final marks = [for (final s in _secOptions) if (s < _shortSec) s];
+    final marks = [
+      for (final s in _secOptions)
+        if (s < _shortSec) s,
+    ];
     // 佈局(對應示意圖):最上一列切視窗;下方左右分欄 —
     //   左(黃)= 垂直資料面板;右(綠)= 上波形、下 RR趨勢+Poincaré(藍)
     return Column(
@@ -1409,17 +1574,25 @@ class _K2PageState extends State<K2Page> {
                 _fixedSwitch(fx),
                 const Divider(height: 14),
                 Text(
-                    trParams(_fixedMode ? 'k2_hrv_fixed' : 'k2_hrv_short',
-                        {'sec': _shortSec}),
-                    style: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.bold)),
+                  trParams(_fixedMode ? 'k2_hrv_fixed' : 'k2_hrv_short', {
+                    'sec': _shortSec,
+                  }),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const SizedBox(height: 4),
                 // 短期不顯示拍數/對數:拍數上面已有、對數因近似成連續而恆為 N/N
                 _kvList(shortHrv, shortRr.length, showCounts: false),
                 const Divider(height: 18),
-                Text('軟體端衍生 (Strapi)',
-                    style: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.bold)),
+                Text(
+                  '軟體端衍生 (Strapi)',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const SizedBox(height: 4),
                 _strapiPanel(metrics),
               ]),
@@ -1444,55 +1617,61 @@ class _K2PageState extends State<K2Page> {
                           //    不能在外層算好傳進來(外層是 1Hz 的整頁 rebuild)——
                           //    否則波形往前滑、標點卻停在原地,一秒才跳一次。
                           //    定長模式的資料是靜態的,走同一條路不受影響。
-                          final srcIr = fx?.chartIr ??
+                          final srcIr =
+                              fx?.chartIr ??
                               (headInRolling
                                   ? <int>[...fw.preIr, ..._adapter.waveIr]
                                   : _adapter.waveIr);
-                          final srcRed = fx?.chartRed ??
+                          final srcRed =
+                              fx?.chartRed ??
                               (headInRolling
                                   ? <int>[...fw.preRed, ..._adapter.waveRed]
                                   : _adapter.waveRed);
                           // 谷標點是「陣列索引」,前面接了開頭段就要整批往後平移。
-                          final srcTroughs = fx?.chartTroughs ??
+                          final srcTroughs =
+                              fx?.chartTroughs ??
                               [
                                 for (final t in _adapter.displayTroughs())
-                                  t + preLen
+                                  t + preLen,
                               ];
                           final srcBands = fx != null
                               ? fx.bands
                               : (headInRolling
-                                  ? _headBands(fw, srcIr.length)
-                                  : const <({
-                                      int from,
-                                      int to,
-                                      K2HeadBand kind
-                                    })>[]);
+                                    ? _headBands(fw, srcIr.length)
+                                    : const <
+                                        ({int from, int to, K2HeadBand kind})
+                                      >[]);
                           return K2WaveChart(
                             // ⚠ shouldRepaint 不比對 ir:切換開關時 displaySamples
                             //   與 version 可能都沒變 → 不換 key 波形不會更新。
-                            key: ValueKey('$_fixedMode/${preLen > 0}/$dropHead'),
+                            key: ValueKey(
+                              '$_fixedMode/${preLen > 0}/$dropHead',
+                            ),
                             ir: dropHead > 0 ? srcIr.sublist(dropHead) : srcIr,
-                            red:
-                                dropHead > 0 ? srcRed.sublist(dropHead) : srcRed,
+                            red: dropHead > 0
+                                ? srcRed.sublist(dropHead)
+                                : srcRed,
                             troughs: dropHead > 0
                                 ? [
                                     for (final t in srcTroughs)
-                                      if (t >= dropHead) t - dropHead
+                                      if (t >= dropHead) t - dropHead,
                                   ]
                                 : srcTroughs,
-                            bands: _paintBands(dropHead > 0
-                                ? [
-                                    for (final b in srcBands)
-                                      if (b.to > dropHead)
-                                        (
-                                          from: b.from > dropHead
-                                              ? b.from - dropHead
-                                              : 0,
-                                          to: b.to - dropHead,
-                                          kind: b.kind,
-                                        )
-                                  ]
-                                : srcBands),
+                            bands: _paintBands(
+                              dropHead > 0
+                                  ? [
+                                      for (final b in srcBands)
+                                        if (b.to > dropHead)
+                                          (
+                                            from: b.from > dropHead
+                                                ? b.from - dropHead
+                                                : 0,
+                                            to: b.to - dropHead,
+                                            kind: b.kind,
+                                          ),
+                                    ]
+                                  : srcBands,
+                            ),
                             events: chartEvents,
                             version: ver,
                             markSeconds: preLen > 0 ? const [] : marks,
@@ -1533,6 +1712,14 @@ class _K2PageState extends State<K2Page> {
           beats: shortPts.length + 1,
           fixedMode: fx != null,
           seconds: _shortSec,
+          // 「?」視窗開著時跟著更新(同推薦飲品視窗的機制)
+          listenable: _adapter,
+          liveRows: () {
+            final cur = _currentMetrics();
+            return cur == null
+                ? null
+                : k2FormulaRows(cur.metrics, beats: cur.beats);
+          },
         ),
         // ── LF 窗長對照實驗:全寬 ────────────────────────────────────
         // 不放側欄的理由:10 個窗 + 基準 + 統計在 215px 寬裡一定要捲,
@@ -1570,49 +1757,65 @@ class _K2PageState extends State<K2Page> {
         builder: (context, _) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [
-              Text(tr('k2_bh_title'),
+            Row(
+              children: [
+                Text(
+                  tr('k2_bh_title'),
                   style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.bold)),
-              const SizedBox(width: 12),
-              // 未開始 → 只能「開始」;錄製中 → 可標記恢復呼吸、可結束
-              if (!rec.active)
-                FilledButton.tonal(
-                  onPressed: () => rec.start(_adapter.core.totalSamples,
-                      orientLabel: orientLabel),
-                  child: Text(tr('k2_bh_start')),
-                )
-              else ...[
-                FilledButton.tonal(
-                  onPressed: rec.resumeT == null
-                      ? () => rec.markResume(_adapter.core.totalSamples)
-                      : null,
-                  child: Text(tr('k2_bh_resume')),
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
+                const SizedBox(width: 12),
+                // 未開始 → 只能「開始」;錄製中 → 可標記恢復呼吸、可結束
+                if (!rec.active)
+                  FilledButton.tonal(
+                    onPressed: () => rec.start(
+                      _adapter.core.totalSamples,
+                      orientLabel: orientLabel,
+                    ),
+                    child: Text(tr('k2_bh_start')),
+                  )
+                else ...[
+                  FilledButton.tonal(
+                    onPressed: rec.resumeT == null
+                        ? () => rec.markResume(_adapter.core.totalSamples)
+                        : null,
+                    child: Text(tr('k2_bh_resume')),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    onPressed: rec.stop,
+                    child: Text(tr('k2_bh_stop')),
+                  ),
+                ],
                 const SizedBox(width: 8),
-                OutlinedButton(
-                  onPressed: rec.stop,
-                  child: Text(tr('k2_bh_stop')),
+                TextButton(
+                  onPressed: rec.clear,
+                  child: Text(tr('k2_bh_clear')),
+                ),
+                const Spacer(),
+                Text(
+                  tr('k2_bh_hint'),
+                  style: TextStyle(fontSize: 9, color: Colors.grey.shade600),
                 ),
               ],
-              const SizedBox(width: 8),
-              TextButton(onPressed: rec.clear, child: Text(tr('k2_bh_clear'))),
-              const Spacer(),
-              Text(tr('k2_bh_hint'),
-                  style: TextStyle(fontSize: 9, color: Colors.grey.shade600)),
-            ]),
+            ),
             if (rec.abortReason != null)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
-                child: Text(tr('k2_bh_abort'),
-                    style:
-                        TextStyle(fontSize: 10, color: Colors.orange.shade800)),
+                child: Text(
+                  tr('k2_bh_abort'),
+                  style: TextStyle(fontSize: 10, color: Colors.orange.shade800),
+                ),
               ),
             const SizedBox(height: 6),
             SizedBox(
               height: 180,
               child: K2BreathHoldChart(
-                  rec: rec, lang: LocalizationService().currentLanguage),
+                rec: rec,
+                lang: LocalizationService().currentLanguage,
+              ),
             ),
           ],
         ),
@@ -1622,21 +1825,21 @@ class _K2PageState extends State<K2Page> {
 
   /// 黃框:左側垂直資料面板(比照原本 `_buildChart2Panel` 的定寬側欄)。
   Widget _sidePanel(List<Widget> children) => SizedBox(
-        width: 215,
-        child: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey.shade300),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: children,
-            ),
-          ),
+    width: 215,
+    child: Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: children,
         ),
-      );
+      ),
+    ),
+  );
 
   /// 側欄的一列:左標籤、右數值。
   ///
@@ -1644,41 +1847,43 @@ class _K2PageState extends State<K2Page> {
   /// 用小灰字標在標籤後面。給的話畫面上會長成 `SDNN (sdnn)` —— 對接時
   /// 不用再回頭查對照表。沒有對應欄位就不要給。
   Widget _kv(String k, String v, {Color? color, String? api}) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Flexible(
-              child: RichText(
-                overflow: TextOverflow.ellipsis,
-                text: TextSpan(
-                  style:
-                      TextStyle(fontSize: 11, color: Colors.grey.shade700),
-                  children: [
-                    TextSpan(text: k),
-                    if (api != null)
-                      TextSpan(
-                        text: '  ($api)',
-                        style: TextStyle(
-                            fontSize: 9.5,
-                            color: Colors.blueGrey.shade300,
-                            fontFamily: 'monospace'),
-                      ),
-                  ],
-                ),
-              ),
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Flexible(
+          child: RichText(
+            overflow: TextOverflow.ellipsis,
+            text: TextSpan(
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+              children: [
+                TextSpan(text: k),
+                if (api != null)
+                  TextSpan(
+                    text: '  ($api)',
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      color: Colors.blueGrey.shade300,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+              ],
             ),
-            const SizedBox(width: 4),
-            Text(v,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.bold,
-                  fontFamily: 'monospace',
-                  color: color,
-                )),
-          ],
+          ),
         ),
-      );
+        const SizedBox(width: 4),
+        Text(
+          v,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.bold,
+            fontFamily: 'monospace',
+            color: color,
+          ),
+        ),
+      ],
+    ),
+  );
 
   /// 0~100 分的分數**撞到量表的邊**時回傳標記(`⤓` 底 / `⤒` 頂),否則空字串。
   ///
@@ -1701,14 +1906,19 @@ class _K2PageState extends State<K2Page> {
   /// [showCounts]:短期(UI 切窗)→ false;長期(核心算)→ true。
   Widget _kvList(HrvStats? hv, int beats, {bool showCounts = true}) {
     if (hv == null) {
-      return Text(trParams('k2_hrv_insufficient', {'beats': beats}),
-          style: TextStyle(fontSize: 11, color: Colors.grey.shade500));
+      return Text(
+        trParams('k2_hrv_insufficient', {'beats': beats}),
+        style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+      );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _kv(tr('k2_hrv_score'), hv.hrvScore.toStringAsFixed(0),
-            color: Colors.purple),
+        _kv(
+          tr('k2_hrv_score'),
+          hv.hrvScore.toStringAsFixed(0),
+          color: Colors.purple,
+        ),
         // api: 整合方(aquivio-strapi / aquivio-station)介面裡的欄位名。
         // 標在這裡是為了讓「我們的名字」與「他們的名字」一眼對得起來 ——
         // 沒標 api 的欄位代表對方介面沒有要,不是我們漏給。
@@ -1718,16 +1928,17 @@ class _K2PageState extends State<K2Page> {
         _kv('SD1', hv.sd1.toStringAsFixed(1)),
         _kv('SD2', hv.sd2.toStringAsFixed(1)),
         _kv(tr('k2_mean_rr'), '${hv.meanRr.toStringAsFixed(0)} ms'),
-        _kv(tr('k2_mean_hr'), '${hv.meanHr.toStringAsFixed(0)} bpm',
-            api: 'mean_hr'),
+        _kv(
+          tr('k2_mean_hr'),
+          '${hv.meanHr.toStringAsFixed(0)} bpm',
+          api: 'mean_hr',
+        ),
         if (showCounts) ...[
           _kv(tr('k2_beats_total'), '${hv.beats} / 300'),
           _kv(
             tr('k2_valid_pairs'),
             '${hv.pairs}/${hv.totalPairs}'
-                '${hv.totalPairs > hv.pairs ? trParams('k2_skipped', {
-                    'n': hv.totalPairs - hv.pairs
-                  }) : ""}',
+            '${hv.totalPairs > hv.pairs ? trParams('k2_skipped', {'n': hv.totalPairs - hv.pairs}) : ""}',
             color: hv.totalPairs > hv.pairs ? Colors.orange.shade800 : null,
           ),
         ],
@@ -1775,16 +1986,25 @@ class _K2PageState extends State<K2Page> {
         // ── 以下四個是 aquivio-vitals 的公式,0~100 分 ──────────────
         //    pns 就是 RMSSD、ans 就是 LF/HF、stress 是前兩者的組合、
         //    activity 就是心率。它們沒有引入新資訊,只是換尺度。
-        _kv('副交感', '${f(m.pnsScore, digits: 1)}$pnsRail',
-            api: 'pns',
-            color: pnsRail.isEmpty ? null : Colors.grey.shade400),
-        _kv('自律平衡', '${f(m.ansScore, digits: 1)}$ansRail',
-            api: 'ans',
-            color: ansRail.isEmpty ? null : Colors.grey.shade400),
+        _kv(
+          '副交感',
+          '${f(m.pnsScore, digits: 1)}$pnsRail',
+          api: 'pns',
+          color: pnsRail.isEmpty ? null : Colors.grey.shade400,
+        ),
+        _kv(
+          '自律平衡',
+          '${f(m.ansScore, digits: 1)}$ansRail',
+          api: 'ans',
+          color: ansRail.isEmpty ? null : Colors.grey.shade400,
+        ),
         _kv('壓力', f(m.stressScore, digits: 1), api: 'stress'),
-        _kv('活動量', '${f(m.activityScore, digits: 1)}$actRail',
-            api: 'activity',
-            color: actRail.isEmpty ? null : Colors.grey.shade400),
+        _kv(
+          '活動量',
+          '${f(m.activityScore, digits: 1)}$actRail',
+          api: 'activity',
+          color: actRail.isEmpty ? null : Colors.grey.shade400,
+        ),
         if (pnsRail.isNotEmpty || ansRail.isNotEmpty || actRail.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 2, bottom: 2),
@@ -1808,8 +2028,11 @@ class _K2PageState extends State<K2Page> {
           ),
         _kv('可信度', m.confidenceBySnr ?? '—', api: 'confidence'),
         _kv('SQI', '${m.sqi}', api: 'sqi'),
-        _kv('訊噪比', m.snrDb == null ? '—' : '${f(m.snrDb, digits: 1)} dB',
-            api: 'snr_db'),
+        _kv(
+          '訊噪比',
+          m.snrDb == null ? '—' : '${f(m.snrDb, digits: 1)} dB',
+          api: 'snr_db',
+        ),
         // ── 頻域:LF / HF 分開顯示,比值另外一列 ──────────────────────
         //
         // 為什麼要分開列:比值會把資訊丟掉。LF/HF 從 0.91 變成 2.42 可能是
@@ -1840,9 +2063,7 @@ class _K2PageState extends State<K2Page> {
           'LF/HF',
           spec == null
               ? '—'
-              : (spec.lfUsable
-                  ? f(spec.lfHf)
-                  : '${f(spec.lfHf)} ⚠'),
+              : (spec.lfUsable ? f(spec.lfHf) : '${f(spec.lfHf)} ⚠'),
           api: 'lf_hf',
           color: (spec?.lfUsable ?? false) ? null : Colors.grey.shade400,
         ),
@@ -1867,16 +2088,23 @@ class _K2PageState extends State<K2Page> {
         // ans 就是 LF/HF),這一套有常模依據,適合我們自己判斷。
         // 兩套並排,才看得出「送出去的」與「我們認為的」差在哪。
         const Divider(height: 14),
-        Row(children: [
-          Text('我們自己的判讀',
+        Row(
+          children: [
+            Text(
+              '我們自己的判讀',
               style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blueGrey.shade600)),
-          const SizedBox(width: 6),
-          Text('不送出',
-              style: TextStyle(fontSize: 9, color: Colors.grey.shade500)),
-        ]),
+                fontSize: 10.5,
+                fontWeight: FontWeight.bold,
+                color: Colors.blueGrey.shade600,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '不送出',
+              style: TextStyle(fontSize: 9, color: Colors.grey.shade500),
+            ),
+          ],
+        ),
         const SizedBox(height: 2),
         _kv('副交感 z', f(m.pns)),
         _kv('交感 z', f(m.sns)),
@@ -1894,8 +2122,7 @@ class _K2PageState extends State<K2Page> {
           '活動量(50起算)',
           meanHr == null
               ? '—'
-              : (((meanHr - 50) / 80).clamp(0.0, 1.0) * 100)
-                  .toStringAsFixed(1),
+              : (((meanHr - 50) / 80).clamp(0.0, 1.0) * 100).toStringAsFixed(1),
         ),
         _kv('可信度(拍數)', m.confidence ?? '—'),
         _kv('LF', spec == null ? '—' : '${spec.lf.toStringAsFixed(0)} ms²'),
@@ -1937,25 +2164,31 @@ class _K2PageState extends State<K2Page> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                const Text('LF 窗長對照實驗',
-                    style: TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.bold)),
+                const Text(
+                  'LF 窗長對照實驗',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                      exp.targetSeconds >= 300
-                          ? '同一段錄 5 分鐘(國際標準長度),切成 30 秒窗與 2 分鐘窗跟全長比'
-                          : '同一段錄 2 分鐘,切成 30 秒窗跟全長比',
-                      style: TextStyle(
-                          fontSize: 10.5, color: Colors.grey.shade600)),
+                    exp.targetSeconds >= 300
+                        ? '同一段錄 5 分鐘(國際標準長度),切成 30 秒窗與 2 分鐘窗跟全長比'
+                        : '同一段錄 2 分鐘,切成 30 秒窗跟全長比',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
                 ),
                 // 錄製長度:錄製中不給改(改了進度條的分母會跳)。
                 for (final s in K2LfExperiment.durationOptions)
                   Padding(
                     padding: const EdgeInsets.only(right: 4),
                     child: ChoiceChip(
-                      label: Text('${s ~/ 60} 分鐘',
-                          style: const TextStyle(fontSize: 11)),
+                      label: Text(
+                        '${s ~/ 60} 分鐘',
+                        style: const TextStyle(fontSize: 11),
+                      ),
                       selected: exp.targetSeconds == s,
                       visualDensity: VisualDensity.compact,
                       onSelected: exp.running
@@ -1987,14 +2220,14 @@ class _K2PageState extends State<K2Page> {
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   switch (exp.abortReason!) {
-                    'reset' => '⚠ 手指離開,核心已歸零 → 實驗中止'
-                        '(兩段時間軸不能接起來,硬接會算出無意義的數字)',
+                    'reset' =>
+                      '⚠ 手指離開,核心已歸零 → 實驗中止'
+                          '(兩段時間軸不能接起來,硬接會算出無意義的數字)',
                     'cancelled' => '已取消',
                     'insufficient' => '⚠ 拍數不足,算不出頻譜',
                     _ => '已停止',
                   },
-                  style:
-                      TextStyle(fontSize: 11, color: Colors.orange.shade800),
+                  style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
                 ),
               ),
             if (exp.result != null) _lfResultBody(exp.result!),
@@ -2016,78 +2249,100 @@ class _K2PageState extends State<K2Page> {
     final bRange = exp.baselineRange;
     final mRange = exp.medianDevRange;
 
-    Widget cell(String s, double w,
-            {Color? color, bool bold = false, TextAlign align = TextAlign.right}) =>
-        SizedBox(
-          width: w,
-          child: Text(s,
-              textAlign: align,
-              style: TextStyle(
-                fontSize: 11,
-                fontFamily: 'monospace',
-                fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-                color: color,
-              )),
-        );
+    Widget cell(
+      String s,
+      double w, {
+      Color? color,
+      bool bold = false,
+      TextAlign align = TextAlign.right,
+    }) => SizedBox(
+      width: w,
+      child: Text(
+        s,
+        textAlign: align,
+        style: TextStyle(
+          fontSize: 11,
+          fontFamily: 'monospace',
+          fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+          color: color,
+        ),
+      ),
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Divider(height: 16),
-        Row(children: [
-          Text('歷次結果 (${h.length} 次)',
-              style:
-                  const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-          const Spacer(),
-          TextButton(
-            onPressed: exp.clearHistory,
-            style: TextButton.styleFrom(
+        Row(
+          children: [
+            Text(
+              '歷次結果 (${h.length} 次)',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: exp.clearHistory,
+              style: TextButton.styleFrom(
                 visualDensity: VisualDensity.compact,
-                textStyle: const TextStyle(fontSize: 11)),
-            child: const Text('清空歷史'),
-          ),
-        ]),
+                textStyle: const TextStyle(fontSize: 11),
+              ),
+              child: const Text('清空歷史'),
+            ),
+          ],
+        ),
         // 表頭
-        Row(children: [
-          cell('#', 26, align: TextAlign.left),
-          cell('時間', 52),
-          cell('長度', 46),
-          cell('基準LF/HF', 74),
-          cell('偏差中位數', 76),
-          cell('偏差範圍', 76),
-          cell('±20%內', 56),
-          cell('拍數', 46),
-        ]),
+        Row(
+          children: [
+            cell('#', 26, align: TextAlign.left),
+            cell('時間', 52),
+            cell('長度', 46),
+            cell('基準LF/HF', 74),
+            cell('偏差中位數', 76),
+            cell('偏差範圍', 76),
+            cell('±20%內', 56),
+            cell('拍數', 46),
+          ],
+        ),
         const SizedBox(height: 2),
         for (final r in h)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 1.5),
-            child: Row(children: [
-              cell('${r.index}', 26, align: TextAlign.left),
-              cell(
+            child: Row(
+              children: [
+                cell('${r.index}', 26, align: TextAlign.left),
+                cell(
                   '${r.time.hour.toString().padLeft(2, '0')}:'
                   '${r.time.minute.toString().padLeft(2, '0')}',
                   52,
-                  color: Colors.grey.shade600),
-              // 不同錄製長度的結果不能混著比 —— 標出來免得看串行
-              cell('${r.targetSeconds ~/ 60} 分', 46,
-                  color: Colors.blueGrey.shade400),
-              cell(r.baselineLfHf.toStringAsFixed(2), 74, bold: true),
-              cell('${r.medianAbsDevPct?.toStringAsFixed(0) ?? '—'}%', 76,
+                  color: Colors.grey.shade600,
+                ),
+                // 不同錄製長度的結果不能混著比 —— 標出來免得看串行
+                cell(
+                  '${r.targetSeconds ~/ 60} 分',
+                  46,
+                  color: Colors.blueGrey.shade400,
+                ),
+                cell(r.baselineLfHf.toStringAsFixed(2), 74, bold: true),
+                cell(
+                  '${r.medianAbsDevPct?.toStringAsFixed(0) ?? '—'}%',
+                  76,
                   bold: true,
                   color: (r.medianAbsDevPct ?? 0) <= 20
                       ? Colors.green.shade700
                       : ((r.medianAbsDevPct ?? 0) <= 50
-                          ? Colors.orange.shade800
-                          : Colors.red.shade700)),
-              cell(
+                            ? Colors.orange.shade800
+                            : Colors.red.shade700),
+                ),
+                cell(
                   '${r.minAbsDevPct?.toStringAsFixed(0) ?? '—'}'
                   '~${r.maxAbsDevPct?.toStringAsFixed(0) ?? '—'}%',
                   76,
-                  color: Colors.grey.shade700),
-              cell('${r.within20}/${r.windowCount}', 56),
-              cell('${r.beats}', 46, color: Colors.grey.shade600),
-            ]),
+                  color: Colors.grey.shade700,
+                ),
+                cell('${r.within20}/${r.windowCount}', 56),
+                cell('${r.beats}', 46, color: Colors.grey.shade600),
+              ],
+            ),
           ),
         if (h.length >= 2) ...[
           const SizedBox(height: 6),
@@ -2107,14 +2362,15 @@ class _K2PageState extends State<K2Page> {
                   '  ·  偏差中位數 '
                   '${mRange == null ? '—' : '${mRange.$1.toStringAsFixed(0)}~${mRange.$2.toStringAsFixed(0)}%'}',
                   style: const TextStyle(
-                      fontSize: 11.5, fontWeight: FontWeight.bold),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   '基準本身若跨次差很多,代表連 2 分鐘的尺都在動;'
                   '偏差中位數若跨次差很多,代表「30 秒差多少」這件事本身不可預測。',
-                  style:
-                      TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                  style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
                 ),
               ],
             ),
@@ -2131,18 +2387,26 @@ class _K2PageState extends State<K2Page> {
   /// 這正是整個實驗要說明的事,所以讓它在畫面上發生一次比看結果表更有感。
   Widget _lfLiveRow(HrvSpectrum s) {
     Widget item(String k, String v, {Color? color}) => Padding(
-          padding: const EdgeInsets.only(right: 18),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('$k ',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
-            Text(v,
-                style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'monospace',
-                    color: color)),
-          ]),
-        );
+      padding: const EdgeInsets.only(right: 18),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$k ',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+          ),
+          Text(
+            v,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'monospace',
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
 
     final ok = s.lfUsable;
     final okColor = ok ? Colors.green.shade700 : Colors.grey.shade500;
@@ -2172,8 +2436,9 @@ class _K2PageState extends State<K2Page> {
       return OutlinedButton(
         onPressed: exp.cancel,
         style: OutlinedButton.styleFrom(
-            visualDensity: VisualDensity.compact,
-            textStyle: const TextStyle(fontSize: 12)),
+          visualDensity: VisualDensity.compact,
+          textStyle: const TextStyle(fontSize: 12),
+        ),
         child: const Text('取消'),
       );
     }
@@ -2181,16 +2446,18 @@ class _K2PageState extends State<K2Page> {
       return OutlinedButton(
         onPressed: exp.clear,
         style: OutlinedButton.styleFrom(
-            visualDensity: VisualDensity.compact,
-            textStyle: const TextStyle(fontSize: 12)),
+          visualDensity: VisualDensity.compact,
+          textStyle: const TextStyle(fontSize: 12),
+        ),
         child: const Text('清除,再測一次'),
       );
     }
     return FilledButton.tonal(
       onPressed: () => exp.start(_adapter.core.totalSamples),
       style: FilledButton.styleFrom(
-          visualDensity: VisualDensity.compact,
-          textStyle: const TextStyle(fontSize: 12)),
+        visualDensity: VisualDensity.compact,
+        textStyle: const TextStyle(fontSize: 12),
+      ),
       child: const Text('開始 2 分鐘錄製'),
     );
   }
@@ -2212,55 +2479,64 @@ class _K2PageState extends State<K2Page> {
     }
 
     Widget stat(String k, String v, {Color? color}) => Padding(
-          padding: const EdgeInsets.only(right: 20),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('$k ',
-                style:
-                    TextStyle(fontSize: 11, color: Colors.grey.shade700)),
-            Text(v,
-                style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'monospace',
-                    color: color)),
-          ]),
-        );
+      padding: const EdgeInsets.only(right: 20),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$k ',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+          ),
+          Text(
+            v,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'monospace',
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
 
     Widget windowRow(LfWindow w) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 1.5),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 62,
-                child: Text('${w.startSec.toInt()}-${w.endSec.toInt()}s',
-                    style: TextStyle(
-                        fontSize: 11, color: Colors.grey.shade600)),
-              ),
-              SizedBox(
-                width: 50,
-                child: Text(w.spec.lfHf.toStringAsFixed(2),
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                        fontSize: 12, fontFamily: 'monospace')),
-              ),
-              SizedBox(
-                width: 62,
-                child: Text(
-                  // 先四捨五入再決定正負號 —— 直接 toStringAsFixed(0) 會讓
-                  // −0.3 顯示成「-0%」。
-                  _pct(w.lfHfDevPct),
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.bold,
-                    color: devColor(w.lfHfDevPct),
-                  ),
-                ),
-              ),
-            ],
+      padding: const EdgeInsets.symmetric(vertical: 1.5),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 62,
+            child: Text(
+              '${w.startSec.toInt()}-${w.endSec.toInt()}s',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            ),
           ),
-        );
+          SizedBox(
+            width: 50,
+            child: Text(
+              w.spec.lfHf.toStringAsFixed(2),
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+            ),
+          ),
+          SizedBox(
+            width: 62,
+            child: Text(
+              // 先四捨五入再決定正負號 —— 直接 toStringAsFixed(0) 會讓
+              // −0.3 顯示成「-0%」。
+              _pct(w.lfHfDevPct),
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 12,
+                fontFamily: 'monospace',
+                fontWeight: FontWeight.bold,
+                color: devColor(w.lfHfDevPct),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
 
     /// 一組窗:標題 + 表格(自動分欄,每欄最多 10 列)+ 該組的結論。
     Widget groupBlock(LfWindowGroup g) {
@@ -2293,19 +2569,25 @@ class _K2PageState extends State<K2Page> {
             ],
           ),
           const SizedBox(height: 6),
-          Wrap(children: [
-            stat('偏差中位數', '${g.medianAbsDevPct?.toStringAsFixed(0) ?? '—'}%',
+          Wrap(
+            children: [
+              stat(
+                '偏差中位數',
+                '${g.medianAbsDevPct?.toStringAsFixed(0) ?? '—'}%',
                 color: median <= 20
                     ? Colors.green.shade700
                     : (median <= 50
-                        ? Colors.orange.shade800
-                        : Colors.red.shade700)),
-            stat(
+                          ? Colors.orange.shade800
+                          : Colors.red.shade700),
+              ),
+              stat(
                 '偏差範圍',
                 '${g.minAbsDevPct?.toStringAsFixed(0) ?? '—'}'
-                    '~${g.maxAbsDevPct?.toStringAsFixed(0) ?? '—'}%'),
-            stat('±20% 內', '${g.within20}/$n'),
-          ]),
+                    '~${g.maxAbsDevPct?.toStringAsFixed(0) ?? '—'}%',
+              ),
+              stat('±20% 內', '${g.within20}/$n'),
+            ],
+          ),
         ],
       );
     }
@@ -2314,12 +2596,14 @@ class _K2PageState extends State<K2Page> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Divider(height: 16),
-        Wrap(children: [
-          stat('基準', '${b.spanSeconds.toStringAsFixed(0)}s · ${b.beats} 拍'),
-          stat('LF/HF', b.lfHf.toStringAsFixed(2)),
-          stat('LF', '${b.lf.toStringAsFixed(0)} ms²'),
-          stat('HF', '${b.hf.toStringAsFixed(0)} ms²'),
-        ]),
+        Wrap(
+          children: [
+            stat('基準', '${b.spanSeconds.toStringAsFixed(0)}s · ${b.beats} 拍'),
+            stat('LF/HF', b.lfHf.toStringAsFixed(2)),
+            stat('LF', '${b.lf.toStringAsFixed(0)} ms²'),
+            stat('HF', '${b.hf.toStringAsFixed(0)} ms²'),
+          ],
+        ),
         for (int i = 0; i < r.groups.length; i++) ...[
           if (i > 0) const Divider(height: 14),
           groupBlock(r.groups[i]),
@@ -2402,54 +2686,100 @@ class _K2PageState extends State<K2Page> {
           ],
         ),
         const Divider(height: 20),
-        Text(tr('k2_params_title'),
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey.shade800)),
+        Text(
+          tr('k2_params_title'),
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey.shade800,
+          ),
+        ),
         const SizedBox(height: 6),
         Wrap(
           spacing: 12,
           runSpacing: 8,
           children: [
-            _numField(tr('k2_f_finger_threshold'), cfg.fingerThreshold,
-                (v) => cfg.fingerThreshold = v,
-                hint: tr('k2_f_finger_threshold_hint')),
-            _numField(tr('k2_f_hr_min'), cfg.hrMin, (v) => cfg.hrMin = v,
-                hint: trParams('k2_f_filter_hint',
-                    {'hz': cfg.bandLowHz.toStringAsFixed(2)})),
-            _numField(tr('k2_f_hr_max'), cfg.hrMax, (v) => cfg.hrMax = v,
-                hint: trParams('k2_f_filter_hint',
-                    {'hz': cfg.bandHighHz.toStringAsFixed(2)})),
-            _dblField(tr('k2_f_prom_ratio'), cfg.promRatio,
-                (v) => cfg.promRatio = v,
-                hint: '0.05 ~ 2.0'),
+            _numField(
+              tr('k2_f_finger_threshold'),
+              cfg.fingerThreshold,
+              (v) => cfg.fingerThreshold = v,
+              hint: tr('k2_f_finger_threshold_hint'),
+            ),
+            _numField(
+              tr('k2_f_hr_min'),
+              cfg.hrMin,
+              (v) => cfg.hrMin = v,
+              hint: trParams('k2_f_filter_hint', {
+                'hz': cfg.bandLowHz.toStringAsFixed(2),
+              }),
+            ),
+            _numField(
+              tr('k2_f_hr_max'),
+              cfg.hrMax,
+              (v) => cfg.hrMax = v,
+              hint: trParams('k2_f_filter_hint', {
+                'hz': cfg.bandHighHz.toStringAsFixed(2),
+              }),
+            ),
+            _dblField(
+              tr('k2_f_prom_ratio'),
+              cfg.promRatio,
+              (v) => cfg.promRatio = v,
+              hint: '0.05 ~ 2.0',
+            ),
             // 計算窗已改成固定常數(500,不開放調)→ 這裡只顯示不給改
-            _roField(tr('k2_f_compute_window'),
-                '${Max30102Config.computeWindow}', tr('k2_f_fixed')),
-            _numField(tr('k2_f_compute_every'), cfg.computeEvery,
-                (v) => cfg.computeEvery = v,
-                hint: '10 ~ ${Max30102Config.computeWindow}'),
-            _numField(tr('k2_f_finger_dead'), cfg.fingerDeadMs,
-                (v) => cfg.fingerDeadMs = v,
-                hint: '0 ~ 2000'),
-            _roField(tr('k2_f_settle_samples'), '${cfg.settleSamples}',
-                tr('k2_f_settle_hint')),
-            _numField(tr('k2_f_data_history'), cfg.dataHistoryMs,
-                (v) => cfg.dataHistoryMs = v,
-                hint: tr('k2_f_data_history_hint')),
-            _numField(tr('k2_f_finger_off_batches'), cfg.fingerOffBatches,
-                (v) => cfg.fingerOffBatches = v,
-                hint: '1 ~ 100'),
-            _numField(tr('k2_f_led_red'), cfg.ledCurrentRed,
-                (v) => cfg.ledCurrentRed = v,
-                hint: '0 ~ 255'),
-            _numField(tr('k2_f_led_ir'), cfg.ledCurrentIr,
-                (v) => cfg.ledCurrentIr = v,
-                hint: '0 ~ 255'),
-            _numField(tr('k2_f_poll_interval'), _adapter.pollIntervalMs,
-                (v) => _adapter.pollIntervalMs = v,
-                hint: tr('k2_f_poll_hint')),
+            _roField(
+              tr('k2_f_compute_window'),
+              '${Max30102Config.computeWindow}',
+              tr('k2_f_fixed'),
+            ),
+            _numField(
+              tr('k2_f_compute_every'),
+              cfg.computeEvery,
+              (v) => cfg.computeEvery = v,
+              hint: '10 ~ ${Max30102Config.computeWindow}',
+            ),
+            _numField(
+              tr('k2_f_finger_dead'),
+              cfg.fingerDeadMs,
+              (v) => cfg.fingerDeadMs = v,
+              hint: '0 ~ 2000',
+            ),
+            _roField(
+              tr('k2_f_settle_samples'),
+              '${cfg.settleSamples}',
+              tr('k2_f_settle_hint'),
+            ),
+            _numField(
+              tr('k2_f_data_history'),
+              cfg.dataHistoryMs,
+              (v) => cfg.dataHistoryMs = v,
+              hint: tr('k2_f_data_history_hint'),
+            ),
+            _numField(
+              tr('k2_f_finger_off_batches'),
+              cfg.fingerOffBatches,
+              (v) => cfg.fingerOffBatches = v,
+              hint: '1 ~ 100',
+            ),
+            _numField(
+              tr('k2_f_led_red'),
+              cfg.ledCurrentRed,
+              (v) => cfg.ledCurrentRed = v,
+              hint: '0 ~ 255',
+            ),
+            _numField(
+              tr('k2_f_led_ir'),
+              cfg.ledCurrentIr,
+              (v) => cfg.ledCurrentIr = v,
+              hint: '0 ~ 255',
+            ),
+            _numField(
+              tr('k2_f_poll_interval'),
+              _adapter.pollIntervalMs,
+              (v) => _adapter.pollIntervalMs = v,
+              hint: tr('k2_f_poll_hint'),
+            ),
           ],
         ),
         const SizedBox(height: 6),
@@ -2457,10 +2787,16 @@ class _K2PageState extends State<K2Page> {
           spacing: 12,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            _switchField(tr('k2_sw_searchback'), cfg.searchBackEnabled,
-                (v) => cfg.searchBackEnabled = v),
-            _switchField(tr('k2_sw_clean'), cfg.cleanEnabled,
-                (v) => cfg.cleanEnabled = v),
+            _switchField(
+              tr('k2_sw_searchback'),
+              cfg.searchBackEnabled,
+              (v) => cfg.searchBackEnabled = v,
+            ),
+            _switchField(
+              tr('k2_sw_clean'),
+              cfg.cleanEnabled,
+              (v) => cfg.cleanEnabled = v,
+            ),
             OutlinedButton.icon(
               onPressed: _checkSettings,
               icon: const Icon(Icons.rule, size: 15),
@@ -2475,11 +2811,14 @@ class _K2PageState extends State<K2Page> {
         const Divider(height: 20),
         Row(
           children: [
-            Text(tr('k2_log_title'),
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade800)),
+            Text(
+              tr('k2_log_title'),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey.shade800,
+              ),
+            ),
             const Spacer(),
             TextButton.icon(
               onPressed: () => setState(_adapter.logs.clear),
@@ -2537,9 +2876,13 @@ class _K2PageState extends State<K2Page> {
           children: [
             Row(
               children: [
-                Text(title,
-                    style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.bold)),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 if (trailing != null) ...[
                   const SizedBox(width: 16),
                   Expanded(child: trailing),
@@ -2555,23 +2898,37 @@ class _K2PageState extends State<K2Page> {
   }
 
   /// [dim] = 這是保留的舊值 → 淡化顯示,與即時數值區分開。
-  Widget _bigValue(String label, String? v, String unit, Color color,
-      {bool dim = false}) {
+  Widget _bigValue(
+    String label,
+    String? v,
+    String unit,
+    Color color, {
+    bool dim = false,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+        Text(
+          label,
+          style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+        ),
         Row(
           crossAxisAlignment: CrossAxisAlignment.baseline,
           textBaseline: TextBaseline.alphabetic,
           children: [
-            Text(v ?? '—',
-                style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: dim ? color.withValues(alpha: 0.45) : color)),
+            Text(
+              v ?? '—',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: dim ? color.withValues(alpha: 0.45) : color,
+              ),
+            ),
             const SizedBox(width: 3),
-            Text(unit, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+            Text(
+              unit,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            ),
           ],
         ),
       ],
@@ -2592,26 +2949,28 @@ class _K2PageState extends State<K2Page> {
   Widget _orientFlag(K2ChannelOrient o) {
     final (String key, Color bg, Color fg) = switch (o) {
       K2ChannelOrient.unknown => (
-          'k2_orient_unknown',
-          Colors.grey.shade300,
-          Colors.grey.shade600
-        ),
+        'k2_orient_unknown',
+        Colors.grey.shade300,
+        Colors.grey.shade600,
+      ),
       K2ChannelOrient.normal => (
-          'k2_orient_normal',
-          Colors.green.shade100,
-          Colors.green.shade800
-        ),
+        'k2_orient_normal',
+        Colors.green.shade100,
+        Colors.green.shade800,
+      ),
       K2ChannelOrient.swapped => (
-          'k2_orient_swapped',
-          Colors.orange.shade100,
-          Colors.orange.shade900
-        ),
+        'k2_orient_swapped',
+        Colors.orange.shade100,
+        Colors.orange.shade900,
+      ),
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(tr('k2_orient'),
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+        Text(
+          tr('k2_orient'),
+          style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+        ),
         const SizedBox(height: 4),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -2619,9 +2978,14 @@ class _K2PageState extends State<K2Page> {
             color: bg,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Text(tr(key),
-              style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.bold, color: fg)),
+          child: Text(
+            tr(key),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: fg,
+            ),
+          ),
         ),
       ],
     );
@@ -2631,7 +2995,10 @@ class _K2PageState extends State<K2Page> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+        Text(
+          label,
+          style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+        ),
         const SizedBox(height: 4),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -2639,11 +3006,14 @@ class _K2PageState extends State<K2Page> {
             color: ok ? Colors.green.shade100 : Colors.grey.shade300,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Text(ok ? 'OK' : '—',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: ok ? Colors.green.shade800 : Colors.grey.shade600)),
+          child: Text(
+            ok ? 'OK' : '—',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: ok ? Colors.green.shade800 : Colors.grey.shade600,
+            ),
+          ),
         ),
       ],
     );
@@ -2727,20 +3097,26 @@ class _K2PageState extends State<K2Page> {
     final issues = Max30102SettingLimits.check(_adapter.core.config);
     // info 不是問題,只是提醒 → 標題的數字只算真正要處理的那些,
     // 不然「設定檢查:1 則」配上一則純說明,看起來像出事了。
-    final problems =
-        issues.where((e) => e.severity != ConfigSeverity.info).length;
+    final problems = issues
+        .where((e) => e.severity != ConfigSeverity.info)
+        .length;
     final notes = issues.length - problems;
 
     if (problems == 0) {
-      _adapter.log(notes == 0
-          ? tr('k2_chk_all_ok')
-          : trParams('k2_chk_all_ok_notes', {'notes': notes}));
+      _adapter.log(
+        notes == 0
+            ? tr('k2_chk_all_ok')
+            : trParams('k2_chk_all_ok_notes', {'notes': notes}),
+      );
     } else {
-      _adapter.log(trParams('k2_chk_problems', {
-        'problems': problems,
-        'notes':
-            notes > 0 ? trParams('k2_chk_notes_tail', {'notes': notes}) : '',
-      }));
+      _adapter.log(
+        trParams('k2_chk_problems', {
+          'problems': problems,
+          'notes': notes > 0
+              ? trParams('k2_chk_notes_tail', {'notes': notes})
+              : '',
+        }),
+      );
     }
 
     for (final e in issues) {
@@ -2769,8 +3145,10 @@ class _K2PageState extends State<K2Page> {
           helperText: hint,
           isDense: true,
           border: const OutlineInputBorder(),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 10,
+          ),
         ),
         style: const TextStyle(fontSize: 12),
       ),
@@ -2778,8 +3156,12 @@ class _K2PageState extends State<K2Page> {
   }
 
   /// 小數欄位(promRatio 之類)。改完一樣自動跑一次設定檢查。
-  Widget _dblField(String label, double value, void Function(double) onSet,
-      {String? hint}) {
+  Widget _dblField(
+    String label,
+    double value,
+    void Function(double) onSet, {
+    String? hint,
+  }) {
     return SizedBox(
       width: 140,
       child: TextFormField(
@@ -2790,8 +3172,10 @@ class _K2PageState extends State<K2Page> {
           helperText: hint,
           isDense: true,
           border: const OutlineInputBorder(),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 10,
+          ),
         ),
         style: const TextStyle(fontSize: 12),
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -2814,10 +3198,12 @@ class _K2PageState extends State<K2Page> {
           value: value,
           onChanged: (v) {
             setState(() => onSet(v));
-            _adapter.log(trParams('k2_sw_log', {
-              'label': label,
-              'state': v ? tr('k2_state_on') : tr('k2_state_off'),
-            }));
+            _adapter.log(
+              trParams('k2_sw_log', {
+                'label': label,
+                'state': v ? tr('k2_state_on') : tr('k2_state_off'),
+              }),
+            );
             _checkSettings();
           },
         ),
@@ -2826,8 +3212,12 @@ class _K2PageState extends State<K2Page> {
     );
   }
 
-  Widget _numField(String label, int value, void Function(int) onSet,
-      {String? hint}) {
+  Widget _numField(
+    String label,
+    int value,
+    void Function(int) onSet, {
+    String? hint,
+  }) {
     return SizedBox(
       width: 140,
       child: TextFormField(
@@ -2838,8 +3228,10 @@ class _K2PageState extends State<K2Page> {
           helperText: hint,
           isDense: true,
           border: const OutlineInputBorder(),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 10,
+          ),
         ),
         style: const TextStyle(fontSize: 12),
         keyboardType: TextInputType.number,

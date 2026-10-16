@@ -12,6 +12,85 @@ import 'package:flutter_firmware_tester_unified/shared/language_state.dart';
 // 重新匯出 AppLanguage 讓現有 import 不需要改
 export 'package:flutter_firmware_tester_unified/shared/language_state.dart';
 
+// ── K2 說明視窗:Lomb-Scargle 的數學細節 ─────────────────────────────
+// lf_ms2 與 hf_ms2 是同一條頻譜、同一個 k,只差加總的頻帶,所以兩個視窗
+// 共用同一段文字(定義一次,兩個 key 指過來,改的時候不會只改到一邊)。
+const _k2LombMathZh = '''為什麼不用 FFT
+  FFT 要求等時間間隔取樣，但 RR 是「每一拍一個點」：心跳快時點比較密、慢時比較疏。Lomb-Scargle 可以直接吃不等間隔的點。
+
+P(f) 是什麼
+  對每一個候選頻率 f，用最小平方法把一條該頻率的正弦波「貼」到 RR 點上。P(f) = 這條正弦波能解釋多少 RR 的起伏。RR 裡若有以 f 重複的起伏，P(f) 就大。
+
+符號
+  tᵢ = 第 i 個 RR 結束的時刻（秒，以第一筆為 0）
+  xᵢ = RRᵢ − mean(RR)（去掉平均，只留起伏）
+  ω  = 2πf
+
+每一個 f 都做一次
+  1. 時間位移 τ：tan(2ωτ) = Σ sin(2ωtᵢ) ÷ Σ cos(2ωtᵢ)
+     （讓下面 cos、sin 兩項互不干擾，才能分開擬合）
+  2. 投影　　：A = Σ xᵢ·cos ω(tᵢ − τ)　　B = Σ xᵢ·sin ω(tᵢ − τ)
+  3. 基底能量：C = Σ cos² ω(tᵢ − τ)　　D = Σ sin² ω(tᵢ − τ)
+  4. P(f) = ½ · ( A² ÷ C + B² ÷ D )
+
+掃描
+  f 從 0.003 Hz 掃到 0.40 Hz，每 Δf = 0.002 Hz 一格，約 200 格，每一格算一個 P(f)。
+
+VLF / LF / HF 怎麼切出來
+  把落在範圍內的格子加起來：
+  VLF 極低頻　0.003 ≤ f < 0.04 Hz　週期 25~333 秒
+  LF  低頻　　0.04  ≤ f < 0.15 Hz　週期 7~25 秒
+  HF  高頻　　0.15  ≤ f < 0.40 Hz　週期 2.5~7 秒
+  每個頻帶 = k · Σ P(f)·Δf（只加該範圍內的格子）
+  VLF 的週期比 30 秒窗還長，根本量不到；算它只是為了讓三個頻帶的總和完整。
+
+k 是什麼
+  Lomb-Scargle 的 P(f) 本身沒有固定單位，大小會隨點數改變，不同窗長之間無法比較。所以把整條頻譜的總和縮放成 RR 的變異數：
+  k = RR 變異數 ÷ Σ P(f)·Δf（全部約 200 格）
+  RR 變異數 = Σ xᵢ² ÷ (N − 1) = SDNN²
+  縮放之後單位變成 ms²，而且 VLF + LF + HF = SDNN²。
+
+附註那筆帳
+  「VLF + LF + HF = 總和 ≈ SDNN²」對得上不是巧合，是 k 刻意讓它對上的。可以直接拿上面 sdnn 那一列的值平方來對；對不上就代表頻譜和 SDNN 用的不是同一批 RR。''';
+
+const _k2LombMathEn = '''Why not FFT
+  FFT needs evenly spaced samples, but RR gives one point per beat: denser when the heart is fast, sparser when slow. Lomb-Scargle works directly on unevenly spaced points.
+
+What P(f) is
+  For each candidate frequency f, a sine wave of that frequency is fitted to the RR points by least squares. P(f) = how much of the RR variation that sine wave explains. If RR swings repeat at f, P(f) is large.
+
+Symbols
+  tᵢ = time at which the i-th RR ends (s, first one at 0)
+  xᵢ = RRᵢ − mean(RR) (mean removed, only the swings remain)
+  ω  = 2πf
+
+For every f
+  1. Time shift τ: tan(2ωτ) = Σ sin(2ωtᵢ) ÷ Σ cos(2ωtᵢ)
+     (makes the cos and sin terms below independent so each can be fitted separately)
+  2. Projections:   A = Σ xᵢ·cos ω(tᵢ − τ)   B = Σ xᵢ·sin ω(tᵢ − τ)
+  3. Basis energy:  C = Σ cos² ω(tᵢ − τ)   D = Σ sin² ω(tᵢ − τ)
+  4. P(f) = ½ · ( A² ÷ C + B² ÷ D )
+
+Scan
+  f runs from 0.003 Hz to 0.40 Hz in steps of Δf = 0.002 Hz, about 200 points, one P(f) each.
+
+How VLF / LF / HF are carved out
+  Sum the points falling inside each range:
+  VLF very low   0.003 ≤ f < 0.04 Hz   periods 25–333 s
+  LF  low        0.04  ≤ f < 0.15 Hz   periods 7–25 s
+  HF  high       0.15  ≤ f < 0.40 Hz   periods 2.5–7 s
+  Each band = k · Σ P(f)·Δf (only the points in that range)
+  VLF periods are longer than a 30 s window, so it cannot really be measured; it is computed only so the three bands add up to the whole.
+
+What k is
+  Lomb-Scargle P(f) has no fixed unit and its size changes with the number of points, so windows of different length cannot be compared. The whole spectrum is therefore scaled to the RR variance:
+  k = RR variance ÷ Σ P(f)·Δf (all ~200 points)
+  RR variance = Σ xᵢ² ÷ (N − 1) = SDNN²
+  After scaling the unit is ms², and VLF + LF + HF = SDNN².
+
+The bookkeeping note
+  "VLF + LF + HF = total ≈ SDNN²" matching is not a coincidence — k makes it match on purpose. Square the value in the sdnn row above to check; a mismatch means the spectrum and SDNN were computed from different RR.''';
+
 /// 多語言管理服務（單例模式）
 class LocalizationService {
   static final LocalizationService _instance = LocalizationService._internal();
@@ -780,6 +859,13 @@ class LocalizationService {
       'k2_help_sec_use': '在推薦裡的角色',
       'k2_help_sec_note': '要注意的地方',
       'k2_help_sec_ref': '參考值',
+      'k2_help_sec_math': '數學細節',
+      'k2_help_box_formula': '公式',
+      'k2_help_box_sub': '代入',
+      'k2_help_box_result': '結果',
+      'k2_help_box_inputs': '帶入參數',
+      'k2_help_lf_ms2_math': _k2LombMathZh,
+      'k2_help_hf_ms2_math': _k2LombMathZh,
 
       'k2_help_mean_hr_what': '平均心率：這一段裡所有 RR 間隔（兩拍之間的時間）取平均，換算成每分鐘幾下。',
       'k2_help_mean_hr_how': '1. 從 IR 波形找出每一拍的谷底\n2. 相鄰兩個谷底的時間差 = 一個 RR 間隔，也就是兩拍之間的間距（ms）\n3. 濾掉漏拍、切拍造成的離群值\n4. mean(RR) = 平均間距：這一段所有 RR 間隔加總 ÷ 個數\n5. 心率 = 60000 ÷ mean(RR)\n\n60000 從哪來：兩邊的單位不同。間距的單位是「毫秒」，心率的單位是「每分鐘幾下」。1 分鐘 = 60 秒 = 60000 毫秒，所以 60000 ÷ 平均間距，就是「1 分鐘裡裝得下幾個間距」= 每分鐘幾拍。\n例：平均間距 885.8 ms → 60000 ÷ 885.8 = 67.7 bpm；間距越短，1 分鐘裝得越多，心率越快。',
@@ -1672,6 +1758,13 @@ class LocalizationService {
       'k2_help_sec_use': 'Role in the recommendation',
       'k2_help_sec_note': 'Caveats',
       'k2_help_sec_ref': 'Reference values',
+      'k2_help_sec_math': 'The math',
+      'k2_help_box_formula': 'formula',
+      'k2_help_box_sub': 'values',
+      'k2_help_box_result': 'result',
+      'k2_help_box_inputs': 'from',
+      'k2_help_lf_ms2_math': _k2LombMathEn,
+      'k2_help_hf_ms2_math': _k2LombMathEn,
 
       'k2_help_mean_hr_what':
           'Mean heart rate: the average of all RR intervals (time between beats) in this segment, converted to beats per minute.',

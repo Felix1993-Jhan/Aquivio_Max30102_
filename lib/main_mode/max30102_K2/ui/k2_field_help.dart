@@ -7,13 +7,18 @@
 //   · 玻璃關 → 一般 AlertDialog
 //   · 公式那一塊是資料，永遠深色實心（玻璃會降低對比）
 //
+// 深色框裡放「這一筆」的數字：公式 / 代入 / 結果，框下再列這一筆的附註。
+// 給了 listenable + liveRows 就跟著頁面更新（滾動每秒、定長停在結束那刻），
+// 機制與推薦飲品視窗相同；沒資料時停在上一份，不清空。
+//
 // 說明文字全部放在 localization_service.dart 的 `k2_help_<api>_<段>`：
 //   what  這是什麼        （必填）
 //   how   怎麼算          （必填）
+//   math  數學細節        （選填 —— 演算法本身值得攤開的才寫）
 //   use   在推薦裡的角色   （必填）
 //   note  要注意的地方     （必填）
 //   ref   參考值          （選填 —— 只有真的有文獻的欄位才寫）
-// 測試會檢查 13 個欄位的必填段落兩種語言都在。
+// 測試會檢查每個欄位的必填段落兩種語言都在。
 // ============================================================================
 
 import 'dart:ui' show ImageFilter;
@@ -25,24 +30,77 @@ import '../../../shared/ui/glass.dart';
 import 'k2_formula_panel.dart';
 
 /// 每個欄位的說明段落（順序即顯示順序）。
-const k2HelpSections = ['what', 'how', 'use', 'note', 'ref'];
+const k2HelpSections = ['what', 'how', 'math', 'use', 'note', 'ref'];
 
-/// 必填段落。`ref` 是選填。
+/// 必填段落。`math` / `ref` 是選填。
 const k2HelpRequired = ['what', 'how', 'use', 'note'];
 
 /// 某欄位某段落的翻譯 key。
 String k2HelpKey(String api, String section) => 'k2_help_${api}_$section';
 
 /// 跳出 [row] 那個欄位的說明視窗。
-Future<void> showK2FieldHelp(BuildContext context, K2FormulaRow row) {
+///
+/// [listenable] + [liveRows] 有給 → 視窗開著時跟著更新；沒給 → 顯示 [row] 的快照。
+Future<void> showK2FieldHelp(
+  BuildContext context,
+  K2FormulaRow row, {
+  Listenable? listenable,
+  List<K2FormulaRow>? Function()? liveRows,
+}) {
   return showDialog<void>(
     context: context,
     // 同推薦飲品視窗:遮罩調淡,玻璃才有東西可以模糊
     barrierColor: globalGlassNotifier.value
         ? const Color.fromRGBO(0, 0, 0, 0.28)
         : null,
-    builder: (ctx) => _K2FieldHelpDialog(row: row),
+    builder: (ctx) => _K2FieldHelpLive(
+      first: row,
+      listenable: listenable,
+      liveRows: liveRows,
+    ),
   );
+}
+
+class _K2FieldHelpLive extends StatefulWidget {
+  const _K2FieldHelpLive({required this.first, this.listenable, this.liveRows});
+
+  final K2FormulaRow first;
+  final Listenable? listenable;
+  final List<K2FormulaRow>? Function()? liveRows;
+
+  @override
+  State<_K2FieldHelpLive> createState() => _K2FieldHelpLiveState();
+}
+
+class _K2FieldHelpLiveState extends State<_K2FieldHelpLive> {
+  late K2FormulaRow _last = widget.first;
+
+  /// 重算後找回同一個欄位;找不到(沒資料)就維持上一份 —— 內容突然消失
+  /// 比停在舊值更難理解,與推薦飲品視窗同一個原則。
+  K2FormulaRow _current() {
+    final rows = widget.liveRows?.call();
+    if (rows != null) {
+      for (final r in rows) {
+        if (r.api == widget.first.api) {
+          _last = r;
+          break;
+        }
+      }
+    }
+    return _last;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = widget.listenable;
+    if (l == null || widget.liveRows == null) {
+      return _K2FieldHelpDialog(row: _last);
+    }
+    return ListenableBuilder(
+      listenable: l,
+      builder: (context, _) => _K2FieldHelpDialog(row: _current()),
+    );
+  }
 }
 
 class _K2FieldHelpDialog extends StatelessWidget {
@@ -67,7 +125,7 @@ class _K2FieldHelpDialog extends StatelessWidget {
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
           child: Container(
-            constraints: const BoxConstraints(maxWidth: 620),
+            constraints: const BoxConstraints(maxWidth: 680),
             decoration: BoxDecoration(
               color: GlassColors.shell,
               border: Border.all(color: GlassColors.shellEdge, width: 1.2),
@@ -96,7 +154,7 @@ class _K2FieldHelpDialog extends StatelessWidget {
 
   Widget _materialDialog(BuildContext context) => AlertDialog(
     title: _titleRow(),
-    content: SizedBox(width: 560, child: _body()),
+    content: SizedBox(width: 620, child: _body()),
     actions: [_closeButton(context)],
   );
 
@@ -140,31 +198,85 @@ class _K2FieldHelpDialog extends StatelessWidget {
     child: Text(tr('k2_drink_close')),
   );
 
+  /// 深色框:公式 / 代入 / 結果 / 帶入參數。標籤對齊成一欄,數字才好對。
+  Widget _formulaBox() {
+    const mono = TextStyle(
+      fontFamily: 'Consolas',
+      fontSize: 12.5,
+      height: 1.6,
+      color: Color(0xFFD4D4D4),
+    );
+    const label = TextStyle(
+      fontFamily: 'Consolas',
+      fontSize: 12,
+      height: 1.6,
+      color: Color(0xFF8A8A8A),
+    );
+    TableRow line(String k, String v, {Color? color}) => TableRow(
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 12),
+          child: Text(k, style: label),
+        ),
+        SelectableText(
+          v,
+          style: color == null ? mono : mono.copyWith(color: color),
+        ),
+      ],
+    );
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E),
+        border: Border.all(color: Colors.black26),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Table(
+        columnWidths: const {0: IntrinsicColumnWidth(), 1: FlexColumnWidth()},
+        defaultVerticalAlignment: TableCellVerticalAlignment.top,
+        children: [
+          line(tr('k2_help_box_formula'), '${row.api} = ${row.formula}'),
+          if (row.sub != null)
+            line(
+              tr('k2_help_box_sub'),
+              row.sub!,
+              color: const Color(0xFF4EC9B0),
+            ),
+          line(
+            tr('k2_help_box_result'),
+            row.result,
+            color: const Color(0xFFFFFFFF),
+          ),
+          line(tr('k2_help_box_inputs'), row.inputs.join(', ')),
+        ],
+      ),
+    );
+  }
+
   Widget _body() {
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // ── 公式:資料區,永遠深色實心 ──
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E1E),
-              border: Border.all(color: Colors.black26),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: SelectableText(
-              '${row.api} = ${row.formula}\n← ${row.inputs.join(', ')}',
-              style: const TextStyle(
-                fontFamily: 'Consolas',
-                fontSize: 12.5,
-                height: 1.6,
-                color: Color(0xFFD4D4D4),
+          _formulaBox(),
+          // 這一筆的附註(撞頂、頻帶帳、資料不足的原因…)—— 與面板上同一份
+          if (row.notes.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            for (final n in row.notes)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '• ${n.params.isEmpty ? tr(n.key) : trParams(n.key, n.params)}',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.45,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
               ),
-            ),
-          ),
+          ],
           for (final s in k2HelpSections)
             if (_has(s)) ...[
               const SizedBox(height: 14),
@@ -179,7 +291,12 @@ class _K2FieldHelpDialog extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 tr(k2HelpKey(row.api, s)),
-                style: const TextStyle(fontSize: 13, height: 1.55),
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.55,
+                  // 數學細節裡有對齊的式子,用等寬字比較好讀
+                  fontFamily: s == 'math' ? 'Consolas' : null,
+                ),
               ),
             ],
         ],

@@ -446,12 +446,22 @@ class K2FormulaPanel extends StatelessWidget {
     required this.beats,
     required this.fixedMode,
     required this.seconds,
+    this.listenable,
+    this.liveRows,
   });
 
   final VitalsMetrics metrics;
   final int beats;
   final bool fixedMode;
   final int seconds;
+
+  /// 「?」說明視窗開著時要聽的通知來源,與 [liveRows] 一起給。
+  /// 不給的話視窗顯示的是按下那一刻的快照。
+  final Listenable? listenable;
+
+  /// 重算目前的公式列(視窗每次收到通知就呼叫)。回 null = 現在沒資料,
+  /// 視窗停在上一份,不會清空。
+  final List<K2FormulaRow>? Function()? liveRows;
 
   static const _mono = 'Consolas';
   static const double _wField = 108; // 欄位名 + 「?」
@@ -568,7 +578,12 @@ class K2FormulaPanel extends StatelessWidget {
                     ),
                     // 「?」→ 這個欄位的說明視窗(外框同推薦飲品視窗)
                     InkWell(
-                      onTap: () => showK2FieldHelp(context, r),
+                      onTap: () => showK2FieldHelp(
+                        context,
+                        r,
+                        listenable: listenable,
+                        liveRows: liveRows,
+                      ),
                       borderRadius: BorderRadius.circular(8),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 3),

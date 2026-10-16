@@ -228,6 +228,49 @@ void main() {
       }
     });
 
+    testWidgets('⑩ 視窗的深色框帶入這一筆的數字,而且跟著更新、沒資料時不清空', (tester) async {
+      final a = k2FormulaRows(metricsOf(normalRr), beats: 30);
+      final b = k2FormulaRows(
+        metricsOf([for (final r in normalRr) r * 0.8]), // 心率變快的另一筆
+        beats: 30,
+      );
+      final tick = ValueNotifier(0);
+      List<K2FormulaRow>? current = a;
+      K2FormulaRow row(List<K2FormulaRow> rs) =>
+          rs.firstWhere((r) => r.api == 'mean_hr');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (ctx) => TextButton(
+              onPressed: () => showK2FieldHelp(
+                ctx,
+                row(a),
+                listenable: tick,
+                liveRows: () => current,
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.text(row(a).sub!), findsOneWidget, reason: '代入的數字要在框裡');
+      expect(find.text(row(a).result), findsOneWidget);
+
+      current = b; // 頁面重算 → 通知
+      tick.value++;
+      await tester.pumpAndSettle();
+      expect(find.text(row(b).result), findsOneWidget, reason: '要跟著更新');
+      expect(find.text(row(a).result), findsNothing);
+
+      current = null; // 手指離開、沒資料
+      tick.value++;
+      await tester.pumpAndSettle();
+      expect(find.text(row(b).result), findsOneWidget, reason: '沒資料時停在上一份');
+    });
+
     test('④ 高 HRV 撞頂時要標出「夾到 100」', () {
       // 800 / 1100 交錯 → RMSSD ≈ 300ms,遠超過 PNS 量表的 80ms 端點
       final m = metricsOf([
