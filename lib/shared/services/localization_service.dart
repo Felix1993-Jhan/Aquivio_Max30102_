@@ -749,7 +749,9 @@ class LocalizationService {
       'k2_fx_title': '公式帶入（送給 LLM 的欄位與它們的來源）',
       'k2_fx_note_power': 'P(f) = Lomb-Scargle 週期圖；k 讓三個頻帶加起來等於 RR 的變異數：VLF {vlf} + LF {lf} + HF {hf} = {total} ≈ SDNN² = {s2}',
       'k2_fx_note_hf_cyc': 'HF 下緣（0.15 Hz）在這段裡有 {cyc} 個週期',
-      'k2_fx_note_not_sent': '不送給 LLM，只是 lf_hf 的分子分母。JSON 另有 {api} = 本值 × 1.024e-3（換成對方的單位）',
+      'k2_fx_note_not_sent': '我們自己的單位（ms²），不送給 LLM，只是 lf_hf 的分子分母。送出的 {api} 換成對方單位，見下方',
+      'k2_fx_note_aquivio': 'JSON 送出的值（對方單位，與左側欄 LF 同一個數），不在 LLM 提示詞裡。× 1e-6：ms² → s²（對方的 RR 用秒）；× 1024：對方的 Welch 頻譜直接加總各格、沒乘格寬 Δf = 4 / 4096 Hz，等於多乘 1/Δf = 1024',
+      'k2_fx_note_aquivio_hf': 'JSON 送出的值（對方單位，與左側欄 HF 同一個數），換算同上',
       'k2_fx_rolling': '滾動模式：最近 {sec} 秒，每秒重算',
       'k2_fx_fixed': '定長模式：與左側同一段，收滿後停在量測結束那一刻',
       'k2_fx_round': '畫面四捨五入顯示，實際送出的是完整浮點數',
@@ -1548,7 +1550,11 @@ class LocalizationService {
           'P(f) = Lomb-Scargle periodogram; k scales the three bands to sum to the RR variance: VLF {vlf} + LF {lf} + HF {hf} = {total} ≈ SDNN² = {s2}',
       'k2_fx_note_hf_cyc': 'This segment holds {cyc} cycles of the HF lower edge (0.15 Hz)',
       'k2_fx_note_not_sent':
-          'Not sent to the LLM — only the numerator / denominator of lf_hf. The JSON also carries {api} = this × 1.024e-3 (their unit)',
+          'Our own unit (ms²), not sent to the LLM — only the numerator / denominator of lf_hf. The {api} that gets sent is in their unit, see below',
+      'k2_fx_note_aquivio':
+          'The value sent in the JSON (their unit; same number as LF in the side panel), not part of the LLM prompt. × 1e-6: ms² → s² (their RR is in seconds); × 1024: their Welch spectrum sums the bins without multiplying by the bin width Δf = 4 / 4096 Hz, i.e. an extra 1/Δf = 1024',
+      'k2_fx_note_aquivio_hf':
+          'The value sent in the JSON (their unit; same number as HF in the side panel), same conversion as above',
       'k2_fx_rolling': 'Rolling: last {sec} s, recomputed every second',
       'k2_fx_fixed':
           'Fixed window: same segment as the side panel, frozen at the end of the measurement',

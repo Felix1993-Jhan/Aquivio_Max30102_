@@ -223,6 +223,40 @@ List<K2FormulaRow> k2FormulaRows(VitalsMetrics m, {required int beats}) {
     ),
   );
 
+  // ── lf / hf ← lf_ms2 / hf_ms2:換成對方(aquivio-vitals)的單位 ──────
+  // 這兩個才是 JSON 裡 `lf` / `hf` 送出的值(左側欄 LF (lf) / HF (hf) 那兩格)。
+  //   × 1e-6 :ms² → s²(對方的 RR 用秒)
+  //   × 1024 :對方的 Welch 頻譜直接加總各格、沒乘格寬 Δf = 4 / 4096 Hz,
+  //            等於多乘了 1/Δf = 1024
+  // 係數本身寫在核心(_aquivioScale),這裡只顯示;值一律取核心算好的那一份。
+  const scaleText = '× 1e-6 × 1024';
+  rows.add(
+    K2FormulaRow(
+      api: 'lf',
+      inputs: const ['lf_ms2'],
+      formula: 'lf_ms2 $scaleText',
+      sub: spec == null ? null : '${_f(spec.lf, 1)} $scaleText',
+      value: spec?.lfAquivio,
+      result: spec == null ? '—' : _f(spec.lfAquivio, 3),
+      notes: spec == null
+          ? naSpec
+          : const [(key: 'k2_fx_note_aquivio', params: {})],
+    ),
+  );
+  rows.add(
+    K2FormulaRow(
+      api: 'hf',
+      inputs: const ['hf_ms2'],
+      formula: 'hf_ms2 $scaleText',
+      sub: spec == null ? null : '${_f(spec.hf, 1)} $scaleText',
+      value: spec?.hfAquivio,
+      result: spec == null ? '—' : _f(spec.hfAquivio, 3),
+      notes: spec == null
+          ? naSpec
+          : const [(key: 'k2_fx_note_aquivio_hf', params: {})],
+    ),
+  );
+
   // ── lf_hf ← lf_ms2, hf_ms2 ──────────────────────────────────────
   rows.add(
     K2FormulaRow(

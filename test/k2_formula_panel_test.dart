@@ -85,6 +85,8 @@ void main() {
         'rmssd',
         'lf_ms2',
         'hf_ms2',
+        'lf',
+        'hf',
         'lf_hf',
         'pns',
         'ans',
@@ -140,6 +142,17 @@ void main() {
           contains('k2_fx_note_not_sent'),
         );
       }
+    });
+
+    test('⑦ lf / hf = ms² 值 × 1e-6 × 1024(畫面寫的換算必須就是核心用的)', () {
+      final m = metricsOf(normalRr);
+      final rows = k2FormulaRows(m, beats: 30);
+      double v(String api) =>
+          rows.firstWhere((r) => r.api == api).value as double;
+      expect(v('lf'), closeTo(v('lf_ms2') * 1e-6 * 1024, 1e-12));
+      expect(v('hf'), closeTo(v('hf_ms2') * 1e-6 * 1024, 1e-12));
+      // 比值不受單位影響
+      expect(v('lf') / v('hf'), closeTo(m.lfHf!, 1e-12));
     });
 
     test('④ 高 HRV 撞頂時要標出「夾到 100」', () {
