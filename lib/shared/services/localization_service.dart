@@ -755,6 +755,7 @@ class LocalizationService {
       'k2_fx_rolling': '滾動模式：最近 {sec} 秒，每秒重算',
       'k2_fx_fixed': '定長模式：與左側同一段，收滿後停在量測結束那一刻',
       'k2_fx_round': '畫面四捨五入顯示，實際送出的是完整浮點數',
+      'k2_fx_legend': '深色 = LLM 提示詞裡的 8 個欄位；淡色 = 算它們用的中間量',
       'k2_fx_col_field': '欄位',
       'k2_fx_col_inputs': '帶入',
       'k2_fx_col_formula': '公式',
@@ -1559,6 +1560,8 @@ class LocalizationService {
       'k2_fx_fixed':
           'Fixed window: same segment as the side panel, frozen at the end of the measurement',
       'k2_fx_round': 'Rounded for display; the full floats are what gets sent',
+      'k2_fx_legend':
+          'Dark = the 8 fields in the LLM prompt; faint = intermediates used to compute them',
       'k2_fx_col_field': 'Field',
       'k2_fx_col_inputs': 'From',
       'k2_fx_col_formula': 'Formula',

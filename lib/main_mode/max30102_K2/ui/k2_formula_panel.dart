@@ -58,7 +58,24 @@ class K2FormulaRow {
 
   /// 附註：撞邊、資料不足的原因、名詞說明。
   final List<K2FormulaNote> notes;
+
+  /// 這一列是不是**真的印進 LLM 提示詞**的欄位。
+  /// false = 算它們用的中間量，畫面上用淡色區分。
+  bool get llm => k2LlmFields.contains(api);
 }
+
+/// 對方提示詞實際印出的 8 個欄位（k2-recommend-prompts.ts:364-369）。
+/// 其餘的列（lf_ms2 / hf_ms2 / lf / hf / snr_db）是算它們用的中間量。
+const k2LlmFields = {
+  'mean_hr',
+  'sdnn',
+  'rmssd',
+  'lf_hf',
+  'pns',
+  'ans',
+  'stress',
+  'confidence',
+};
 
 String _f(double? v, int digits) => v == null ? '—' : v.toStringAsFixed(digits);
 
@@ -474,7 +491,8 @@ class K2FormulaPanel extends StatelessWidget {
               Expanded(
                 child: Text(
                   '${fixedMode ? tr('k2_fx_fixed') : trParams('k2_fx_rolling', {'sec': seconds})}'
-                  '　·　${tr('k2_fx_round')}',
+                  '　·　${tr('k2_fx_round')}'
+                  '　·　${tr('k2_fx_legend')}',
                   style: TextStyle(fontSize: 10.5, color: grey),
                 ),
               ),
@@ -518,6 +536,9 @@ class K2FormulaPanel extends StatelessWidget {
   Widget _row(K2FormulaRow r) {
     final grey = Colors.grey.shade600;
     final na = r.value == null;
+    // 中間量(不在 LLM 提示詞裡)整列用淡色、結果不加粗 ——
+    // 一眼就分得出哪 8 列是 LLM 真正看到的。
+    final faint = r.llm ? null : Colors.grey.shade400;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Column(
@@ -530,10 +551,11 @@ class K2FormulaPanel extends StatelessWidget {
                 width: _wField,
                 child: Text(
                   r.api,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontFamily: _mono,
                     fontSize: 12,
-                    fontWeight: FontWeight.bold,
+                    fontWeight: r.llm ? FontWeight.bold : FontWeight.normal,
+                    color: faint,
                   ),
                 ),
               ),
@@ -544,7 +566,7 @@ class K2FormulaPanel extends StatelessWidget {
                   style: TextStyle(
                     fontFamily: _mono,
                     fontSize: 11,
-                    color: Colors.blueGrey.shade400,
+                    color: faint ?? Colors.blueGrey.shade400,
                   ),
                 ),
               ),
@@ -552,7 +574,11 @@ class K2FormulaPanel extends StatelessWidget {
                 flex: 5,
                 child: Text(
                   r.formula,
-                  style: const TextStyle(fontFamily: _mono, fontSize: 11.5),
+                  style: TextStyle(
+                    fontFamily: _mono,
+                    fontSize: 11.5,
+                    color: faint,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -563,7 +589,8 @@ class K2FormulaPanel extends StatelessWidget {
                   style: TextStyle(
                     fontFamily: _mono,
                     fontSize: 11.5,
-                    color: r.sub == null ? grey : Colors.teal.shade700,
+                    color:
+                        faint ?? (r.sub == null ? grey : Colors.teal.shade700),
                   ),
                 ),
               ),
@@ -575,8 +602,8 @@ class K2FormulaPanel extends StatelessWidget {
                   style: TextStyle(
                     fontFamily: _mono,
                     fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: na ? grey : null,
+                    fontWeight: r.llm ? FontWeight.bold : FontWeight.normal,
+                    color: faint ?? (na ? grey : null),
                   ),
                 ),
               ),
@@ -587,7 +614,7 @@ class K2FormulaPanel extends StatelessWidget {
               padding: const EdgeInsets.only(left: _wField + _wInputs, top: 1),
               child: Text(
                 n.params.isEmpty ? tr(n.key) : trParams(n.key, n.params),
-                style: TextStyle(fontSize: 10.5, color: grey),
+                style: TextStyle(fontSize: 10.5, color: faint ?? grey),
               ),
             ),
         ],

@@ -104,6 +104,23 @@ void main() {
       expect(inputs['confidence'], [
         'snr_db',
       ], reason: '送出的 confidence 看 SNR,不是看拍數');
+      // 深色(LLM 看得到)的剛好是提示詞印出的那 8 個,其餘都是中間量
+      expect(
+        [
+          for (final r in rows)
+            if (r.llm) r.api,
+        ],
+        [
+          'mean_hr',
+          'sdnn',
+          'rmssd',
+          'lf_hf',
+          'pns',
+          'ans',
+          'stress',
+          'confidence',
+        ],
+      );
       // 正常資料每一列都要有值
       for (final r in rows) {
         expect(r.value, isNotNull, reason: r.api);
