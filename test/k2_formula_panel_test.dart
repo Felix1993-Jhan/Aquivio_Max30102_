@@ -11,6 +11,7 @@ import 'dart:math' as math;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_hrv_calculator.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_vitals_metrics.dart';
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/ui/k2_drink_preview.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/ui/k2_field_help.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/ui/k2_formula_panel.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
@@ -269,6 +270,21 @@ void main() {
       tick.value++;
       await tester.pumpAndSettle();
       expect(find.text(row(b).result), findsOneWidget, reason: '沒資料時停在上一份');
+    });
+
+    test('⑪ 投票欄:8 個 LLM 欄位都有一票,中間量沒有,而且與 ② 同一份', () {
+      final m = metricsOf(normalRr);
+      final drink = K2DrinkPreview.from(m.toStrapiJson());
+      final votes = k2VotesByApi(drink);
+      final rows = k2FormulaRows(m, beats: 30);
+      for (final r in rows) {
+        expect(votes.containsKey(r.api), r.llm, reason: '${r.api}:LLM 欄位才有投票');
+      }
+      // 對應表沒有漏:② 的每一票都對得到面板上的某一列
+      expect(votes.length, drink.votes.length);
+      for (final v in drink.votes) {
+        expect(votes.values, contains(v));
+      }
     });
 
     test('④ 高 HRV 撞頂時要標出「夾到 100」', () {

@@ -307,6 +307,47 @@ class K2DrinkVote {
   final bool theirs;
 }
 
+/// 投票標籤（交感 +1 / 副交感 +1 / 否決權…）。
+///
+/// ② 投票表與公式帶入面板共用，兩邊的文字與配色才會一致。
+class K2VoteChip extends StatelessWidget {
+  const K2VoteChip(this.side, {super.key});
+
+  final K2VoteSide side;
+
+  @override
+  Widget build(BuildContext context) {
+    final (String label, Color color) = switch (side) {
+      K2VoteSide.sympathetic => (
+        tr('k2_drink_vote_sym'),
+        Colors.orange.shade800,
+      ),
+      K2VoteSide.parasympathetic => (
+        tr('k2_drink_vote_para'),
+        Colors.teal.shade700,
+      ),
+      K2VoteSide.override => (
+        tr('k2_drink_vote_override'),
+        Colors.red.shade700,
+      ),
+      K2VoteSide.notTriggered => (
+        tr('k2_drink_vote_not_triggered'),
+        Colors.grey.shade600,
+      ),
+      K2VoteSide.none => (tr('k2_drink_vote_none'), Colors.grey.shade600),
+      K2VoteSide.unused => (tr('k2_drink_vote_unused'), Colors.grey.shade500),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(label, style: TextStyle(fontSize: 11, color: color)),
+    );
+  }
+}
+
 /// 推演結果。純資料，沒有 Flutter 相依，可以直接寫測試。
 class K2DrinkPreview {
   K2DrinkPreview({
@@ -996,26 +1037,6 @@ class _K2DrinkDialog extends StatelessWidget {
 
   /// 一筆投票一列：欄位 數值 門檻 → 投給誰，底下一行小字「這個欄位影響什麼」。
   Widget _voteRow(K2DrinkVote v) {
-    final (String label, Color color) = switch (v.side) {
-      K2VoteSide.sympathetic => (
-        tr('k2_drink_vote_sym'),
-        Colors.orange.shade800,
-      ),
-      K2VoteSide.parasympathetic => (
-        tr('k2_drink_vote_para'),
-        Colors.teal.shade700,
-      ),
-      K2VoteSide.override => (
-        tr('k2_drink_vote_override'),
-        Colors.red.shade700,
-      ),
-      K2VoteSide.notTriggered => (
-        tr('k2_drink_vote_not_triggered'),
-        Colors.grey.shade600,
-      ),
-      K2VoteSide.none => (tr('k2_drink_vote_none'), Colors.grey.shade600),
-      K2VoteSide.unused => (tr('k2_drink_vote_unused'), Colors.grey.shade500),
-    };
     final dim = v.side == K2VoteSide.unused;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -1058,17 +1079,7 @@ class _K2DrinkDialog extends StatelessWidget {
                   ),
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  border: Border.all(color: color),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  label,
-                  style: TextStyle(fontSize: 11, color: color),
-                ),
-              ),
+              K2VoteChip(v.side),
             ],
           ),
           Padding(

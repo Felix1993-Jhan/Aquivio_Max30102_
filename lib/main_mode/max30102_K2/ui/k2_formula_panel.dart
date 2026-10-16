@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 import '../../../shared/services/localization_service.dart';
 import '../k2_hrv_calculator.dart';
 import '../k2_vitals_metrics.dart';
+import 'k2_drink_preview.dart';
 import 'k2_field_help.dart';
 
 /// 一條附註：翻譯 key + 參數（翻譯留給畫面層做，資料層保持可測）。
@@ -65,7 +66,26 @@ class K2FormulaRow {
   bool get llm => k2LlmFields.contains(api);
 }
 
-/// 對方提示詞實際印出的 8 個欄位（k2-recommend-prompts.ts:364-369）。
+/// ② 投票表用的是提示詞裡的欄位名(`Heart rate`、`LF/HF`…),
+/// 公式面板用的是 JSON key —— 這張表把兩邊對起來。
+const _voteFieldToApi = {
+  'Heart rate': 'mean_hr',
+  'LF/HF': 'lf_hf',
+  'Stress': 'stress',
+  'PNS': 'pns',
+  'RMSSD': 'rmssd',
+  'SDNN': 'sdnn',
+  'ANS score': 'ans',
+  'Reading confidence': 'confidence',
+};
+
+/// ② 的每一票,以 JSON key 為索引。中間量(lf_ms2…)不投票,不會出現在這裡。
+Map<String, K2DrinkVote> k2VotesByApi(K2DrinkPreview p) => {
+  for (final v in p.votes)
+    if (_voteFieldToApi[v.field] != null) _voteFieldToApi[v.field]!: v,
+};
+
+/// fastify 提示詞實際印出的 8 個欄位（k2-recommend-prompts.ts:364-369）。
 /// 其餘的列（lf_ms2 / hf_ms2 / lf / hf / snr_db）是算它們用的中間量。
 const k2LlmFields = {
   'mean_hr',
@@ -467,10 +487,14 @@ class K2FormulaPanel extends StatelessWidget {
   static const double _wField = 108; // 欄位名 + 「?」
   static const double _wInputs = 96;
   static const double _wResult = 96;
+  static const double _wVote = 196; // 門檻 + 投票標籤
 
   @override
   Widget build(BuildContext context) {
     final rows = k2FormulaRows(metrics, beats: beats);
+    // ② 的投票直接拿推薦飲品那套推演的結果,不另外算 —— 兩邊一定一致
+    final drink = K2DrinkPreview.from(metrics.toStrapiJson());
+    final votes = k2VotesByApi(drink);
     final grey = Colors.grey.shade600;
     final head = TextStyle(
       fontSize: 10.5,
@@ -535,16 +559,48 @@ class K2FormulaPanel extends StatelessWidget {
                   textAlign: TextAlign.right,
                 ),
               ),
+              SizedBox(
+                width: _wVote,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 14),
+                  child: Text(tr('k2_fx_col_vote'), style: head),
+                ),
+              ),
             ],
           ),
           const Divider(height: 8),
-          for (final r in rows) _row(context, r),
+          for (final r in rows) _row(context, r, votes[r.api]),
+          // ── 票數總結:與 ② 最後一行相同 ──
+          const Divider(height: 10),
+          Row(
+            children: [
+              Text(
+                drink.votes.any((v) => v.side == K2VoteSide.override)
+                    ? tr('k2_drink_tally_override')
+                    : trParams('k2_drink_tally', {
+                        's': drink.symVotes,
+                        'p': drink.paraVotes,
+                      }),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '→ ${tr(k2DrinkRuleKey(drink.rule))}',
+                  style: TextStyle(fontSize: 11.5, color: grey),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _row(BuildContext context, K2FormulaRow r) {
+  Widget _row(BuildContext context, K2FormulaRow r, K2DrinkVote? vote) {
     final grey = Colors.grey.shade600;
     final na = r.value == null;
     // 中間量(不在 LLM 提示詞裡)整列用淡色、結果不加粗 ——
@@ -644,6 +700,31 @@ class K2FormulaPanel extends StatelessWidget {
                     color: faint ?? (na ? grey : null),
                   ),
                 ),
+              ),
+              // ② 投票:門檻 + 標籤。中間量不投票,留空。
+              SizedBox(
+                width: _wVote,
+                child: vote == null
+                    ? null
+                    : Padding(
+                        padding: const EdgeInsets.only(left: 14),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 74,
+                              child: Text(
+                                vote.criterion,
+                                style: TextStyle(
+                                  fontFamily: _mono,
+                                  fontSize: 11,
+                                  color: grey,
+                                ),
+                              ),
+                            ),
+                            K2VoteChip(vote.side),
+                          ],
+                        ),
+                      ),
               ),
             ],
           ),

@@ -866,6 +866,7 @@ class LocalizationService {
       'k2_fx_col_formula': '公式',
       'k2_fx_col_sub': '代入數值',
       'k2_fx_col_result': '結果',
+      'k2_fx_col_vote': '② 投票',
       'k2_fx_note_sdnn': 'N = RR 間隔數（拍數 − 1）；樣本標準差，分母 N − 1',
       'k2_fx_note_rmssd': 'P = 時間上相鄰（中間沒有漏拍）的相鄰對，目前 {pairs} / {total} 對',
       'k2_fx_note_lfhf':
@@ -1847,6 +1848,7 @@ class LocalizationService {
       'k2_fx_col_formula': 'Formula',
       'k2_fx_col_sub': 'Substituted',
       'k2_fx_col_result': 'Result',
+      'k2_fx_col_vote': '② Vote',
       'k2_fx_note_sdnn':
           'N = number of RR intervals (beats − 1); sample standard deviation, divisor N − 1',
       'k2_fx_note_rmssd':
