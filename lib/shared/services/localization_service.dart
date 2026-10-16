@@ -98,7 +98,8 @@ class LocalizationService {
   LocalizationService._internal();
 
   /// 當前語言通知器（指向全域共用狀態）
-  ValueNotifier<AppLanguage> get currentLanguageNotifier => globalLanguageNotifier;
+  ValueNotifier<AppLanguage> get currentLanguageNotifier =>
+      globalLanguageNotifier;
 
   /// 取得當前語言
   AppLanguage get currentLanguage => globalLanguageNotifier.value;
@@ -258,7 +259,8 @@ class LocalizationService {
       'cleaning_workflow_title': '自動清洗測試流程',
       'cleaning_workflow_subtitle': '4 步驟自動清洗 — 可暫停 / 緊急停止',
       'cleaning_stm_workflow_title': '自動清洗測試流程（STM 單獨）',
-      'cleaning_stm_workflow_subtitle': '不需 Arduino 連線；relay 改由 STM32 ID16 / ID13 操作',
+      'cleaning_stm_workflow_subtitle':
+          '不需 Arduino 連線；relay 改由 STM32 ID16 / ID13 操作',
 
       // 步驟名稱
       'cleaning_step_1_name': '步驟 1：注水至容器',
@@ -267,9 +269,11 @@ class LocalizationService {
       'cleaning_step_4_name': '步驟 4：排空',
 
       // 步驟描述（hover/說明）
-      'cleaning_step_1_desc': '開啟 cleanrelay + containerrelay；STM32 注水至容器（水泵 + 常溫水閥）',
+      'cleaning_step_1_desc':
+          '開啟 cleanrelay + containerrelay；STM32 注水至容器（水泵 + 常溫水閥）',
       'cleaning_step_2_desc': '保持 containerrelay 導通；STM32 啟動 ID0~9 從容器吸取清潔液',
-      'cleaning_step_3_desc': '⚠ 危險步驟。containerrelay 切換為治具方向；STM32 啟動 ID0~9 + 水泵 + 水閥',
+      'cleaning_step_3_desc':
+          '⚠ 危險步驟。containerrelay 切換為治具方向；STM32 啟動 ID0~9 + 水泵 + 水閥',
       'cleaning_step_4_desc': 'STM32 啟動 ID0~9 進行排空動作',
 
       // 步驟狀態
@@ -312,18 +316,21 @@ class LocalizationService {
 
       // 緊急停止橫幅
       'emergency_banner_title': '緊急停止已觸發',
-      'emergency_banner_subtitle': 'STM32 全關 + Arduino 兩 relay 已關閉。請確認硬體狀態，按「重置」解除鎖定。',
+      'emergency_banner_subtitle':
+          'STM32 全關 + Arduino 兩 relay 已關閉。請確認硬體狀態，按「重置」解除鎖定。',
 
       // Workflow log 訊息
       'log_workflow_started': '流程開始',
-      'log_workflow_finalizing': '流程結束清理中：關閉 Arduino cleanrelay / containerrelay',
+      'log_workflow_finalizing':
+          '流程結束清理中：關閉 Arduino cleanrelay / containerrelay',
       'log_workflow_completed': '流程全部完成，所有零件已關閉',
       'log_step_started': '步驟 {step} 開始',
       'log_step_finished': '步驟 {step} 倒數結束',
       'log_step_user_aborted': '步驟 {step} 使用者中止',
       'log_paused': '暫停：STM32 全關，Arduino 保持',
       'log_resumed': '繼續：STM32 恢復 [{ids}]',
-      'log_emergency_triggered': '緊急停止觸發：STM32 全關 + Arduino cleanrelay/containerrelay 關閉',
+      'log_emergency_triggered':
+          '緊急停止觸發：STM32 全關 + Arduino cleanrelay/containerrelay 關閉',
       'log_emergency_reset': '已解除緊急停止鎖定',
       'log_step3_manual_on': '步驟 3 手動開啟 ID0~9',
       'log_step3_manual_off': '步驟 3 手動關閉 ID0~9',
@@ -424,9 +431,9 @@ class LocalizationService {
       'bootloader_bl_update_confirm_title': '確認觸發 BL V2 更新？',
       'bootloader_bl_update_confirm_message':
           '⚠️ 此命令將讓板子 reset 並進入「BL V2 更新模式」。\n\n'
-              '若沒接著立即傳送 BL V2 binary（START 20KB → DATA → END → COMMIT），\n'
-              '板子會在 30 秒後 timeout 自動回 App。\n\n'
-              '確認要送出 sub-cmd 0x10 嗎？',
+          '若沒接著立即傳送 BL V2 binary（START 20KB → DATA → END → COMMIT），\n'
+          '板子會在 30 秒後 timeout 自動回 App。\n\n'
+          '確認要送出 sub-cmd 0x10 嗎？',
       'bootloader_bl_update_confirm_ok': '確認觸發',
       // ---------- Error Report 分頁 ----------
       'page_error_report': '異常偵測',
@@ -459,7 +466,7 @@ class LocalizationService {
       'error_report_all_on_confirm_title': '確認全開 19 個裝置？',
       'error_report_all_on_confirm_message':
           '⚠️ 此動作會同時啟動 19 個裝置（10 個營養液泵 + 水泵 + 3 個 UVC + 3 個 Relay + Clean + Container）。\n\n'
-              '確認硬體連接正確、且測試環境安全嗎？',
+          '確認硬體連接正確、且測試環境安全嗎？',
       'error_report_all_on_confirm_ok': '確認全開',
       // 設定全部（預設值）— 把「出廠測試預設值」一次寫入 26 個 ID
       'error_report_apply_preset': '設定全部（預設值）',
@@ -535,8 +542,10 @@ class LocalizationService {
       'step_phase_running': '運轉中',
       'step_phase_resting': '靜置中',
       'step_pulse_cycle': 'Cycle {n}',
-      'log_phase_enter_rest': '步驟 {step} 進入靜置（Cycle {cycle}）：關閉 STM32 非 relay GPIO，relay 維持',
-      'log_phase_enter_run': '步驟 {step} 進入運轉（Cycle {cycle}）：STM32 ON，本段剩餘 {time}',
+      'log_phase_enter_rest':
+          '步驟 {step} 進入靜置（Cycle {cycle}）：關閉 STM32 非 relay GPIO，relay 維持',
+      'log_phase_enter_run':
+          '步驟 {step} 進入運轉（Cycle {cycle}）：STM32 ON，本段剩餘 {time}',
       'log_pulse_cycle_done': 'Cycle {cycle} 完成（已累計運轉 {acc} / {total}）',
       'log_resumed_rest': '繼續（Cycle {cycle} 靜置中）：Relay 已復原，等待靜置倒數結束',
       // 緊急停止觸發來源
@@ -551,7 +560,8 @@ class LocalizationService {
       'emergency_trigger_resume_stm32': '繼續時 STM32 GPIO 確認失敗（連續 3 次無 ack）',
       'emergency_trigger_finish_stm32': '流程結束清理時 STM32 全關確認失敗',
       'emergency_trigger_finish_clean': '流程結束清理時 Arduino cleanrelay_off 確認失敗',
-      'emergency_trigger_finish_container': '流程結束清理時 Arduino containerrelay_off 確認失敗',
+      'emergency_trigger_finish_container':
+          '流程結束清理時 Arduino containerrelay_off 確認失敗',
       'emergency_trigger_midstep_stm32': '中段步驟結束關閉非 relay GPIO 確認失敗',
       'emergency_banner_source_prefix': '觸發來源',
       // ---------- MAX30102 心跳/血氧分頁 ----------
@@ -594,8 +604,7 @@ class LocalizationService {
           'HR 帶通濾波下限（Hz）。濾掉低於此頻率的基線漂移；0.5Hz≈30bpm。太高會把慢心跳濾掉。',
       'max30102_help_band_high':
           'HR 帶通濾波上限（Hz）。濾掉高於此頻率的雜訊；4Hz≈240bpm。太低會抹掉快心跳細節。',
-      'max30102_help_hr_range':
-          '心率合理範圍（bpm）。算出的 HR 超出此範圍視為無效、不顯示（預設 30~240）。',
+      'max30102_help_hr_range': '心率合理範圍（bpm）。算出的 HR 超出此範圍視為無效、不顯示（預設 30~240）。',
       'max30102_help_spo2_range':
           '血氧合理範圍（%）。算出的 SpO2 超出此範圍視為無效、不顯示（預設 70~100）。',
       'max30102_waveform_hint':
@@ -623,7 +632,8 @@ class LocalizationService {
       'max30102_reset': 'RESET',
       'max30102_reg_addr': '暫存器位址',
       'max30102_reg_value': '寫入值',
-      'max30102_reset_confirm': '確認軟體復位晶片？復位後晶片會進入 POR 休眠（不可用），需再按 [INIT 初始化] 才能恢復運作。一般情況請直接用 INIT。',
+      'max30102_reset_confirm':
+          '確認軟體復位晶片？復位後晶片會進入 POR 休眠（不可用），需再按 [INIT 初始化] 才能恢復運作。一般情況請直接用 INIT。',
       'max30102_log_caps': '(顯示 5000 / 保留 50000)',
 
       // ---------- MAX30102 K2（交接版驗證頁）----------
@@ -653,15 +663,18 @@ class LocalizationService {
       'k2_window_range': '10~{max}',
       'k2_fixed_mode': '定長',
       'k2_hide_dead': '隱藏空轉段',
-      'k2_hide_dead_tip': '把開頭空轉期那 1.5 秒從圖上拿掉(只是顯示,那段本來就沒進計算)。'
+      'k2_hide_dead_tip':
+          '把開頭空轉期那 1.5 秒從圖上拿掉(只是顯示,那段本來就沒進計算)。'
           '先按開始、手指才壓上去時,IR 會從 5 萬爬到 9 萬,縱軸會被那根大波吃掉,'
           '後面真正的脈搏被壓成一條直線。確認過核心在做什麼之後就可以收起來。',
       'k2_snap_full': '完整',
-      'k2_snap_full_tip': '完整存檔:快照額外寫入「核心丟掉的開頭段(空轉 + 沉澱)、'
+      'k2_snap_full_tip':
+          '完整存檔:快照額外寫入「核心丟掉的開頭段(空轉 + 沉澱)、'
           '定長窗狀態、軟體端衍生的全部數值、HRV 全欄位」。'
           '關閉(預設)時產出的檔案與以往完全相同。'
           '⚠ 這是桌面上的快照檔,與 server 送出去的 JSON 無關。',
-      'k2_fixed_hint': '只算這次量測的前 {sec} 秒,之後的不列入。'
+      'k2_fixed_hint':
+          '只算這次量測的前 {sec} 秒,之後的不列入。'
           '計時起點 = 核心吐出第一筆乾淨樣本(手指偵測後約 3.5 秒:'
           '空轉 1.5s + 沉澱 2.0s),所以剛開啟時進度不是從 0.0 開始。',
       'k2_fixed_collecting': '收集中 {got} / {sec} s',
@@ -709,7 +722,8 @@ class LocalizationService {
       'k2_bh_recovering': '恢復中',
       'k2_bh_previous': '上一次(對照)',
       'k2_bh_abort': '⚠ 手指離開,核心已歸零 → 時間軸接不起來,錄製中止。',
-      'k2_bh_hint': '手指放好、等「通道」判定完成再按開始。錄完按結束,'
+      'k2_bh_hint':
+          '手指放好、等「通道」判定完成再按開始。錄完按結束,'
           '換一片板子再錄一次就會疊在同一張圖上比對。',
 
       // HRV 面板
@@ -805,10 +819,11 @@ class LocalizationService {
       'k2_log_start': '🟢 開始量測(探測板子中:0x31 優先,逾時退 0x30)',
       // 推薦飲品預覽（離線推演，不連外）
       'glass_setting': '玻璃質感',
-      'glass_setting_hint': '所有頁面改用半透明 + 背景模糊的樣式。'
+      'glass_setting_hint':
+          '所有頁面改用半透明 + 背景模糊的樣式。'
           '⚠️ 每一層模糊都會讓畫面每一幀多做一次重算 —— '
           '如果量測中發現波形圖變頓，先把這個關掉。',
-      'k2_drink_vote_head': '為什麼命中這一條（★ = 對方提示詞寫死的門檻，其餘為本地自訂）',
+      'k2_drink_vote_head': '為什麼命中這一條（★ = fastify 提示詞寫死的門檻，其餘為本地自訂）',
       'k2_drink_vote_sym': '交感 +1',
       'k2_drink_vote_para': '副交感 +1',
       'k2_drink_vote_override': '否決權觸發',
@@ -817,20 +832,31 @@ class LocalizationService {
       'k2_drink_vote_unused': '規則未引用',
       'k2_drink_tally': '交感 {s} 票 · 副交感 {p} 票',
       'k2_drink_tally_override': '心率偏高 → 否決權生效，其餘訊號一律不計',
-      'k2_drink_eff_hr': '偏高是否決權：只給補水、非氣泡、非刺激（electrolytes），蓋掉其他所有訊號；也是 caffeine / cascara 的迴避條件',
-      'k2_drink_eff_lfhf': '唯一的硬數字。> 1.5 投交感票，也是 caffeine 的迴避條件；≤ 1.5 只是不投交感，不會投副交感',
-      'k2_drink_eff_stress': '高 → 交感票，排除 caffeine / cascara / bcaa / whey / lCarnitine，偏向 lutein；低 → 副交感票。門檻參考 Garmin 壓力分段（> 75 高、≤ 50 低）',
-      'k2_drink_eff_pns': '由 RMSSD 換算，門檻也由 RMSSD 20 / 50 ms 換算而來。低 → 交感票，是 caffeine / cascara 的迴避條件；高 → 副交感票，解鎖能量與表現類',
-      'k2_drink_eff_rmssd': 'HRV 之一（規則寫 high HRV — SDNN/RMSSD）。高 → 副交感票；低 → 交感票。雜訊會把它推高',
-      'k2_drink_eff_sdnn': 'HRV 之一（規則寫 high HRV — SDNN/RMSSD）。高 → 副交感票；低 → 交感票。雜訊同樣會把它推高',
-      'k2_drink_eff_ans': '由 LF/HF 換算（> 64.6 ⇔ LF/HF > 1.5），規則只用 LF/HF 的寫法，再投一次就是同一票算兩次。低 = 偏副交感，但模型可能誤讀成「分數不足」',
+      'k2_drink_eff_hr':
+          '偏高是否決權：只給補水、非氣泡、非刺激（electrolytes），蓋掉其他所有訊號；也是 caffeine / cascara 的迴避條件',
+      'k2_drink_eff_lfhf':
+          '唯一的硬數字。> 1.5 投交感票，也是 caffeine 的迴避條件；≤ 1.5 只是不投交感，不會投副交感',
+      'k2_drink_eff_stress':
+          '高 → 交感票，排除 caffeine / cascara / bcaa / whey / lCarnitine，偏向 lutein；低 → 副交感票。門檻參考 Garmin 壓力分段（> 75 高、≤ 50 低）',
+      'k2_drink_eff_pns':
+          '由 RMSSD 換算，門檻也由 RMSSD 20 / 50 ms 換算而來。低 → 交感票，是 caffeine / cascara 的迴避條件；高 → 副交感票，解鎖能量與表現類',
+      'k2_drink_eff_rmssd':
+          'HRV 之一（規則寫 high HRV — SDNN/RMSSD）。高 → 副交感票；低 → 交感票。雜訊會把它推高',
+      'k2_drink_eff_sdnn':
+          'HRV 之一（規則寫 high HRV — SDNN/RMSSD）。高 → 副交感票；低 → 交感票。雜訊同樣會把它推高',
+      'k2_drink_eff_ans':
+          '由 LF/HF 換算（> 64.6 ⇔ LF/HF > 1.5），規則只用 LF/HF 的寫法，再投一次就是同一票算兩次。低 = 偏副交感，但模型可能誤讀成「分數不足」',
       'k2_drink_eff_conf': '規則與程式都沒有引用，不影響命中哪一條',
       'k2_fx_title': '公式帶入（送給 LLM 的欄位與它們的來源）',
-      'k2_fx_note_power': 'P(f) = Lomb-Scargle 週期圖；k 讓三個頻帶加起來等於 RR 的變異數：VLF {vlf} + LF {lf} + HF {hf} = {total} ≈ SDNN² = {s2}',
+      'k2_fx_note_power':
+          'P(f) = Lomb-Scargle 週期圖；k 讓三個頻帶加起來等於 RR 的變異數：VLF {vlf} + LF {lf} + HF {hf} = {total} ≈ SDNN² = {s2}',
       'k2_fx_note_hf_cyc': 'HF 下緣（0.15 Hz）在這段裡有 {cyc} 個週期',
-      'k2_fx_note_not_sent': '我們自己的單位（ms²），不送給 LLM，只是 lf_hf 的分子分母。送出的 {api} 換成對方單位，見下方',
-      'k2_fx_note_aquivio': 'JSON 送出的值（對方單位，與左側欄 LF 同一個數），不在 LLM 提示詞裡。× 1e-6：ms² → s²（對方的 RR 用秒）；× 1024：對方的 Welch 頻譜直接加總各格、沒乘格寬 Δf = 4 / 4096 Hz，等於多乘 1/Δf = 1024',
-      'k2_fx_note_aquivio_hf': 'JSON 送出的值（對方單位，與左側欄 HF 同一個數），換算同上',
+      'k2_fx_note_not_sent':
+          '我們自己的單位（ms²），不送給 LLM，只是 lf_hf 的分子分母。送進 fastify 的 {api} 另外換成借自 aquivio-vitals 的單位，見下方',
+      'k2_fx_note_aquivio':
+          '送進 fastify 的 JSON 值（與左側欄 LF 同一個數），不在 LLM 提示詞裡。單位借自前一代量測來源 aquivio-vitals（攝影機機台，現由 MAX30102 接手）的 hrv.py。× 1e-6：ms² → s²（aquivio-vitals 的 RR 用秒）；× 1024：aquivio-vitals 的 Welch 頻譜直接加總各格、沒乘格寬 Δf = 4 / 4096 Hz，等於多乘 1/Δf = 1024',
+      'k2_fx_note_aquivio_hf':
+          '送進 fastify 的 JSON 值（與左側欄 HF 同一個數），單位與換算同上（借自 aquivio-vitals）',
       'k2_fx_rolling': '滾動模式：最近 {sec} 秒，每秒重算',
       'k2_fx_fixed': '定長模式：與左側同一段，收滿後停在量測結束那一刻',
       'k2_fx_round': '畫面四捨五入顯示，實際送出的是完整浮點數',
@@ -842,9 +868,11 @@ class LocalizationService {
       'k2_fx_col_result': '結果',
       'k2_fx_note_sdnn': 'N = RR 間隔數（拍數 − 1）；樣本標準差，分母 N − 1',
       'k2_fx_note_rmssd': 'P = 時間上相鄰（中間沒有漏拍）的相鄰對，目前 {pairs} / {total} 對',
-      'k2_fx_note_lfhf': 'Lomb-Scargle 頻譜。本段涵蓋 {span} 秒，LF 下緣（0.04 Hz）只有 {cyc} 個週期',
+      'k2_fx_note_lfhf':
+          'Lomb-Scargle 頻譜。本段涵蓋 {span} 秒，LF 下緣（0.04 Hz）只有 {cyc} 個週期',
       'k2_fx_note_clamp': '算出 {raw}，超出 0 ~ 100 → 夾到 {v}',
-      'k2_fx_note_snr': 'P_signal = 基頻 f₀（= 心率 / 60）與 2f₀ 各 ±{hw} Hz 內的功率；P_noise = {lo} ~ {hi} Hz 內其餘的功率。兩個功率在核心內部，未導出',
+      'k2_fx_note_snr':
+          'P_signal = 基頻 f₀（= 心率 / 60）與 2f₀ 各 ±{hw} Hz 內的功率；P_noise = {lo} ~ {hi} Hz 內其餘的功率。兩個功率在核心內部，未導出',
       'k2_fx_note_conf': '只看 snr_db，與拍數無關（看拍數的是 confidence_by_beats，不送給 LLM）',
       'k2_fx_na_beats': '拍數不足 {min}（目前 {n}）',
       'k2_fx_na_spec': 'RR 間隔不足 8 個，算不出頻譜',
@@ -868,80 +896,125 @@ class LocalizationService {
       'k2_help_hf_ms2_math': _k2LombMathZh,
 
       'k2_help_mean_hr_what': '平均心率：這一段裡所有 RR 間隔（兩拍之間的時間）取平均，換算成每分鐘幾下。',
-      'k2_help_mean_hr_how': '1. 從 IR 波形找出每一拍的谷底\n2. 相鄰兩個谷底的時間差 = 一個 RR 間隔，也就是兩拍之間的間距（ms）\n3. 濾掉漏拍、切拍造成的離群值\n4. mean(RR) = 平均間距：這一段所有 RR 間隔加總 ÷ 個數\n5. 心率 = 60000 ÷ mean(RR)\n\n60000 從哪來：兩邊的單位不同。間距的單位是「毫秒」，心率的單位是「每分鐘幾下」。1 分鐘 = 60 秒 = 60000 毫秒，所以 60000 ÷ 平均間距，就是「1 分鐘裡裝得下幾個間距」= 每分鐘幾拍。\n例：平均間距 885.8 ms → 60000 ÷ 885.8 = 67.7 bpm；間距越短，1 分鐘裝得越多，心率越快。',
-      'k2_help_mean_hr_use': '提示詞的「Heart rate: X bpm」。對方規則「Elevated heart rate」是否決權：心率偏高時不管其他訊號，只給補水、非氣泡、非刺激性的飲品，也是 caffeine / cascara 的迴避條件。對方沒寫多少算偏高，由 LLM 自己判斷；我們 ② 的推演用 100 bpm。',
-      'k2_help_mean_hr_note': '它量的是「當下」，不是靜息心率：量測前剛走動、說話、緊張，都會讓它偏高，進而觸發否決權。是由平均 RR 換算的，與畫面上逐拍的即時心率可能差 1~2 bpm。',
+      'k2_help_mean_hr_how':
+          '1. 從 IR 波形找出每一拍的谷底\n2. 相鄰兩個谷底的時間差 = 一個 RR 間隔，也就是兩拍之間的間距（ms）\n3. 濾掉漏拍、切拍造成的離群值\n4. mean(RR) = 平均間距：這一段所有 RR 間隔加總 ÷ 個數\n5. 心率 = 60000 ÷ mean(RR)\n\n60000 從哪來：兩邊的單位不同。間距的單位是「毫秒」，心率的單位是「每分鐘幾下」。1 分鐘 = 60 秒 = 60000 毫秒，所以 60000 ÷ 平均間距，就是「1 分鐘裡裝得下幾個間距」= 每分鐘幾拍。\n例：平均間距 885.8 ms → 60000 ÷ 885.8 = 67.7 bpm；間距越短，1 分鐘裝得越多，心率越快。',
+      'k2_help_mean_hr_use':
+          '提示詞的「Heart rate: X bpm」。fastify 規則「Elevated heart rate」是否決權：心率偏高時不管其他訊號，只給補水、非氣泡、非刺激性的飲品，也是 caffeine / cascara 的迴避條件。fastify 沒寫多少算偏高，由 LLM 自己判斷；我們 ② 的推演用 100 bpm。',
+      'k2_help_mean_hr_note':
+          '它量的是「當下」，不是靜息心率：量測前剛走動、說話、緊張，都會讓它偏高，進而觸發否決權。是由平均 RR 換算的，與畫面上逐拍的即時心率可能差 1~2 bpm。',
       'k2_help_mean_hr_ref': '成人靜息 60~100 bpm；> 100 bpm 為心搏過速（臨床定義）。',
 
       'k2_help_sdnn_what': 'RR 間隔的標準差：整段心跳快慢起伏的「總量」，同時包含呼吸造成的快速起伏，以及更慢的變化。',
-      'k2_help_sdnn_how': '1. 取這一段的 N 個 RR 間隔\n2. 算平均\n3. 每個 RR 減平均、平方、全部加總\n4. 除以 N − 1（樣本標準差），再開根號',
-      'k2_help_sdnn_use': '提示詞的「HRV SDNN: X ms」。對方規則把它和 RMSSD 並列為 HRV：high HRV — SDNN/RMSSD → 副交感／恢復良好；low HRV → 交感／壓力。',
-      'k2_help_sdnn_note': '短窗下最不可靠的 HRV 指標：SDNN 含有慢變化，窗越短量到的越少。文獻建議至少 30 秒，PPG 研究要 240 秒才穩定，我們的窗是 12~30 秒。漏拍或雜訊也會把它推高。',
-      'k2_help_sdnn_ref': 'Nunan 2010 短時（5 分鐘）常模：平均 50 ± 16 ms（範圍 32~93）。隨年齡下降。',
+      'k2_help_sdnn_how':
+          '1. 取這一段的 N 個 RR 間隔\n2. 算平均\n3. 每個 RR 減平均、平方、全部加總\n4. 除以 N − 1（樣本標準差），再開根號',
+      'k2_help_sdnn_use':
+          '提示詞的「HRV SDNN: X ms」。fastify 規則把它和 RMSSD 並列為 HRV：high HRV — SDNN/RMSSD → 副交感／恢復良好；low HRV → 交感／壓力。',
+      'k2_help_sdnn_note':
+          '短窗下最不可靠的 HRV 指標：SDNN 含有慢變化，窗越短量到的越少。文獻建議至少 30 秒，PPG 研究要 240 秒才穩定，我們的窗是 12~30 秒。漏拍或雜訊也會把它推高。',
+      'k2_help_sdnn_ref':
+          'Nunan 2010 短時（5 分鐘）常模：平均 50 ± 16 ms（範圍 32~93）。隨年齡下降。',
 
       'k2_help_rmssd_what': '相鄰兩拍差值的均方根：只看「這一拍到下一拍」的快速變化，主要反映迷走神經（副交感）的活性。',
-      'k2_help_rmssd_how': '1. 只取時間上相鄰（中間沒有漏拍）的兩拍\n2. 後一拍 − 前一拍，平方，全部加總\n3. 除以相鄰對數 P，再開根號',
-      'k2_help_rmssd_use': '提示詞的「RMSSD: X ms」。它也是 pns 的唯一來源，又透過 pns 決定 stress 的 60%——一個 RMSSD 會同時影響提示詞裡的三行。',
-      'k2_help_rmssd_note': '對雜訊非常敏感：一個誤判的谷底會造成兩個很大的相鄰差，平方後把 RMSSD 大幅推高 → 被讀成「恢復良好」→ 推向刺激類飲品。刻意深呼吸、慢呼吸也會讓它暴增（呼吸性竇性心律不整）。',
-      'k2_help_rmssd_ref': 'Nunan 2010：平均 42 ± 15 ms（範圍 19~75）。10~30 秒的超短時 RMSSD 有文獻驗證（Munoz 2015，與 5 分鐘相關 r = 0.94）。隨年齡下降。',
+      'k2_help_rmssd_how':
+          '1. 只取時間上相鄰（中間沒有漏拍）的兩拍\n2. 後一拍 − 前一拍，平方，全部加總\n3. 除以相鄰對數 P，再開根號',
+      'k2_help_rmssd_use':
+          '提示詞的「RMSSD: X ms」。它也是 pns 的唯一來源，又透過 pns 決定 stress 的 60%——一個 RMSSD 會同時影響提示詞裡的三行。',
+      'k2_help_rmssd_note':
+          '對雜訊非常敏感：一個誤判的谷底會造成兩個很大的相鄰差，平方後把 RMSSD 大幅推高 → 被讀成「恢復良好」→ 推向刺激類飲品。刻意深呼吸、慢呼吸也會讓它暴增（呼吸性竇性心律不整）。',
+      'k2_help_rmssd_ref':
+          'Nunan 2010：平均 42 ± 15 ms（範圍 19~75）。10~30 秒的超短時 RMSSD 有文獻驗證（Munoz 2015，與 5 分鐘相關 r = 0.94）。隨年齡下降。',
 
-      'k2_help_lf_ms2_what': '低頻（0.04~0.15 Hz，週期約 7~25 秒）的心率變化功率，單位 ms²。主要來自血壓調節（壓力反射），交感與副交感都有參與。',
-      'k2_help_lf_ms2_how': '1. 把 RR 依發生的時間排成序列（不等間隔，所以不能直接 FFT）\n2. 用 Lomb-Scargle 週期圖估計每個頻率的功率 P(f)\n3. 0.04~0.15 Hz 內的 P(f)·Δf 加總\n4. 乘上 k，讓 VLF + LF + HF 剛好等於 RR 的變異數（SDNN²）',
-      'k2_help_lf_ms2_use': '不送給 LLM。它只是 lf_hf 的分子；換成對方單位後以 lf 欄位送進 JSON。',
-      'k2_help_lf_ms2_note': '0.04 Hz 一個週期就要 25 秒，12~30 秒的窗連一個完整的慢波都裝不下，所以這個值在我們的窗長下很不可靠。短時 HRV 的標準量測長度是 5 分鐘，原因就在這裡。',
+      'k2_help_lf_ms2_what':
+          '低頻（0.04~0.15 Hz，週期約 7~25 秒）的心率變化功率，單位 ms²。主要來自血壓調節（壓力反射），交感與副交感都有參與。',
+      'k2_help_lf_ms2_how':
+          '1. 把 RR 依發生的時間排成序列（不等間隔，所以不能直接 FFT）\n2. 用 Lomb-Scargle 週期圖估計每個頻率的功率 P(f)\n3. 0.04~0.15 Hz 內的 P(f)·Δf 加總\n4. 乘上 k，讓 VLF + LF + HF 剛好等於 RR 的變異數（SDNN²）',
+      'k2_help_lf_ms2_use':
+          '不送給 LLM，只是 lf_hf 的分子。送進 fastify 時，另外換成借自 aquivio-vitals 的單位，以 lf 欄位送出。',
+      'k2_help_lf_ms2_note':
+          '0.04 Hz 一個週期就要 25 秒，12~30 秒的窗連一個完整的慢波都裝不下，所以這個值在我們的窗長下很不可靠。短時 HRV 的標準量測長度是 5 分鐘，原因就在這裡。',
 
-      'k2_help_hf_ms2_what': '高頻（0.15~0.40 Hz，週期 2.5~6.7 秒）的心率變化功率，單位 ms²。對應每分鐘 9~24 次的呼吸，也就是呼吸性竇性心律不整，主要反映迷走神經。',
+      'k2_help_hf_ms2_what':
+          '高頻（0.15~0.40 Hz，週期 2.5~6.7 秒）的心率變化功率，單位 ms²。對應每分鐘 9~24 次的呼吸，也就是呼吸性竇性心律不整，主要反映迷走神經。',
       'k2_help_hf_ms2_how': '與 lf_ms2 相同，只是頻帶換成 0.15~0.40 Hz。',
-      'k2_help_hf_ms2_use': '不送給 LLM。它只是 lf_hf 的分母；換成對方單位後以 hf 欄位送進 JSON。',
-      'k2_help_hf_ms2_note': '呼吸頻率決定它落在哪裡：呼吸慢於每分鐘 9 次（例如刻意深呼吸）時，呼吸造成的變化會掉進 LF 頻帶 → LF/HF 變大 → 被誤讀成「交感」。30 秒窗約有 4.5 個 HF 週期，比 LF 可靠。',
+      'k2_help_hf_ms2_use':
+          '不送給 LLM，只是 lf_hf 的分母。送進 fastify 時，另外換成借自 aquivio-vitals 的單位，以 hf 欄位送出。',
+      'k2_help_hf_ms2_note':
+          '呼吸頻率決定它落在哪裡：呼吸慢於每分鐘 9 次（例如刻意深呼吸）時，呼吸造成的變化會掉進 LF 頻帶 → LF/HF 變大 → 被誤讀成「交感」。30 秒窗約有 4.5 個 HF 週期，比 LF 可靠。',
 
-      'k2_help_lf_what': 'lf_ms2 換成對方（攝影機端 aquivio-vitals）的單位，是 JSON 裡 lf 欄位實際送出的值，與左側欄「LF (lf)」同一個數。',
-      'k2_help_lf_how': 'lf_ms2 × 1e-6 × 1024\n· × 1e-6：ms² → s²（對方的 RR 用秒）\n· × 1024：對方用 Welch 頻譜（fs = 4 Hz、nfft = 4096）時直接把各格加總、沒有乘上格寬 Δf = 4 / 4096 Hz，等於多乘了 1/Δf = 1024',
-      'k2_help_lf_use': '送進軟體端的 JSON，但不在 LLM 提示詞裡。換單位的目的是讓同名欄位在攝影機機台和我們這邊的數量級一致，下游比較時才不會差一千倍。',
-      'k2_help_lf_note': '1024 綁定對方 nfft = 4096、fs = 4 的設定，對方改了設定，這個係數也要跟著改。兩邊估計頻譜的方法不同（Welch 對 Lomb-Scargle），只保證數量級一致，不保證相等。',
+      'k2_help_lf_what':
+          'lf_ms2 換算後的值，是送進 fastify 的 JSON 裡 lf 欄位的值，與左側欄「LF (lf)」同一個數。\n單位借自 aquivio-vitals：在 MAX30102 之前，負責量測、把數值送給 fastify 的是攝影機機台（rPPG），用的就是 aquivio-vitals。現在 MAX30102 接手了這個角色，而 fastify 的欄位與判斷尺度沒有改，所以我們沿用同一個尺度。',
+      'k2_help_lf_how':
+          'lf_ms2 × 1e-6 × 1024（兩個係數都來自 aquivio-vitals 的 hrv.py）\n· × 1e-6：ms² → s²（aquivio-vitals 的 RR 用秒）\n· × 1024：aquivio-vitals 用 Welch 頻譜（fs = 4 Hz、nfft = 4096）時直接把各格加總、沒有乘上格寬 Δf = 4 / 4096 Hz，等於多乘了 1/Δf = 1024',
+      'k2_help_lf_use':
+          '送進 fastify 的 JSON，但不在 LLM 提示詞裡。換成 aquivio-vitals 的尺度，是為了讓同名欄位和 MAX30102 接手之前、攝影機機台送出的數量級一致，下游比較時才不會差一千倍。',
+      'k2_help_lf_note':
+          '1024 是照抄 aquivio-vitals 當時的 nfft = 4096、fs = 4 設定；換了參考對象，這個係數就要重新核對。兩邊估計頻譜的方法不同（Welch 對 Lomb-Scargle），只保證數量級一致，不保證相等。',
 
-      'k2_help_hf_what': 'hf_ms2 換成對方的單位，是 JSON 裡 hf 欄位實際送出的值，與左側欄「HF (hf)」同一個數。',
+      'k2_help_hf_what':
+          'hf_ms2 換算後的值，是送進 fastify 的 JSON 裡 hf 欄位的值，與左側欄「HF (hf)」同一個數。單位同樣借自 aquivio-vitals。',
       'k2_help_hf_how': 'hf_ms2 × 1e-6 × 1024，換算方式與 lf 相同。',
-      'k2_help_hf_use': '送進軟體端的 JSON，但不在 LLM 提示詞裡。',
-      'k2_help_hf_note': '與 lf 相同：係數綁定對方的頻譜設定，只保證數量級一致。',
+      'k2_help_hf_use': '送進 fastify 的 JSON，但不在 LLM 提示詞裡。',
+      'k2_help_hf_note': '與 lf 相同：係數照抄 aquivio-vitals 的頻譜設定，只保證數量級一致。',
 
-      'k2_help_lf_hf_what': 'LF 功率 ÷ HF 功率。傳統上被當成「交感／副交感平衡」的指標：大於 1 偏交感、小於 1 偏副交感。',
+      'k2_help_lf_hf_what':
+          'LF 功率 ÷ HF 功率。傳統上被當成「交感／副交感平衡」的指標：大於 1 偏交感、小於 1 偏副交感。',
       'k2_help_lf_hf_how': 'lf_ms2 ÷ hf_ms2。單位在比值裡約掉，所以用 lf ÷ hf 算出來也一樣。',
-      'k2_help_lf_hf_use': '提示詞的「ANS balance (LF/HF X)」。這是對方規則裡唯一寫死的數字：LF/HF > 1.5 → 交感主導，也是 caffeine 的迴避條件。它也是 ans 的唯一來源。',
-      'k2_help_lf_hf_note': '三個問題疊在一起：\n① 窗長：LF 在 12~30 秒的窗裡量不準（見 lf_ms2）\n② 生理意義有爭議：Billman 2013 指出 LF/HF 不能準確代表交感／副交感平衡\n③ 門檻：健康人靜息平均約 2.8，用 1.5 當門檻，大多數健康、放鬆的人都會被判成交感主導\n我們有送 lf_reliable 旗標說明可信度，但對方沒有讀它。',
+      'k2_help_lf_hf_use':
+          '提示詞的「ANS balance (LF/HF X)」。這是 fastify 規則裡唯一寫死的數字：LF/HF > 1.5 → 交感主導，也是 caffeine 的迴避條件。它也是 ans 的唯一來源。',
+      'k2_help_lf_hf_note':
+          '三個問題疊在一起：\n① 窗長：LF 在 12~30 秒的窗裡量不準（見 lf_ms2）\n② 生理意義有爭議：Billman 2013 指出 LF/HF 不能準確代表交感／副交感平衡\n③ 門檻：健康人靜息平均約 2.8，用 1.5 當門檻，大多數健康、放鬆的人都會被判成交感主導\n我們有送 lf_reliable 旗標說明可信度，但 fastify 沒有讀它。',
       'k2_help_lf_hf_ref': 'Nunan 2010 短時（5 分鐘）常模：平均 2.8 ± 2.6（範圍 1.1~11.6）。',
 
-      'k2_help_pns_what': '對方的「副交感／恢復」分數（0~100，對方畫面上叫 Recovery）。它就是 RMSSD 換成對數尺度，沒有加入任何新資訊。',
-      'k2_help_pns_how': '(log₁₀ RMSSD − 1) ÷ (log₁₀ 80 − 1)，夾在 0~1 之間，再 × 100。\nRMSSD 10 ms → 0 分、80 ms → 100 分，超出兩端就夾住。',
-      'k2_help_pns_use': '提示詞的「PNS / recovery: X/100」。對方規則：low PNS → 交感；high PNS → 副交感。它也占 stress 的 60%。',
-      'k2_help_pns_note': 'RMSSD ≥ 80 ms 一律 100 分（撞頂），分不出「真的很好」和「被雜訊推高」。公式來自 aquivio-vitals，原始註解自稱 heuristic、not clinical。與左側欄的「副交感 z」（Kubios 式 z-score）是不同的東西，尺度不能互相比較。',
+      'k2_help_pns_what':
+          '送進 fastify 的「副交感／恢復」分數（0~100）。公式借自前一代量測來源 aquivio-vitals（攝影機機台，現由 MAX30102 接手）的 derived_scores()，fastify 提示詞裡的 PNS 就是照這個尺度寫的。它就是 RMSSD 換成對數尺度，沒有加入任何新資訊。',
+      'k2_help_pns_how':
+          '(log₁₀ RMSSD − 1) ÷ (log₁₀ 80 − 1)，夾在 0~1 之間，再 × 100。\nRMSSD 10 ms → 0 分、80 ms → 100 分，超出兩端就夾住。',
+      'k2_help_pns_use':
+          '提示詞的「PNS / recovery: X/100」。fastify 規則：low PNS → 交感；high PNS → 副交感。它也占 stress 的 60%。',
+      'k2_help_pns_note':
+          'RMSSD ≥ 80 ms 一律 100 分（撞頂），分不出「真的很好」和「被雜訊推高」。公式來自 aquivio-vitals，原始註解自稱 heuristic、not clinical。與左側欄的「副交感 z」（Kubios 式 z-score）是不同的東西，尺度不能互相比較。',
       'k2_help_pns_ref': '常模平均 RMSSD 42 ms 換算約 69 分。',
 
-      'k2_help_ans_what': '對方的「自律神經平衡」分數（0~100）。它就是 LF/HF 取對數後縮放，分數越高越偏交感。',
-      'k2_help_ans_how': '0.5 + log₂(LF/HF) ÷ 4，夾在 0~1 之間，再 × 100。\nLF/HF 0.25 → 0 分、1 → 50 分、4 → 100 分。',
-      'k2_help_ans_use': '提示詞的「ANS score X/100」，與 LF/HF 印在同一行。對方規則沒有直接點名它，但它占 stress 的 40%。',
-      'k2_help_ans_note': '方向容易誤讀：低分代表偏副交感（放鬆），不是「分數不足」。LF/HF 的所有問題它全部繼承。LF/HF > 1.5 等於 ans > 64.6。',
+      'k2_help_ans_what':
+          '送進 fastify 的「自律神經平衡」分數（0~100），公式借自 aquivio-vitals 的 derived_scores()。它就是 LF/HF 取對數後縮放，分數越高越偏交感。',
+      'k2_help_ans_how':
+          '0.5 + log₂(LF/HF) ÷ 4，夾在 0~1 之間，再 × 100。\nLF/HF 0.25 → 0 分、1 → 50 分、4 → 100 分。',
+      'k2_help_ans_use':
+          '提示詞的「ANS score X/100」，與 LF/HF 印在同一行。fastify 規則沒有直接點名它，但它占 stress 的 40%。',
+      'k2_help_ans_note':
+          '方向容易誤讀：低分代表偏副交感（放鬆），不是「分數不足」。LF/HF 的所有問題它全部繼承。LF/HF > 1.5 等於 ans > 64.6。',
 
-      'k2_help_stress_what': '對方的「壓力」分數（0~100）。由 pns 和 ans 加權混合而成，不是獨立的量測。',
+      'k2_help_stress_what':
+          '送進 fastify 的「壓力」分數（0~100），公式借自 aquivio-vitals 的 derived_scores()。由 pns 和 ans 加權混合而成，不是獨立的量測。',
       'k2_help_stress_how': '0.6 × (100 − PNS) + 0.4 × ANS，夾在 0~100。',
-      'k2_help_stress_use': '提示詞的「Stress: X/100」。對方規則：high stress → 交感，排除 caffeine、cascara、bcaa、whey、lCarnitine；low stress → 副交感。',
-      'k2_help_stress_note': '展開來就是 60% RMSSD + 40% LF/HF，所以它和 rmssd、pns 不是三個獨立的證據。RMSSD ≥ 80 ms 時 PNS = 100，stress 最高只剩 40，一定被讀成低壓力。左側欄另有一個 Baevsky 壓力指數（stress_baevsky），那是不同的東西，也不送給 LLM。',
-      'k2_help_stress_ref': '對方的量表沒有文獻依據。可參考 Garmin 的 0~100 壓力分段：0~25 休息、26~50 低、51~75 中、76~100 高（② 的推演門檻即採用此分段）。',
+      'k2_help_stress_use':
+          '提示詞的「Stress: X/100」。fastify 規則：high stress → 交感，排除 caffeine、cascara、bcaa、whey、lCarnitine；low stress → 副交感。',
+      'k2_help_stress_note':
+          '展開來就是 60% RMSSD + 40% LF/HF，所以它和 rmssd、pns 不是三個獨立的證據。RMSSD ≥ 80 ms 時 PNS = 100，stress 最高只剩 40，一定被讀成低壓力。左側欄另有一個 Baevsky 壓力指數（stress_baevsky），那是不同的東西，也不送給 LLM。',
+      'k2_help_stress_ref':
+          '這套量表借自 aquivio-vitals，沒有文獻依據（原始註解自稱 heuristic、not clinical）。可參考 Garmin 的 0~100 壓力分段：0~25 休息、26~50 低、51~75 中、76~100 高（② 的推演門檻即採用此分段）。',
 
       'k2_help_snr_db_what': '波形的訊噪比（dB）：脈搏頻率上的功率，和其他頻率上的功率之比。衡量波形「乾不乾淨」。',
-      'k2_help_snr_db_how': '1. IR 原始波形減平均、乘 Hann 窗\n2. FFT（補零到 2 的冪次）\n3. 在 0.5~4 Hz 內，f₀（= 心率 ÷ 60）與 2f₀ 各 ±0.2 Hz 的功率算「訊號」，其餘算「雜訊」\n4. 10 · log₁₀(訊號 ÷ 雜訊)',
-      'k2_help_snr_db_use': '不送給 LLM，但 confidence 完全由它決定。',
-      'k2_help_snr_db_note': '它其實也在量「心率穩不穩」：訊號窗只有 ±0.2 Hz（約 ±12 bpm），整段心率起伏超過這個範圍，脈搏能量就會落到窗外被算成雜訊——深呼吸造成的心率擺動就會讓 SNR 下降。頻帶與門檻照抄攝影機端 aquivio-vitals，是為 rPPG 校準的，和我們的接觸式 PPG 不一定對應。',
-      'k2_help_snr_db_ref': 'aquivio-vitals 原始註解：低於約 6 dB 時，RMSSD 的雜訊底線會超過典型的靜息 HRV。',
+      'k2_help_snr_db_how':
+          '1. IR 原始波形減平均、乘 Hann 窗\n2. FFT（補零到 2 的冪次）\n3. 在 0.5~4 Hz 內，f₀（= 心率 ÷ 60）與 2f₀ 各 ±0.2 Hz 的功率算「訊號」，其餘算「雜訊」\n4. 10 · log₁₀(訊號 ÷ 雜訊)',
+      'k2_help_snr_db_use':
+          '送進 fastify 的 JSON，但不在 LLM 提示詞裡；送給 LLM 的 confidence 完全由它決定。',
+      'k2_help_snr_db_note':
+          '它其實也在量「心率穩不穩」：訊號窗只有 ±0.2 Hz（約 ±12 bpm），整段心率起伏超過這個範圍，脈搏能量就會落到窗外被算成雜訊——深呼吸造成的心率擺動就會讓 SNR 下降。頻帶與門檻借自前一代量測來源 aquivio-vitals（攝影機機台，現由 MAX30102 接手）的 core.py，是為 rPPG 校準的，和我們的接觸式 PPG 不一定對應。',
+      'k2_help_snr_db_ref':
+          'aquivio-vitals 原始註解：低於約 6 dB 時，RMSSD 的雜訊底線會超過典型的靜息 HRV。',
 
       'k2_help_confidence_what': '讀數可信度：good / rough / very rough。',
-      'k2_help_confidence_how': '只看 snr_db：\n≥ 6 dB → good\n≥ 1 dB → rough\n其餘 → very rough\nsnr_db 算不出來 → null',
-      'k2_help_confidence_use': '提示詞的「Reading confidence: X」。但對方的規則和程式都沒有任何一處用到它——模型看得到，卻沒有被告知該怎麼用。',
-      'k2_help_confidence_note': '與拍數無關。看拍數的是另一個欄位 confidence_by_beats，不送給 LLM。所以「good」不代表樣本夠多，只代表波形的頻譜乾淨。',
+      'k2_help_confidence_how':
+          '只看 snr_db（門檻借自 aquivio-vitals 的 hrv_confidence()）：\n≥ 6 dB → good\n≥ 1 dB → rough\n其餘 → very rough\nsnr_db 算不出來 → null',
+      'k2_help_confidence_use':
+          '提示詞的「Reading confidence: X」。但 fastify 的規則和程式都沒有任何一處用到它——模型看得到，卻沒有被告知該怎麼用。',
+      'k2_help_confidence_note':
+          '與拍數無關。看拍數的是另一個欄位 confidence_by_beats，不送給 LLM。所以「good」不代表樣本夠多，只代表波形的頻譜乾淨。',
 
       'k2_drink_btn': '推薦飲品',
       'k2_drink_title': '這組數字會換到哪一杯？',
-      'k2_drink_sec_payload': '① 會送出去的欄位（逐字照對方模板）',
+      'k2_drink_sec_payload': '① 會送出去的欄位（逐字照 fastify 模板）',
       'k2_drink_sec_rule': '② 會命中的規則',
       'k2_drink_sec_picks': '③ 會被偏好 / 排除的飲品',
       'k2_drink_favored': '偏好',
@@ -949,26 +1022,27 @@ class LocalizationService {
       'k2_drink_close': '關閉',
       'k2_drink_apply_stock': '只看機器有的',
       'k2_drink_stock_row': '機器庫存（模擬）',
-      'k2_drink_none_stocked': '⚠️ 機器裡沒有任何入圍的營養劑 —— 實際上對方會拿不到可選的 slug',
-      'k2_drink_no_avoid_note': 'ℹ️ 11 款裡有 5 款（electrolytes / collagen / lutein / creatine / fiber）'
-          '在對方知識庫裡**根本沒有 avoidWhen 欄位**，所以永遠不會出現在「排除」。\n'
+      'k2_drink_none_stocked': '⚠️ 機器裡沒有任何入圍的營養劑 —— 實際上 fastify 會拿不到可選的 slug',
+      'k2_drink_no_avoid_note':
+          'ℹ️ 11 款裡有 5 款（electrolytes / collagen / lutein / creatine / fiber）'
+          '在 fastify 知識庫裡**根本沒有 avoidWhen 欄位**，所以永遠不會出現在「排除」。\n'
           '「不在排除清單」不等於「被評估過而且通過」。\n'
           '另外 electrolytes 的依據有兩條來源且不一致（自己的 bestFor 只講心率偏高，\n'
           '但提示詞的交感規則又把 hydration/mineral 包進去），實際上幾乎永遠是候選。',
-      'k2_drink_rule_hr': '心率偏高 → 一律補水、非氣泡、非刺激性（對方寫明這條**不管其他訊號**）',
+      'k2_drink_rule_hr': '心率偏高 → 一律補水、非氣泡、非刺激性（fastify 寫明這條**不管其他訊號**）',
       'k2_drink_rule_sym': '交感主導／壓力 → 恢復與鎮靜類：補水礦物、抗氧化、恢復。**禁咖啡因與任何刺激物**',
       'k2_drink_rule_para': '副交感／恢復良好 → 能量與表現類：刺激物、胺基酸、蛋白質、代謝',
       'k2_drink_rule_neutral': '中性／混合，沒有主導訊號 → 一般支持類，但仍偏向現有最強的那個訊號',
-      'k2_drink_trust_head': '⚠️ 這筆數據可能不可信 —— 但對方**不會擋**',
+      'k2_drink_trust_head': '⚠️ 這筆數據可能不可信 —— 但 fastify**不會擋**',
       'k2_drink_trust_pi': '灌流指數過低，訊號不像脈搏（實測木頭桌面 0.149%、真手指 10.1%）',
       'k2_drink_trust_hr': '心率超出生理可能範圍',
-      'k2_drink_trust_direction':
-          '⚠️ 而且方向危險：雜訊會把 HRV 推高 → 被讀成「恢復良好」→ 推刺激類飲品',
-      'k2_drink_disclaimer': '① 是精確的（照對方 k2-recommend-prompts.ts 的模板逐字排版）。\n'
-          '②③ 是本地推演的近似值：對方提示詞裡**只有 LF/HF > 1.5 是硬數字**，\n'
+      'k2_drink_trust_direction': '⚠️ 而且方向危險：雜訊會把 HRV 推高 → 被讀成「恢復良好」→ 推刺激類飲品',
+      'k2_drink_disclaimer':
+          '① 是精確的（照 fastify k2-recommend-prompts.ts 的模板逐字排版）。\n'
+          '②③ 是本地推演的近似值：fastify 提示詞裡**只有 LF/HF > 1.5 是硬數字**，\n'
           '其餘「高 stress / 低 PNS / 低 HRV / 心率偏高」都交給 LLM 自由心證，\n'
-          '所以這裡用的門檻是我們自己訂的（見 K2DrinkThresholds），不是對方的行為。\n'
-          '飲品清單是 infusion-knowledge.ts 的快照，對方改了這裡不會自動跟著動。\n'
+          '所以這裡用的門檻是我們自己訂的（見 K2DrinkThresholds），不是 fastify 的行為。\n'
+          '飲品清單是 infusion-knowledge.ts 的快照，fastify 改了這裡不會自動跟著動。\n'
           '本頁不連外、不發送任何資料。',
       'k2_log_stop': '⏸ 停止量測',
       'k2_log_round_late': '⏳ 送出後 {ms}ms 內沒有完整回應(通訊延遲;連續多輪才會重開串口)',
@@ -1029,7 +1103,8 @@ class LocalizationService {
       'select_stm32_port': 'Please select STM32 port first',
       'connect_stm32_first': 'Please connect STM32 first',
       'stm32_usb_removed': 'STM32 USB removed, connection closed',
-      'stm32_wrong_port': 'Selected COM port is not STM32\nPlease pick the correct port',
+      'stm32_wrong_port':
+          'Selected COM port is not STM32\nPlease pick the correct port',
       'stm32_connection_error': 'STM32 connection may be lost\nor in error',
       'stm32_verifying': 'Connecting STM32, verifying device...',
       'stm32_connecting': 'STM32 connecting... ({current}/{max})',
@@ -1116,18 +1191,23 @@ class LocalizationService {
       // Auto-Cleaning Workflow
       // ============================================================
       'cleaning_workflow_title': 'Auto-Cleaning Workflow',
-      'cleaning_workflow_subtitle': '4-step automated cleaning — pause / emergency-stop',
+      'cleaning_workflow_subtitle':
+          '4-step automated cleaning — pause / emergency-stop',
       'cleaning_stm_workflow_title': 'Auto-Cleaning Workflow (STM only)',
-      'cleaning_stm_workflow_subtitle': 'No Arduino required; relays driven by STM32 ID16 / ID13',
+      'cleaning_stm_workflow_subtitle':
+          'No Arduino required; relays driven by STM32 ID16 / ID13',
 
       'cleaning_step_1_name': 'Step 1: Fill container',
       'cleaning_step_2_name': 'Step 2: Suction cleaning liquid',
       'cleaning_step_3_name': 'Step 3: Cleaning cycle',
       'cleaning_step_4_name': 'Step 4: Drain',
 
-      'cleaning_step_1_desc': 'Open cleanrelay + containerrelay; STM32 fills container (water pump + ambient valve)',
-      'cleaning_step_2_desc': 'Keep containerrelay on; STM32 starts ID0~9 to suction from container',
-      'cleaning_step_3_desc': '⚠ Dangerous. Switch containerrelay to fixture; STM32 runs ID0~9 + pump + valve',
+      'cleaning_step_1_desc':
+          'Open cleanrelay + containerrelay; STM32 fills container (water pump + ambient valve)',
+      'cleaning_step_2_desc':
+          'Keep containerrelay on; STM32 starts ID0~9 to suction from container',
+      'cleaning_step_3_desc':
+          '⚠ Dangerous. Switch containerrelay to fixture; STM32 runs ID0~9 + pump + valve',
       'cleaning_step_4_desc': 'STM32 runs ID0~9 to drain the system',
 
       'step_status_idle': 'Idle',
@@ -1155,26 +1235,31 @@ class LocalizationService {
       'step3_pause_hint': 'You can manually toggle ID0~9 while paused',
 
       'confirm_proceed_title': 'Step {step} completed',
-      'confirm_proceed_message': 'Next step will execute:\n{actions}\n\nProceed to step {next}?',
+      'confirm_proceed_message':
+          'Next step will execute:\n{actions}\n\nProceed to step {next}?',
       'confirm_proceed_yes': 'Proceed to next step',
       'confirm_proceed_no': 'Cancel (stop workflow)',
       'confirm_emergency_reset_title': 'Confirm Reset',
-      'confirm_emergency_reset_message': 'Please confirm all hardware is in safe state and the workflow can be re-armed.',
+      'confirm_emergency_reset_message':
+          'Please confirm all hardware is in safe state and the workflow can be re-armed.',
       'confirm_emergency_reset_yes': 'Confirmed, unlock',
       'workflow_aborted_by_user': 'Workflow aborted by user',
 
       'emergency_banner_title': 'Emergency stop triggered',
-      'emergency_banner_subtitle': 'STM32 fully off + both Arduino relays off. Verify hardware then press Reset to unlock.',
+      'emergency_banner_subtitle':
+          'STM32 fully off + both Arduino relays off. Verify hardware then press Reset to unlock.',
 
       'log_workflow_started': 'Workflow started',
-      'log_workflow_finalizing': 'Finalizing: turning off Arduino cleanrelay / containerrelay',
+      'log_workflow_finalizing':
+          'Finalizing: turning off Arduino cleanrelay / containerrelay',
       'log_workflow_completed': 'Workflow completed; all components turned off',
       'log_step_started': 'Step {step} started',
       'log_step_finished': 'Step {step} countdown ended',
       'log_step_user_aborted': 'Step {step} aborted by user',
       'log_paused': 'Paused: STM32 all-off, Arduino held',
       'log_resumed': 'Resumed: STM32 re-enabled [{ids}]',
-      'log_emergency_triggered': 'Emergency stop: STM32 all-off + Arduino cleanrelay/containerrelay off',
+      'log_emergency_triggered':
+          'Emergency stop: STM32 all-off + Arduino cleanrelay/containerrelay off',
       'log_emergency_reset': 'Emergency lock cleared',
       'log_step3_manual_on': 'Step 3 manual ON ID0~9',
       'log_step3_manual_off': 'Step 3 manual OFF ID0~9',
@@ -1184,22 +1269,29 @@ class LocalizationService {
       'log_send_arduino': 'Arduino: {cmd}',
       'log_countdown_tick': 'Remaining {time}',
       'log_step_idle_outputs': 'Step {step}: no STM32 outputs enabled',
-      'log_step_hw_ready': 'Step {step}: hardware ack complete, countdown starts',
+      'log_step_hw_ready':
+          'Step {step}: hardware ack complete, countdown starts',
       // ACK
       'log_ack_wait_arduino': 'Awaiting Arduino ack: {cmd}',
       'log_ack_ok_arduino': 'Arduino ack OK: {cmd}',
       'log_ack_retry_arduino': 'Retry ({n}/3): Arduino {cmd}',
       'log_ack_retried_arduino_ok': 'Arduino ack OK: {cmd} (after {n} retries)',
-      'log_ack_failed_arduino': 'X Arduino {cmd} not acknowledged after 3 retries -- emergency stop',
+      'log_ack_failed_arduino':
+          'X Arduino {cmd} not acknowledged after 3 retries -- emergency stop',
       'log_ack_wait_stm32': 'Awaiting STM32 ack: cmd=0x{cmd} mask={mask}',
       'log_ack_ok_stm32': 'STM32 ack OK: cmd=0x{cmd} mask={mask}',
       'log_ack_retry_stm32': 'Retry ({n}/3): STM32 cmd=0x{cmd}',
-      'log_ack_retried_stm32_ok': 'STM32 ack OK: cmd=0x{cmd} (after {n} retries)',
-      'log_ack_failed_stm32': 'X STM32 cmd=0x{cmd} not acknowledged after 3 retries -- emergency stop',
-      'log_emergency_warn_stm32': 'WARN: STM32 all-off ack missing; lock retained',
-      'log_emergency_warn_arduino': 'WARN: Arduino {cmd} ack missing; lock retained',
+      'log_ack_retried_stm32_ok':
+          'STM32 ack OK: cmd=0x{cmd} (after {n} retries)',
+      'log_ack_failed_stm32':
+          'X STM32 cmd=0x{cmd} not acknowledged after 3 retries -- emergency stop',
+      'log_emergency_warn_stm32':
+          'WARN: STM32 all-off ack missing; lock retained',
+      'log_emergency_warn_arduino':
+          'WARN: Arduino {cmd} ack missing; lock retained',
       'log_emergency_finished': 'Emergency stop sequence complete',
-      'ack_failed_snackbar': 'Hardware not acknowledged, please check connection and retry',
+      'ack_failed_snackbar':
+          'Hardware not acknowledged, please check connection and retry',
 
       'id_label_s0': 's0 (slot 1)',
       'id_label_s1': 's1 (slot 2)',
@@ -1229,8 +1321,10 @@ class LocalizationService {
       'confirm_each_step_toggle': 'Confirm before each step',
       'step_test_only': 'Test this step alone',
       'log_test_single_step': 'Single-step test: running step {step}',
-      'log_step_transition_auto': 'Auto-proceeding to next step (confirm disabled)',
-      'log_step_partial_off': 'Step {step} end: turning off non-relay GPIO (relay state retained)',
+      'log_step_transition_auto':
+          'Auto-proceeding to next step (confirm disabled)',
+      'log_step_partial_off':
+          'Step {step} end: turning off non-relay GPIO (relay state retained)',
       'log_relay_activation_delay': 'Relay activation delay 200ms...',
       'log_relay_no_change': 'Relay unchanged, skipping switch',
       // Auto-proceed SnackBar
@@ -1273,10 +1367,10 @@ class LocalizationService {
       'bootloader_bl_update_confirm_title': 'Confirm BL V2 update?',
       'bootloader_bl_update_confirm_message':
           '⚠️ This will reset the board into "BL V2 update mode".\n\n'
-              'If you don\'t immediately follow up with BL V2 binary '
-              '(START 20KB → DATA → END → COMMIT), the board will auto-recover '
-              'to App after 30s timeout.\n\n'
-              'Confirm sending sub-cmd 0x10?',
+          'If you don\'t immediately follow up with BL V2 binary '
+          '(START 20KB → DATA → END → COMMIT), the board will auto-recover '
+          'to App after 30s timeout.\n\n'
+          'Confirm sending sub-cmd 0x10?',
       'bootloader_bl_update_confirm_ok': 'Confirm',
       // ---------- Error Report page ----------
       'page_error_report': 'Error Detection',
@@ -1302,14 +1396,15 @@ class LocalizationService {
       'error_report_set': 'SET',
       'error_report_clear': 'CLEAR',
       'error_report_set_section': 'SET Parameters',
-      'error_report_no_read_yet': 'No READ yet — press [READ] to load current values',
+      'error_report_no_read_yet':
+          'No READ yet — press [READ] to load current values',
       'error_report_device_control': 'Device Control (ID 0~17 + 25)',
       'error_report_all_on': 'ALL ON',
       'error_report_all_off': 'ALL OFF',
       'error_report_all_on_confirm_title': 'Confirm turning ALL 19 devices ON?',
       'error_report_all_on_confirm_message':
           '⚠️ This will simultaneously activate 19 devices (10 pumps + water pump + 3 UVC + 3 relays + Clean + Container).\n\n'
-              'Verify hardware is connected and test environment is safe?',
+          'Verify hardware is connected and test environment is safe?',
       'error_report_all_on_confirm_ok': 'Confirm ALL ON',
       // Apply factory testing preset to all 26 IDs
       'error_report_apply_preset': 'Set All (Preset)',
@@ -1350,15 +1445,13 @@ class LocalizationService {
       'group_b_debounce_label': 'Compare window',
       'group_b_debounce_hint':
           'Compare flow delta every N ms (multiples of 200)',
-      'group_b_thr_low_hint':
-          'Flow delta within window <= this value = fault',
+      'group_b_thr_low_hint': 'Flow delta within window <= this value = fault',
       // Group C: Pressure (orange)
       'group_c_title': 'Pressure',
       'group_c_subtitle': 'ID 19 (CO2 pressure), 20 (water pressure)',
       'group_c_debounce_label': 'Consecutive',
       'group_c_debounce_suffix': 'times',
-      'group_c_debounce_hint':
-          'Fires after N consecutive matches (1 = 200ms)',
+      'group_c_debounce_hint': 'Fires after N consecutive matches (1 = 200ms)',
       'group_c_thr_off_hint': 'Idle-state pressure upper limit',
       'group_c_thr_low_hint': 'Running-state pressure lower limit',
       'group_c_baseline_hint': 'Boot-time auto-calibrated pressure baseline',
@@ -1370,8 +1463,7 @@ class LocalizationService {
       'group_d_debounce_hint':
           'Fires after N consecutive faults (each read ~1s, unit=count)',
       'group_d_sensor_label': 'SENSOR check',
-      'group_d_sensor_hint':
-          'Reading integer 85 indicates sensor disconnected',
+      'group_d_sensor_hint': 'Reading integer 85 indicates sensor disconnected',
       'group_d_thr_low_hint':
           'Temperature below this = fault (can be negative)',
       'group_d_thr_high_hint': 'Temperature above this = fault',
@@ -1399,24 +1491,40 @@ class LocalizationService {
       'step_phase_running': 'Running',
       'step_phase_resting': 'Resting',
       'step_pulse_cycle': 'Cycle {n}',
-      'log_phase_enter_rest': 'Step {step} entering rest (cycle {cycle}): non-relay GPIO off, relay maintained',
-      'log_phase_enter_run': 'Step {step} entering run (cycle {cycle}): STM32 ON, this phase remaining {time}',
-      'log_pulse_cycle_done': 'Cycle {cycle} done (accumulated run {acc} / {total})',
-      'log_resumed_rest': 'Resumed (cycle {cycle}, resting): relay restored, waiting for rest timer',
+      'log_phase_enter_rest':
+          'Step {step} entering rest (cycle {cycle}): non-relay GPIO off, relay maintained',
+      'log_phase_enter_run':
+          'Step {step} entering run (cycle {cycle}): STM32 ON, this phase remaining {time}',
+      'log_pulse_cycle_done':
+          'Cycle {cycle} done (accumulated run {acc} / {total})',
+      'log_resumed_rest':
+          'Resumed (cycle {cycle}, resting): relay restored, waiting for rest timer',
       // Emergency trigger source
-      'log_emergency_triggered_with_source': 'Emergency stop triggered (source: {source})',
-      'log_emergency_reentry': 'Re-entered emergency stop (already in emergency, source: {source})',
+      'log_emergency_triggered_with_source':
+          'Emergency stop triggered (source: {source})',
+      'log_emergency_reentry':
+          'Re-entered emergency stop (already in emergency, source: {source})',
       'emergency_trigger_manual': 'User pressed emergency stop button',
-      'emergency_trigger_user_abort': 'User selected "Cancel" in step transition dialog',
-      'emergency_trigger_enter_relay': 'Relay ack failed on step entry (3 retries exhausted)',
-      'emergency_trigger_enter_stm32': 'STM32 GPIO ack failed on step entry (3 retries exhausted)',
-      'emergency_trigger_pause_stm32': 'STM32 all-off ack failed on pause (3 retries exhausted)',
-      'emergency_trigger_resume_relay': 'Relay ack failed on resume (3 retries exhausted)',
-      'emergency_trigger_resume_stm32': 'STM32 GPIO ack failed on resume (3 retries exhausted)',
-      'emergency_trigger_finish_stm32': 'STM32 all-off ack failed during final cleanup',
-      'emergency_trigger_finish_clean': 'Arduino cleanrelay_off ack failed during final cleanup',
-      'emergency_trigger_finish_container': 'Arduino containerrelay_off ack failed during final cleanup',
-      'emergency_trigger_midstep_stm32': 'Non-relay GPIO off ack failed at mid-step transition',
+      'emergency_trigger_user_abort':
+          'User selected "Cancel" in step transition dialog',
+      'emergency_trigger_enter_relay':
+          'Relay ack failed on step entry (3 retries exhausted)',
+      'emergency_trigger_enter_stm32':
+          'STM32 GPIO ack failed on step entry (3 retries exhausted)',
+      'emergency_trigger_pause_stm32':
+          'STM32 all-off ack failed on pause (3 retries exhausted)',
+      'emergency_trigger_resume_relay':
+          'Relay ack failed on resume (3 retries exhausted)',
+      'emergency_trigger_resume_stm32':
+          'STM32 GPIO ack failed on resume (3 retries exhausted)',
+      'emergency_trigger_finish_stm32':
+          'STM32 all-off ack failed during final cleanup',
+      'emergency_trigger_finish_clean':
+          'Arduino cleanrelay_off ack failed during final cleanup',
+      'emergency_trigger_finish_container':
+          'Arduino containerrelay_off ack failed during final cleanup',
+      'emergency_trigger_midstep_stm32':
+          'Non-relay GPIO off ack failed at mid-step transition',
       'emergency_banner_source_prefix': 'Trigger source',
       // ---------- MAX30102 heart-rate / SpO2 page ----------
       'page_max30102': 'MAX30102 HR/SpO2',
@@ -1453,10 +1561,8 @@ class LocalizationService {
           'How often HR/SpO2 is recomputed (ms, sliding window). Restarts the timer.',
       'max30102_help_trim':
           'Window (samples) for the trimmed sliding mean (gold line): drop max & min then average. Larger = smoother.',
-      'max30102_help_band_low':
-          'HR band-pass low cutoff (Hz). 0.5Hz~=30bpm.',
-      'max30102_help_band_high':
-          'HR band-pass high cutoff (Hz). 4Hz~=240bpm.',
+      'max30102_help_band_low': 'HR band-pass low cutoff (Hz). 0.5Hz~=30bpm.',
+      'max30102_help_band_high': 'HR band-pass high cutoff (Hz). 4Hz~=240bpm.',
       'max30102_help_hr_range':
           'Valid HR range (bpm); values outside are discarded (default 30~240).',
       'max30102_help_spo2_range':
@@ -1464,7 +1570,8 @@ class LocalizationService {
       'max30102_waveform_hint':
           '4 lines per chart: raw, raw-DC (dashed), trimmed mean (orange), trimmed-DC (blue dashed)  ·  left panel shows raw vs trimmed for HR/SpO2 & DC/AC',
       'max30102_params': 'Parameters',
-      'max30102_params_hint': '⚠️ Finger/saturation thresholds are tentative (tune on real hardware); LED current writes the chip reg instantly (no reflash).',
+      'max30102_params_hint':
+          '⚠️ Finger/saturation thresholds are tentative (tune on real hardware); LED current writes the chip reg instantly (no reflash).',
       'max30102_led_red': 'RED LED(0x0C)',
       'max30102_led_ir': 'IR LED(0x0D)',
       'max30102_finger_threshold': 'Finger IR thr.',
@@ -1486,7 +1593,8 @@ class LocalizationService {
       'max30102_reset': 'RESET',
       'max30102_reg_addr': 'Register addr',
       'max30102_reg_value': 'Value',
-      'max30102_reset_confirm': 'Soft-reset the chip? It will enter POR sleep (unusable) — press [INIT] to bring it back. Normally just use INIT.',
+      'max30102_reset_confirm':
+          'Soft-reset the chip? It will enter POR sleep (unusable) — press [INIT] to bring it back. Normally just use INIT.',
       'max30102_log_caps': '(show 5000 / keep 50000)',
 
       // ---------- MAX30102 K2 (handover verification page) ----------
@@ -1516,17 +1624,20 @@ class LocalizationService {
       'k2_window_range': '10~{max}',
       'k2_fixed_mode': 'Fixed',
       'k2_hide_dead': 'Hide dead',
-      'k2_hide_dead_tip': 'Removes the 1.5s dead period from the chart (display '
+      'k2_hide_dead_tip':
+          'Removes the 1.5s dead period from the chart (display '
           'only; that segment never enters any calculation). When start is '
           'pressed before the finger lands, IR ramps from 50k to 90k and that '
           'swing takes over the vertical scale, flattening the real pulse.',
       'k2_snap_full': 'Full',
-      'k2_snap_full_tip': 'Full snapshot: also writes the head segment the core '
+      'k2_snap_full_tip':
+          'Full snapshot: also writes the head segment the core '
           'discards (dead + settling), fixed-window state, every derived value, '
           'and all HrvStats fields. '
           'When off (default) the file is identical to before. '
           'Note: this is the desktop snapshot file, not the server JSON.',
-      'k2_fixed_hint': 'Uses only the first {sec}s of this measurement; '
+      'k2_fixed_hint':
+          'Uses only the first {sec}s of this measurement; '
           'later data is excluded. The clock starts at the first clean sample '
           'the core emits (about 3.5s after the finger is detected: '
           '1.5s dead + 2.0s settling), so it does not start at 0.0.',
@@ -1578,9 +1689,11 @@ class LocalizationService {
       'k2_bh_recover': 'recovery',
       'k2_bh_recovering': 'recovering',
       'k2_bh_previous': 'previous (reference)',
-      'k2_bh_abort': '⚠ Finger left; the core reset its index, so the timeline '
+      'k2_bh_abort':
+          '⚠ Finger left; the core reset its index, so the timeline '
           'cannot be joined. Recording aborted.',
-      'k2_bh_hint': 'Place the finger and wait for the channel verdict before '
+      'k2_bh_hint':
+          'Place the finger and wait for the channel verdict before '
           'starting. Stop when done, then record again with a different module '
           'to overlay both runs on the same chart.',
 
@@ -1664,8 +1777,7 @@ class LocalizationService {
       // Settings-check log
       'k2_chk_all_ok': '✅ Settings check: all valid',
       'k2_chk_all_ok_notes': '✅ Settings check: all valid ({notes} notes)',
-      'k2_chk_problems':
-          '── Settings check: {problems} to fix{notes} ──',
+      'k2_chk_problems': '── Settings check: {problems} to fix{notes} ──',
       'k2_chk_notes_tail': ' + {notes} notes',
       'k2_chk_ui_ref': '   ↳ UI: {where}',
       'k2_chk_field_ref': '"{label}" field',
@@ -1683,8 +1795,8 @@ class LocalizationService {
       'glass_setting': 'Glass look',
       'glass_setting_hint':
           'Translucent panels with a blurred backdrop, across every page. '
-              '⚠️ Each blur layer is recomputed every frame — '
-              'if the waveform starts stuttering while measuring, turn this off first.',
+          '⚠️ Each blur layer is recomputed every frame — '
+          'if the waveform starts stuttering while measuring, turn this off first.',
       'k2_drink_vote_head':
           'Why this rule (★ = threshold hard-coded in their prompt; the rest are ours)',
       'k2_drink_vote_sym': 'Sympathetic +1',
@@ -1716,13 +1828,14 @@ class LocalizationService {
           'Formulas with live values (fields sent to the LLM and where they come from)',
       'k2_fx_note_power':
           'P(f) = Lomb-Scargle periodogram; k scales the three bands to sum to the RR variance: VLF {vlf} + LF {lf} + HF {hf} = {total} ≈ SDNN² = {s2}',
-      'k2_fx_note_hf_cyc': 'This segment holds {cyc} cycles of the HF lower edge (0.15 Hz)',
+      'k2_fx_note_hf_cyc':
+          'This segment holds {cyc} cycles of the HF lower edge (0.15 Hz)',
       'k2_fx_note_not_sent':
-          'Our own unit (ms²), not sent to the LLM — only the numerator / denominator of lf_hf. The {api} that gets sent is in their unit, see below',
+          'Our own unit (ms²), not sent to the LLM — only the numerator / denominator of lf_hf. The {api} sent to fastify is converted to a unit borrowed from aquivio-vitals, see below',
       'k2_fx_note_aquivio':
-          'The value sent in the JSON (their unit; same number as LF in the side panel), not part of the LLM prompt. × 1e-6: ms² → s² (their RR is in seconds); × 1024: their Welch spectrum sums the bins without multiplying by the bin width Δf = 4 / 4096 Hz, i.e. an extra 1/Δf = 1024',
+          'Value sent to fastify in the JSON (same number as LF in the side panel), not part of the LLM prompt. The unit is borrowed from hrv.py of aquivio-vitals, the previous measurement source (the camera machine, now replaced by the MAX30102). × 1e-6: ms² → s² (aquivio-vitals RR is in seconds); × 1024: the aquivio-vitals Welch spectrum sums the bins without multiplying by the bin width Δf = 4 / 4096 Hz, i.e. an extra 1/Δf = 1024',
       'k2_fx_note_aquivio_hf':
-          'The value sent in the JSON (their unit; same number as HF in the side panel), same conversion as above',
+          'Value sent to fastify in the JSON (same number as HF in the side panel); unit and conversion as above (borrowed from aquivio-vitals)',
       'k2_fx_rolling': 'Rolling: last {sec} s, recomputed every second',
       'k2_fx_fixed':
           'Fixed window: same segment as the side panel, frozen at the end of the measurement',
@@ -1804,33 +1917,35 @@ class LocalizationService {
       'k2_help_lf_ms2_how':
           '1. Lay out RR by the time each occurred (unevenly spaced, so no plain FFT)\n2. Estimate the power P(f) at each frequency with a Lomb-Scargle periodogram\n3. Sum P(f)·Δf over 0.04–0.15 Hz\n4. Multiply by k so that VLF + LF + HF equals the RR variance (SDNN²)',
       'k2_help_lf_ms2_use':
-          'Not sent to the LLM. It is only the numerator of lf_hf; converted to their unit it goes into the JSON as lf.',
+          'Not sent to the LLM; only the numerator of lf_hf. For fastify it is converted to a unit borrowed from aquivio-vitals and sent as lf.',
       'k2_help_lf_ms2_note':
           'One cycle at 0.04 Hz takes 25 s — a 12–30 s window cannot hold even one full slow wave, so this value is unreliable at our window length. That is exactly why standard short-term HRV uses 5 minutes.',
 
       'k2_help_hf_ms2_what':
           'Power of heart-rate variation at high frequency (0.15–0.40 Hz, periods of 2.5–6.7 s), in ms². Matches breathing at 9–24 breaths per minute (respiratory sinus arrhythmia), mainly vagal.',
-      'k2_help_hf_ms2_how': 'Same as lf_ms2, with the band changed to 0.15–0.40 Hz.',
+      'k2_help_hf_ms2_how':
+          'Same as lf_ms2, with the band changed to 0.15–0.40 Hz.',
       'k2_help_hf_ms2_use':
-          'Not sent to the LLM. It is only the denominator of lf_hf; converted to their unit it goes into the JSON as hf.',
+          'Not sent to the LLM; only the denominator of lf_hf. For fastify it is converted to a unit borrowed from aquivio-vitals and sent as hf.',
       'k2_help_hf_ms2_note':
           'Breathing rate decides where it lands: breathing slower than 9 per minute (e.g. deliberate deep breathing) moves the breathing-driven swing into the LF band → LF/HF rises → misread as sympathetic. A 30 s window holds about 4.5 HF cycles, more reliable than LF.',
 
       'k2_help_lf_what':
-          'lf_ms2 converted to their unit (the camera-side aquivio-vitals): the value actually sent as lf in the JSON, the same number as "LF (lf)" in the side panel.',
+          'lf_ms2 after conversion: the value sent to fastify as lf in the JSON, the same number as "LF (lf)" in the side panel.\nThe unit is borrowed from aquivio-vitals: before the MAX30102, the camera machine (rPPG) running aquivio-vitals measured these values and sent them to fastify. The MAX30102 has taken over that role while the fastify fields and scales stayed the same, so we keep the same scale.',
       'k2_help_lf_how':
-          'lf_ms2 × 1e-6 × 1024\n· × 1e-6: ms² → s² (their RR is in seconds)\n· × 1024: their Welch spectrum (fs = 4 Hz, nfft = 4096) sums the bins without multiplying by the bin width Δf = 4 / 4096 Hz, i.e. an extra 1/Δf = 1024',
+          'lf_ms2 × 1e-6 × 1024 (both factors come from hrv.py of aquivio-vitals)\n· × 1e-6: ms² → s² (aquivio-vitals RR is in seconds)\n· × 1024: the aquivio-vitals Welch spectrum (fs = 4 Hz, nfft = 4096) sums the bins without multiplying by the bin width Δf = 4 / 4096 Hz, i.e. an extra 1/Δf = 1024',
       'k2_help_lf_use':
-          'Sent in the JSON to the software side, but not part of the LLM prompt. The conversion keeps the same-named field on the same scale on the camera machine and ours, so downstream comparisons are not off by a thousand.',
+          'Sent to fastify in the JSON, but not part of the LLM prompt. Using the aquivio-vitals scale keeps the same-named field on the same order of magnitude as what the camera machine sent before the MAX30102 took over, so downstream comparisons are not off by a thousand.',
       'k2_help_lf_note':
-          'The 1024 is tied to their nfft = 4096 and fs = 4; if they change those, this factor must change too. The two sides estimate the spectrum differently (Welch vs Lomb-Scargle), so only the order of magnitude is guaranteed to match.',
+          'The 1024 copies the nfft = 4096 and fs = 4 settings aquivio-vitals used; if the reference changes, this factor must be rechecked. The two sides estimate the spectrum differently (Welch vs Lomb-Scargle), so only the order of magnitude is guaranteed to match.',
 
       'k2_help_hf_what':
-          'hf_ms2 converted to their unit: the value actually sent as hf in the JSON, the same number as "HF (hf)" in the side panel.',
+          'hf_ms2 after conversion: the value sent to fastify as hf in the JSON, the same number as "HF (hf)" in the side panel. The unit is likewise borrowed from aquivio-vitals.',
       'k2_help_hf_how': 'hf_ms2 × 1e-6 × 1024, same conversion as lf.',
-      'k2_help_hf_use': 'Sent in the JSON to the software side, but not part of the LLM prompt.',
+      'k2_help_hf_use':
+          'Sent to fastify in the JSON, but not part of the LLM prompt.',
       'k2_help_hf_note':
-          'Same as lf: the factor is tied to their spectrum settings and only the order of magnitude is guaranteed.',
+          'Same as lf: the factor copies the aquivio-vitals spectrum settings and only the order of magnitude is guaranteed.',
 
       'k2_help_lf_hf_what':
           'LF power ÷ HF power. Traditionally read as sympatho-vagal balance: above 1 leans sympathetic, below 1 leans parasympathetic.',
@@ -1844,7 +1959,7 @@ class LocalizationService {
           'Nunan 2010 short-term (5-min) norms: mean 2.8 ± 2.6 (range 1.1–11.6).',
 
       'k2_help_pns_what':
-          'Their parasympathetic / recovery score (0–100, called Recovery on their screen). It is RMSSD on a log scale and adds no new information.',
+          'The parasympathetic / recovery score (0–100) sent to fastify. The formula is borrowed from derived_scores() of aquivio-vitals, the previous measurement source (the camera machine, now replaced by the MAX30102); the PNS in the fastify prompt is written against this scale. It is RMSSD on a log scale and adds no new information.',
       'k2_help_pns_how':
           '(log₁₀ RMSSD − 1) ÷ (log₁₀ 80 − 1), clamped to 0–1, then × 100.\nRMSSD 10 ms → 0, 80 ms → 100, clamped beyond either end.',
       'k2_help_pns_use':
@@ -1854,7 +1969,7 @@ class LocalizationService {
       'k2_help_pns_ref': 'The norm-average RMSSD of 42 ms maps to about 69.',
 
       'k2_help_ans_what':
-          'Their autonomic balance score (0–100): LF/HF on a log scale. Higher means more sympathetic.',
+          'The autonomic balance score (0–100) sent to fastify; the formula is borrowed from derived_scores() of aquivio-vitals. It is LF/HF on a log scale — higher means more sympathetic.',
       'k2_help_ans_how':
           '0.5 + log₂(LF/HF) ÷ 4, clamped to 0–1, then × 100.\nLF/HF 0.25 → 0, 1 → 50, 4 → 100.',
       'k2_help_ans_use':
@@ -1863,28 +1978,30 @@ class LocalizationService {
           'Easy to misread: a low score means parasympathetic-leaning (relaxed), not "a poor score". It inherits every problem of LF/HF. LF/HF > 1.5 is the same as ans > 64.6.',
 
       'k2_help_stress_what':
-          'Their stress score (0–100): a weighted mix of pns and ans, not an independent measurement.',
+          'The stress score (0–100) sent to fastify; the formula is borrowed from derived_scores() of aquivio-vitals. A weighted mix of pns and ans, not an independent measurement.',
       'k2_help_stress_how': '0.6 × (100 − PNS) + 0.4 × ANS, clamped to 0–100.',
       'k2_help_stress_use':
           '"Stress: X/100" in the prompt. Their rules: high stress → sympathetic, excludes caffeine, cascara, bcaa, whey, lCarnitine; low stress → parasympathetic.',
       'k2_help_stress_note':
           'Expanded, it is 60% RMSSD + 40% LF/HF, so stress, rmssd and pns are not three independent pieces of evidence. With RMSSD ≥ 80 ms, PNS = 100 and stress can be at most 40 — always read as low stress. The side panel also shows a Baevsky stress index (stress_baevsky); that is a different thing and is not sent to the LLM.',
       'k2_help_stress_ref':
-          'Their scale has no literature basis. For comparison, Garmin 0–100 stress bands: 0–25 rest, 26–50 low, 51–75 medium, 76–100 high (the preview in ② uses these bands).',
+          'This scale is borrowed from aquivio-vitals and has no literature basis (its own comment calls it heuristic, not clinical). For comparison, Garmin 0–100 stress bands: 0–25 rest, 26–50 low, 51–75 medium, 76–100 high (the preview in ② uses these bands).',
 
       'k2_help_snr_db_what':
           'Waveform signal-to-noise ratio (dB): power at the pulse frequency versus power elsewhere. Measures how clean the waveform is.',
       'k2_help_snr_db_how':
           '1. Remove the mean of the raw IR waveform and apply a Hann window\n2. FFT (zero-padded to a power of two)\n3. Within 0.5–4 Hz, power within ±0.2 Hz of f₀ (= HR ÷ 60) and 2f₀ counts as signal, the rest as noise\n4. 10 · log₁₀(signal ÷ noise)',
-      'k2_help_snr_db_use': 'Not sent to the LLM, but it alone decides confidence.',
+      'k2_help_snr_db_use':
+          'Sent to fastify in the JSON, but not part of the LLM prompt; it alone decides the confidence the LLM sees.',
       'k2_help_snr_db_note':
-          'It also measures how steady the heart rate is: the signal window is only ±0.2 Hz (about ±12 bpm), so if HR swings beyond that during the segment, pulse energy falls outside and counts as noise — HR swings from deep breathing lower the SNR. Bands and thresholds are copied from the camera-side aquivio-vitals and were calibrated for rPPG, not necessarily for our contact PPG.',
+          'It also measures how steady the heart rate is: the signal window is only ±0.2 Hz (about ±12 bpm), so if HR swings beyond that during the segment, pulse energy falls outside and counts as noise — HR swings from deep breathing lower the SNR. Bands and thresholds are borrowed from core.py of aquivio-vitals, the previous measurement source (the camera machine, now replaced by the MAX30102), calibrated for rPPG and not necessarily for our contact PPG.',
       'k2_help_snr_db_ref':
           'aquivio-vitals source comment: below about 6 dB the RMSSD noise floor exceeds typical resting HRV.',
 
-      'k2_help_confidence_what': 'Reading confidence: good / rough / very rough.',
+      'k2_help_confidence_what':
+          'Reading confidence: good / rough / very rough.',
       'k2_help_confidence_how':
-          'Depends only on snr_db:\n≥ 6 dB → good\n≥ 1 dB → rough\notherwise → very rough\nno snr_db → null',
+          'Depends only on snr_db (thresholds borrowed from hrv_confidence() of aquivio-vitals):\n≥ 6 dB → good\n≥ 1 dB → rough\notherwise → very rough\nno snr_db → null',
       'k2_help_confidence_use':
           '"Reading confidence: X" in the prompt. But neither their rules nor their code use it anywhere — the model sees it without being told what to do with it.',
       'k2_help_confidence_note':
@@ -1892,7 +2009,8 @@ class LocalizationService {
 
       'k2_drink_btn': 'Drink pick',
       'k2_drink_title': 'What drink would these numbers produce?',
-      'k2_drink_sec_payload': '① Fields that get sent (verbatim, their template)',
+      'k2_drink_sec_payload':
+          '① Fields that get sent (verbatim, their template)',
       'k2_drink_sec_rule': '② Rule this reading hits',
       'k2_drink_sec_picks': '③ Infusions favored / excluded',
       'k2_drink_favored': 'Favored',
@@ -1904,10 +2022,10 @@ class LocalizationService {
           '⚠️ None of the shortlisted infusions are stocked — their side would get no usable slug',
       'k2_drink_no_avoid_note':
           'ℹ️ 5 of the 11 (electrolytes / collagen / lutein / creatine / fiber) have **no avoidWhen field at all**\n'
-              'in their knowledge base, so they can never appear under "Excluded".\n'
-              '"Not excluded" does not mean "evaluated and passed".\n'
-              'electrolytes also has two inconsistent sources (its own bestFor names only elevated HR,\n'
-              'while the prompt\'s sympathetic rule pulls in hydration/mineral), so it is a candidate almost always.',
+          'in their knowledge base, so they can never appear under "Excluded".\n'
+          '"Not excluded" does not mean "evaluated and passed".\n'
+          'electrolytes also has two inconsistent sources (its own bestFor names only elevated HR,\n'
+          'while the prompt\'s sympathetic rule pulls in hydration/mineral), so it is a candidate almost always.',
       'k2_drink_rule_hr':
           'Elevated heart rate → hydrating, non-fizzy, non-stimulant. Their prompt says this applies **regardless of the other signals**',
       'k2_drink_rule_sym':
@@ -1920,16 +2038,17 @@ class LocalizationService {
           '⚠️ This reading may not be trustworthy — and their side **does not gate on it**',
       'k2_drink_trust_pi':
           'Perfusion index too low; the signal does not look like a pulse (measured: wooden desk 0.149%, real finger 10.1%)',
-      'k2_drink_trust_hr': 'Heart rate outside the physiologically possible range',
+      'k2_drink_trust_hr':
+          'Heart rate outside the physiologically possible range',
       'k2_drink_trust_direction':
           '⚠️ And the bias is dangerous: noise inflates HRV → read as "well recovered" → pushes stimulants',
       'k2_drink_disclaimer':
           '① is exact (laid out verbatim from their k2-recommend-prompts.ts template).\n'
-              '②③ are a local approximation: their prompt pins down **only LF/HF > 1.5**;\n'
-              '"high stress / low PNS / low HRV / elevated HR" are left to the LLM,\n'
-              'so the thresholds here are ours (see K2DrinkThresholds), not their behaviour.\n'
-              'The infusion list is a snapshot of infusion-knowledge.ts and will not track their edits.\n'
-              'This page makes no network calls and sends nothing.',
+          '②③ are a local approximation: their prompt pins down **only LF/HF > 1.5**;\n'
+          '"high stress / low PNS / low HRV / elevated HR" are left to the LLM,\n'
+          'so the thresholds here are ours (see K2DrinkThresholds), not their behaviour.\n'
+          'The infusion list is a snapshot of infusion-knowledge.ts and will not track their edits.\n'
+          'This page makes no network calls and sends nothing.',
       'k2_log_stop': '⏸ Stopped',
       'k2_log_round_late':
           '⏳ No complete reply within {ms}ms (comm delay; port reopens only after several in a row)',
@@ -1942,7 +2061,8 @@ class LocalizationService {
       'k2_log_core_reset': '♻ Core reset; UI waveform restarted',
       'k2_log_no_wave': '⚠ No waveform data — cannot save snapshot',
       'k2_log_snap_saved': '📸 Snapshot saved: {name}',
-      'k2_log_snap_failed': '❌ Failed to save snapshot (desktop path not found?)',
+      'k2_log_snap_failed':
+          '❌ Failed to save snapshot (desktop path not found?)',
     },
   };
 }
