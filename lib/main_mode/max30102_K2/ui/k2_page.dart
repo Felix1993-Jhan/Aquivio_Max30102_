@@ -27,6 +27,7 @@ import '../k2_setting_limits.dart';
 import '../k2_vitals_metrics.dart';
 import 'k2_drink_preview.dart';
 import 'k2_fixed_window.dart';
+import 'k2_formula_panel.dart';
 import 'k2_hrv_chart.dart';
 import 'k2_breathhold_chart.dart';
 import 'k2_lf_experiment.dart';
@@ -1523,6 +1524,16 @@ class _K2PageState extends State<K2Page> {
           ),
         ),
         _resizeHandle(_sec1Height, (v) => _sec1Height = v),
+        // ── 公式帶入:送給 LLM 的欄位逐一攤開 ──────────────────────────
+        // 吃同一份 metrics → 滾動模式每秒更新、定長模式停在量測結束那一刻,
+        // 而且數字與左側欄、② 投票表、送出的 JSON 是同一份。
+        const SizedBox(height: 10),
+        K2FormulaPanel(
+          metrics: metrics,
+          beats: shortPts.length + 1,
+          fixedMode: fx != null,
+          seconds: _shortSec,
+        ),
         // ── LF 窗長對照實驗:全寬 ────────────────────────────────────
         // 不放側欄的理由:10 個窗 + 基準 + 統計在 215px 寬裡一定要捲,
         // 而這一塊的重點就是「一眼看完整個分布」。全寬才排得下兩欄。
