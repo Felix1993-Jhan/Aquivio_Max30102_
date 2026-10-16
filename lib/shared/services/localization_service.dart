@@ -782,7 +782,7 @@ class LocalizationService {
       'k2_help_sec_ref': '參考值',
 
       'k2_help_mean_hr_what': '平均心率：這一段裡所有 RR 間隔（兩拍之間的時間）取平均，換算成每分鐘幾下。',
-      'k2_help_mean_hr_how': '1. 從 IR 波形找出每一拍的谷底\n2. 相鄰兩個谷底的時間差 = 一個 RR 間隔（ms）\n3. 濾掉漏拍、切拍造成的離群值\n4. 心率 = 60000 ÷ 平均 RR',
+      'k2_help_mean_hr_how': '1. 從 IR 波形找出每一拍的谷底\n2. 相鄰兩個谷底的時間差 = 一個 RR 間隔，也就是兩拍之間的間距（ms）\n3. 濾掉漏拍、切拍造成的離群值\n4. mean(RR) = 平均間距：這一段所有 RR 間隔加總 ÷ 個數\n5. 心率 = 60000 ÷ mean(RR)\n\n60000 從哪來：兩邊的單位不同。間距的單位是「毫秒」，心率的單位是「每分鐘幾下」。1 分鐘 = 60 秒 = 60000 毫秒，所以 60000 ÷ 平均間距，就是「1 分鐘裡裝得下幾個間距」= 每分鐘幾拍。\n例：平均間距 885.8 ms → 60000 ÷ 885.8 = 67.7 bpm；間距越短，1 分鐘裝得越多，心率越快。',
       'k2_help_mean_hr_use': '提示詞的「Heart rate: X bpm」。對方規則「Elevated heart rate」是否決權：心率偏高時不管其他訊號，只給補水、非氣泡、非刺激性的飲品，也是 caffeine / cascara 的迴避條件。對方沒寫多少算偏高，由 LLM 自己判斷；我們 ② 的推演用 100 bpm。',
       'k2_help_mean_hr_note': '它量的是「當下」，不是靜息心率：量測前剛走動、說話、緊張，都會讓它偏高，進而觸發否決權。是由平均 RR 換算的，與畫面上逐拍的即時心率可能差 1~2 bpm。',
       'k2_help_mean_hr_ref': '成人靜息 60~100 bpm；> 100 bpm 為心搏過速（臨床定義）。',
@@ -1676,7 +1676,7 @@ class LocalizationService {
       'k2_help_mean_hr_what':
           'Mean heart rate: the average of all RR intervals (time between beats) in this segment, converted to beats per minute.',
       'k2_help_mean_hr_how':
-          '1. Find the trough of every beat in the IR waveform\n2. Time between adjacent troughs = one RR interval (ms)\n3. Drop outliers caused by missed or split beats\n4. Heart rate = 60000 ÷ mean RR',
+          '1. Find the trough of every beat in the IR waveform\n2. Time between adjacent troughs = one RR interval, i.e. the spacing between two beats (ms)\n3. Drop outliers caused by missed or split beats\n4. mean(RR) = the average spacing: sum of all RR intervals in this segment ÷ their count\n5. Heart rate = 60000 ÷ mean(RR)\n\nWhere 60000 comes from: the units differ. The spacing is in milliseconds, heart rate is in beats per minute. 1 minute = 60 s = 60000 ms, so 60000 ÷ the average spacing is how many spacings fit into one minute = beats per minute.\nExample: average spacing 885.8 ms → 60000 ÷ 885.8 = 67.7 bpm; shorter spacing fits more into a minute, so a faster heart rate.',
       'k2_help_mean_hr_use':
           '"Heart rate: X bpm" in the prompt. Their "Elevated heart rate" rule is an override: when HR is elevated, all other signals are ignored and only hydrating, non-fizzy, non-stimulant drinks are allowed; it is also an avoid condition for caffeine / cascara. They never say how high is elevated, so the LLM decides; our preview in ② uses 100 bpm.',
       'k2_help_mean_hr_note':
