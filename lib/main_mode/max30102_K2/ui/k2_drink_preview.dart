@@ -234,6 +234,59 @@ class K2TrustIssue {
   final String detail;
 }
 
+/// 一個欄位在推演裡投給哪一邊。
+enum K2VoteSide {
+  /// 投交感／壓力端一票。
+  sympathetic,
+
+  /// 投副交感／恢復端一票。
+  parasympathetic,
+
+  /// 心率偏高 —— 否決權生效，其餘不計。
+  override,
+
+  /// 心率沒有偏高，否決權沒觸發。
+  notTriggered,
+
+  /// 落在中間帶（或缺值），兩邊都不投。
+  none,
+
+  /// 這個欄位在 ① 裡，但四條規則**沒有引用**它。
+  unused,
+}
+
+/// 推演裡的一筆投票：「哪個欄位、多少、照什麼門檻、投給誰」。
+///
+/// ⚠️ 規則（[K2DrinkPreview.rule]）是**從這些投票算出來的**，不是另外算一份。
+///    顯示與判定同一個來源，才不會出現「畫面上說 A，實際算的是 B」。
+class K2DrinkVote {
+  const K2DrinkVote({
+    required this.field,
+    required this.value,
+    required this.criterion,
+    required this.side,
+    required this.effectKey,
+    this.theirs = false,
+  });
+
+  /// 欄位名，照 ① 的模板原文（英文），方便對照。
+  final String field;
+
+  /// 已格式化的數值。
+  final String value;
+
+  /// 門檻。只用符號（`> 60`、`40 ~ 60`），不需要翻譯。
+  final String criterion;
+
+  final K2VoteSide side;
+
+  /// 「這個欄位大致影響什麼」的翻譯 key。
+  final String effectKey;
+
+  /// 門檻是**對方提示詞寫死的**（只有 LF/HF > 1.5）。其餘是我們本地自訂的。
+  final bool theirs;
+}
+
 /// 推演結果。純資料，沒有 Flutter 相依，可以直接寫測試。
 class K2DrinkPreview {
   K2DrinkPreview({
@@ -242,7 +295,18 @@ class K2DrinkPreview {
     required this.favored,
     required this.avoided,
     required this.trustIssues,
+    required this.votes,
+    required this.symVotes,
+    required this.paraVotes,
   });
+
+  /// 每個欄位的投票，照判定順序排（心率 → LF/HF → Stress → PNS → RMSSD），
+  /// 後面接三個規則沒引用的（SDNN / ANS score / confidence）。
+  final List<K2DrinkVote> votes;
+
+  /// 交感票數與副交感票數。心率偏高時兩者仍照實計算，但不參與判定。
+  final int symVotes;
+  final int paraVotes;
 
   /// 會送出去的欄位，**逐字照對方提示詞的格式**。這一段是精確的。
   final List<String> lines;
@@ -307,30 +371,168 @@ class K2DrinkPreview {
       '- Reading confidence: ${conf is String && conf.isNotEmpty ? conf : 'n/a'}',
     ];
 
-    // ── ② 主導訊號 ───────────────────────────────────────────────────
+    // ── ② 主導訊號 —— 先逐欄投票，規則再**從投票算出來** ─────────────
     //
     // 順序照對方的提示詞:心率偏高是**否決權**(寫明 regardless of the
-    // other signals),所以先判它;其餘用「哪一端的訊號多」決定。
-    K2DrinkRule rule;
-    if (meanHr != null && meanHr > K2DrinkThresholds.elevatedHr) {
-      rule = K2DrinkRule.elevatedHr;
-    } else {
-      var sym = 0;
-      var para = 0;
-      if (lfHf != null && lfHf > K2DrinkThresholds.sympatheticLfHf) sym++;
-      if (stress != null && stress > K2DrinkThresholds.highStress) sym++;
-      if (pns != null && pns < K2DrinkThresholds.lowPns) sym++;
-      if (rmssd != null && rmssd < K2DrinkThresholds.lowRmssd) sym++;
-      if (pns != null && pns > K2DrinkThresholds.highPns) para++;
-      if (rmssd != null && rmssd > K2DrinkThresholds.highRmssd) para++;
-      if (stress != null && stress < K2DrinkThresholds.highStress) para++;
-      if (sym > para) {
-        rule = K2DrinkRule.sympathetic;
-      } else if (para > sym) {
-        rule = K2DrinkRule.parasympathetic;
+    // other signals),所以先判它;其餘用「哪一端的票多」決定。
+    // 畫面上 ② 底下那張表就是這份 votes —— 顯示與判定同一個來源。
+    String n(double v) => _trim(v);
+    final votes = <K2DrinkVote>[];
+
+    // 心率:否決權
+    final hrOver = meanHr != null && meanHr > K2DrinkThresholds.elevatedHr;
+    votes.add(
+      K2DrinkVote(
+        field: 'Heart rate',
+        value: f(meanHr, ' bpm'),
+        criterion: meanHr == null
+            ? '—'
+            : (hrOver
+                  ? '> ${n(K2DrinkThresholds.elevatedHr)}'
+                  : '≤ ${n(K2DrinkThresholds.elevatedHr)}'),
+        side: meanHr == null
+            ? K2VoteSide.none
+            : (hrOver ? K2VoteSide.override : K2VoteSide.notTriggered),
+        effectKey: 'k2_drink_eff_hr',
+      ),
+    );
+
+    // LF/HF:唯一寫死的門檻。≤ 1.5 只是「不投交感」,**不會投副交感**。
+    final lfSym = lfHf != null && lfHf > K2DrinkThresholds.sympatheticLfHf;
+    votes.add(
+      K2DrinkVote(
+        field: 'LF/HF',
+        value: f(lfHf),
+        criterion: lfHf == null
+            ? '—'
+            : (lfSym
+                  ? '> ${n(K2DrinkThresholds.sympatheticLfHf)}'
+                  : '≤ ${n(K2DrinkThresholds.sympatheticLfHf)}'),
+        side: lfSym ? K2VoteSide.sympathetic : K2VoteSide.none,
+        effectKey: 'k2_drink_eff_lfhf',
+        theirs: true,
+      ),
+    );
+
+    // Stress:沒有中間帶 —— 不是高就投副交感(剛好等於門檻才不投)
+    K2VoteSide stressSide = K2VoteSide.none;
+    String stressCrit = '—';
+    if (stress != null) {
+      if (stress > K2DrinkThresholds.highStress) {
+        stressSide = K2VoteSide.sympathetic;
+        stressCrit = '> ${n(K2DrinkThresholds.highStress)}';
+      } else if (stress < K2DrinkThresholds.highStress) {
+        stressSide = K2VoteSide.parasympathetic;
+        stressCrit = '< ${n(K2DrinkThresholds.highStress)}';
       } else {
-        rule = K2DrinkRule.neutral;
+        stressCrit = '= ${n(K2DrinkThresholds.highStress)}';
       }
+    }
+    votes.add(
+      K2DrinkVote(
+        field: 'Stress',
+        value: f(stress),
+        criterion: stressCrit,
+        side: stressSide,
+        effectKey: 'k2_drink_eff_stress',
+      ),
+    );
+
+    // PNS:40 ~ 60 是中間帶
+    K2VoteSide pnsSide = K2VoteSide.none;
+    String pnsCrit = '—';
+    if (pns != null) {
+      if (pns < K2DrinkThresholds.lowPns) {
+        pnsSide = K2VoteSide.sympathetic;
+        pnsCrit = '< ${n(K2DrinkThresholds.lowPns)}';
+      } else if (pns > K2DrinkThresholds.highPns) {
+        pnsSide = K2VoteSide.parasympathetic;
+        pnsCrit = '> ${n(K2DrinkThresholds.highPns)}';
+      } else {
+        pnsCrit =
+            '${n(K2DrinkThresholds.lowPns)} ~ ${n(K2DrinkThresholds.highPns)}';
+      }
+    }
+    votes.add(
+      K2DrinkVote(
+        field: 'PNS',
+        value: f(pns),
+        criterion: pnsCrit,
+        side: pnsSide,
+        effectKey: 'k2_drink_eff_pns',
+      ),
+    );
+
+    // RMSSD:20 ~ 50 ms 是中間帶
+    K2VoteSide rmSide = K2VoteSide.none;
+    String rmCrit = '—';
+    if (rmssd != null) {
+      if (rmssd < K2DrinkThresholds.lowRmssd) {
+        rmSide = K2VoteSide.sympathetic;
+        rmCrit = '< ${n(K2DrinkThresholds.lowRmssd)} ms';
+      } else if (rmssd > K2DrinkThresholds.highRmssd) {
+        rmSide = K2VoteSide.parasympathetic;
+        rmCrit = '> ${n(K2DrinkThresholds.highRmssd)} ms';
+      } else {
+        rmCrit =
+            '${n(K2DrinkThresholds.lowRmssd)} ~ ${n(K2DrinkThresholds.highRmssd)} ms';
+      }
+    }
+    votes.add(
+      K2DrinkVote(
+        field: 'RMSSD',
+        value: f(rmssd, ' ms'),
+        criterion: rmCrit,
+        side: rmSide,
+        effectKey: 'k2_drink_eff_rmssd',
+      ),
+    );
+
+    // 在 ① 裡、但規則沒引用的三個
+    votes.add(
+      K2DrinkVote(
+        field: 'SDNN',
+        value: f(sdnn, ' ms'),
+        criterion: '—',
+        side: K2VoteSide.unused,
+        effectKey: 'k2_drink_eff_sdnn',
+      ),
+    );
+    votes.add(
+      K2DrinkVote(
+        field: 'ANS score',
+        value: f(ans),
+        criterion: '—',
+        side: K2VoteSide.unused,
+        effectKey: 'k2_drink_eff_ans',
+      ),
+    );
+    votes.add(
+      K2DrinkVote(
+        field: 'Reading confidence',
+        value: conf is String && conf.isNotEmpty ? conf : 'n/a',
+        criterion: '—',
+        side: K2VoteSide.unused,
+        effectKey: 'k2_drink_eff_conf',
+      ),
+    );
+
+    final symVotes = votes
+        .where((v) => v.side == K2VoteSide.sympathetic)
+        .length;
+    final paraVotes = votes
+        .where((v) => v.side == K2VoteSide.parasympathetic)
+        .length;
+
+    final K2DrinkRule rule;
+    if (hrOver) {
+      rule = K2DrinkRule.elevatedHr;
+    } else if (symVotes > paraVotes) {
+      rule = K2DrinkRule.sympathetic;
+    } else if (paraVotes > symVotes) {
+      rule = K2DrinkRule.parasympathetic;
+    } else {
+      rule = K2DrinkRule.neutral;
     }
 
     // ── ③ 依規則分出偏好 / 排除 ──────────────────────────────────────
@@ -395,6 +597,9 @@ class K2DrinkPreview {
       favored: favored,
       avoided: avoided,
       trustIssues: issues,
+      votes: votes,
+      symVotes: symVotes,
+      paraVotes: paraVotes,
     );
   }
 
@@ -632,9 +837,40 @@ class _K2DrinkDialog extends StatelessWidget {
             border: globalGlassNotifier.value
                 ? GlassColors.tealEdge
                 : Colors.teal.shade200,
-            child: Text(
-              tr(k2DrinkRuleKey(p.rule)),
-              style: const TextStyle(fontSize: 13),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  tr(k2DrinkRuleKey(p.rule)),
+                  style: const TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 10),
+                // 為什麼命中這一條:① 裡每個欄位投給哪一邊。
+                // 這張表就是判定用的 votes 本身,不是另外算的說明。
+                Text(
+                  tr('k2_drink_vote_head'),
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                for (final v in p.votes) _voteRow(v),
+                const Divider(height: 14),
+                Text(
+                  p.rule == K2DrinkRule.elevatedHr
+                      ? tr('k2_drink_tally_override')
+                      : trParams('k2_drink_tally', {
+                          's': '${p.symVotes}',
+                          'p': '${p.paraVotes}',
+                        }),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 14),
@@ -717,6 +953,99 @@ class _K2DrinkDialog extends StatelessWidget {
     ),
     child: child,
   );
+
+  /// 一筆投票一列：欄位 數值 門檻 → 投給誰，底下一行小字「這個欄位影響什麼」。
+  Widget _voteRow(K2DrinkVote v) {
+    final (String label, Color color) = switch (v.side) {
+      K2VoteSide.sympathetic => (
+        tr('k2_drink_vote_sym'),
+        Colors.orange.shade800,
+      ),
+      K2VoteSide.parasympathetic => (
+        tr('k2_drink_vote_para'),
+        Colors.teal.shade700,
+      ),
+      K2VoteSide.override => (
+        tr('k2_drink_vote_override'),
+        Colors.red.shade700,
+      ),
+      K2VoteSide.notTriggered => (
+        tr('k2_drink_vote_not_triggered'),
+        Colors.grey.shade600,
+      ),
+      K2VoteSide.none => (tr('k2_drink_vote_none'), Colors.grey.shade600),
+      K2VoteSide.unused => (tr('k2_drink_vote_unused'), Colors.grey.shade500),
+    };
+    final dim = v.side == K2VoteSide.unused;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SizedBox(
+                width: 132,
+                child: Text(
+                  v.theirs ? '${v.field} ★' : v.field,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontFamily: 'Consolas',
+                    fontWeight: FontWeight.bold,
+                    color: dim ? Colors.grey.shade500 : Colors.grey.shade900,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 76,
+                child: Text(
+                  v.value,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontFamily: 'Consolas',
+                    color: dim ? Colors.grey.shade500 : null,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 92,
+                child: Text(
+                  v.criterion,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontFamily: 'Consolas',
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  border: Border.all(color: color),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  label,
+                  style: TextStyle(fontSize: 11, color: color),
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 1, left: 2),
+            child: Text(
+              tr(v.effectKey),
+              style: TextStyle(
+                fontSize: 10.5,
+                height: 1.35,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   /// 一款飲品一列：標記 + slug + 中文 + 分類，底下一行「為什麼」。
   ///

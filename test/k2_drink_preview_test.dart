@@ -23,17 +23,16 @@ Map<String, dynamic> vitals({
   double? pns,
   double? stress,
   String? confidence,
-}) =>
-    {
-      'mean_hr': meanHr,
-      'sdnn': sdnn,
-      'rmssd': rmssd,
-      'lf_hf': lfHf,
-      'ans': ans,
-      'pns': pns,
-      'stress': stress,
-      'confidence': confidence,
-    };
+}) => {
+  'mean_hr': meanHr,
+  'sdnn': sdnn,
+  'rmssd': rmssd,
+  'lf_hf': lfHf,
+  'ans': ans,
+  'pns': pns,
+  'stress': stress,
+  'confidence': confidence,
+};
 
 void main() {
   group('K2DrinkPreview', () {
@@ -43,14 +42,15 @@ void main() {
         perfusionPct: 0.149, // 實測木頭桌面
       );
 
-      expect(p.rule, K2DrinkRule.elevatedHr,
-          reason: '心率偏高是否決權,對方寫明不管其他訊號');
+      expect(p.rule, K2DrinkRule.elevatedHr, reason: '心率偏高是否決權,對方寫明不管其他訊號');
       expect(p.favored, contains('electrolytes'));
-      expect(p.avoided, contains('caffeine'),
-          reason: '心率偏高時咖啡因一定要被排除');
+      expect(p.avoided, contains('caffeine'), reason: '心率偏高時咖啡因一定要被排除');
 
-      expect(p.trustIssues.map((e) => e.titleKey), contains('k2_drink_trust_pi'),
-          reason: '灌流指數兩個量級的差距必須被抓到');
+      expect(
+        p.trustIssues.map((e) => e.titleKey),
+        contains('k2_drink_trust_pi'),
+        reason: '灌流指數兩個量級的差距必須被抓到',
+      );
     });
 
     test('② 訊號強度正常的高 HRV → 推到刺激類，但**不可以**跳警告', () {
@@ -64,30 +64,39 @@ void main() {
         perfusionPct: 10.1, // 訊號強度沒問題
       );
 
-      expect(p.rule, K2DrinkRule.parasympathetic,
-          reason: '高 HRV + 高 PNS + 低 stress 會被讀成「恢復良好」');
-      expect(p.favored, contains('caffeine'),
-          reason: '這個傾向本身還在 —— 只是我們沒有可靠的依據去警告它');
+      expect(
+        p.rule,
+        K2DrinkRule.parasympathetic,
+        reason: '高 HRV + 高 PNS + 低 stress 會被讀成「恢復良好」',
+      );
+      expect(
+        p.favored,
+        contains('caffeine'),
+        reason: '這個傾向本身還在 —— 只是我們沒有可靠的依據去警告它',
+      );
 
-      expect(p.trustIssues, isEmpty,
-          reason: '灌流指數正常就不該跳警告 —— **誤報會讓人以後忽略真正的警告**');
+      expect(
+        p.trustIssues,
+        isEmpty,
+        reason: '灌流指數正常就不該跳警告 —— **誤報會讓人以後忽略真正的警告**',
+      );
     });
 
     test('③ 正常健康的一筆 → 不可以亂喊狼來了', () {
       final p = K2DrinkPreview.from(
         vitals(
-            meanHr: 72,
-            sdnn: 48,
-            rmssd: 35,
-            lfHf: 1.0,
-            pns: 50,
-            stress: 40,
-            confidence: 'high'),
+          meanHr: 72,
+          sdnn: 48,
+          rmssd: 35,
+          lfHf: 1.0,
+          pns: 50,
+          stress: 40,
+          confidence: 'high',
+        ),
         perfusionPct: 8.0,
       );
 
-      expect(p.trustIssues, isEmpty,
-          reason: '一切正常卻跳警示,會讓人以後忽略真正的警示');
+      expect(p.trustIssues, isEmpty, reason: '一切正常卻跳警示,會讓人以後忽略真正的警示');
       expect(p.rule, isNot(K2DrinkRule.elevatedHr));
     });
 
@@ -118,18 +127,30 @@ void main() {
 
     test('⑧ 只看機器有的：沒進貨的不會出現在任何一邊', () {
       final v = vitals(
-          meanHr: 88, sdnn: 18, rmssd: 12, lfHf: 3.2, pns: 20, stress: 80);
+        meanHr: 88,
+        sdnn: 18,
+        rmssd: 12,
+        lfHf: 3.2,
+        pns: 20,
+        stress: 80,
+      );
 
       final all = K2DrinkPreview.from(v, perfusionPct: 6.0);
       expect(all.favored, contains('lutein'));
       expect(all.avoided, contains('caffeine'));
 
       // 這台機器只有電解質和纖維
-      final some = K2DrinkPreview.from(v,
-          perfusionPct: 6.0, stocked: {'electrolytes', 'fiber'});
+      final some = K2DrinkPreview.from(
+        v,
+        perfusionPct: 6.0,
+        stocked: {'electrolytes', 'fiber'},
+      );
       expect(some.favored, ['electrolytes', 'fiber']);
-      expect(some.avoided, isEmpty,
-          reason: 'caffeine 沒進貨,連「排除」都不該列 —— 對方根本看不到它');
+      expect(
+        some.avoided,
+        isEmpty,
+        reason: 'caffeine 沒進貨,連「排除」都不該列 —— 對方根本看不到它',
+      );
 
       // 一款都沒有 → 兩邊都空,畫面要能講出這件事
       final none = K2DrinkPreview.from(v, perfusionPct: 6.0, stocked: {});
@@ -141,15 +162,94 @@ void main() {
       for (final i in kK2Infusions) {
         expect(i.bestForZh, isNotEmpty, reason: '${i.slug} 少了入圍理由');
         if (i.avoidRules.isNotEmpty) {
-          expect(i.avoidWhenZh, isNotNull,
-              reason: '${i.slug} 有迴避規則卻沒有理由,畫面會列出一條空的');
+          expect(
+            i.avoidWhenZh,
+            isNotNull,
+            reason: '${i.slug} 有迴避規則卻沒有理由,畫面會列出一條空的',
+          );
         }
       }
       // 對方知識庫裡**沒有** avoidWhen 的那 5 款,我們也不可以自己編一個出來
-      final noAvoid =
-          kK2Infusions.where((i) => i.avoidWhenZh == null).map((i) => i.slug);
-      expect(noAvoid, containsAll(
-          ['electrolytes', 'collagen', 'lutein', 'creatine', 'fiber']));
+      final noAvoid = kK2Infusions
+          .where((i) => i.avoidWhenZh == null)
+          .map((i) => i.slug);
+      expect(
+        noAvoid,
+        containsAll([
+          'electrolytes',
+          'collagen',
+          'lutein',
+          'creatine',
+          'fiber',
+        ]),
+      );
+    });
+
+    test(
+      '⑩ 投票表：截圖那組（HR 61.9 / LF/HF 0.8 / Stress 29.9 / PNS 79.4 / RMSSD 52.2）',
+      () {
+        final p = K2DrinkPreview.from(
+          vitals(
+            meanHr: 61.9,
+            sdnn: 47.8,
+            rmssd: 52.2,
+            lfHf: 0.8,
+            ans: 43.8,
+            pns: 79.4,
+            stress: 29.9,
+            confidence: 'good',
+          ),
+          perfusionPct: 3.0,
+        );
+        K2DrinkVote v(String f) => p.votes.firstWhere((e) => e.field == f);
+
+        expect(v('Heart rate').side, K2VoteSide.notTriggered);
+        expect(
+          v('LF/HF').side,
+          K2VoteSide.none,
+          reason: 'LF/HF ≤ 1.5 只是不投交感,不會投副交感',
+        );
+        expect(v('LF/HF').theirs, isTrue, reason: '唯一對方寫死的門檻');
+        expect(v('Stress').side, K2VoteSide.parasympathetic);
+        expect(v('PNS').side, K2VoteSide.parasympathetic);
+        expect(v('RMSSD').side, K2VoteSide.parasympathetic);
+        for (final f in ['SDNN', 'ANS score', 'Reading confidence']) {
+          expect(v(f).side, K2VoteSide.unused, reason: '$f 在 ① 裡但規則沒引用');
+        }
+        expect(p.symVotes, 0);
+        expect(p.paraVotes, 3);
+        expect(p.rule, K2DrinkRule.parasympathetic);
+        // 判定順序：否決權在最前面
+        expect(p.votes.first.field, 'Heart rate');
+      },
+    );
+
+    test('⑪ 規則必須從投票算出來（顯示與判定同源）', () {
+      final cases = [
+        vitals(meanHr: 207, rmssd: 78, pns: 99, stress: 10), // 否決權
+        vitals(meanHr: 88, rmssd: 12, lfHf: 3.2, pns: 20, stress: 80), // 交感
+        vitals(meanHr: 61, rmssd: 97, pns: 100, stress: 7), // 副交感
+        vitals(meanHr: 70, rmssd: 35, pns: 50, stress: 60), // 全落中間帶 → 中性
+        vitals(), // 全缺值
+      ];
+      for (final c in cases) {
+        final p = K2DrinkPreview.from(c);
+        final hr =
+            p.votes.firstWhere((e) => e.field == 'Heart rate').side ==
+            K2VoteSide.override;
+        final expected = hr
+            ? K2DrinkRule.elevatedHr
+            : p.symVotes > p.paraVotes
+            ? K2DrinkRule.sympathetic
+            : p.paraVotes > p.symVotes
+            ? K2DrinkRule.parasympathetic
+            : K2DrinkRule.neutral;
+        expect(p.rule, expected, reason: '畫面上的票數必須能推出畫面上的規則');
+      }
+      final neutral = K2DrinkPreview.from(cases[3]);
+      expect(neutral.symVotes, 0);
+      expect(neutral.paraVotes, 0);
+      expect(neutral.rule, K2DrinkRule.neutral);
     });
 
     test('⑦ slug 必須逐字對上對方 infusion-knowledge.ts 的鍵值', () {
@@ -177,13 +277,14 @@ void main() {
     test('⑥ 送出的欄位要逐字照對方模板', () {
       final p = K2DrinkPreview.from(
         vitals(
-            meanHr: 56,
-            sdnn: 105,
-            rmssd: 127.3,
-            lfHf: 0.77,
-            ans: 37.3,
-            pns: 100,
-            confidence: '粗略'),
+          meanHr: 56,
+          sdnn: 105,
+          rmssd: 127.3,
+          lfHf: 0.77,
+          ans: 37.3,
+          pns: 100,
+          confidence: '粗略',
+        ),
       );
 
       final text = p.lines.join('\n');

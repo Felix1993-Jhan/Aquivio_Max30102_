@@ -729,6 +729,23 @@ class LocalizationService {
       'glass_setting_hint': '所有頁面改用半透明 + 背景模糊的樣式。'
           '⚠️ 每一層模糊都會讓畫面每一幀多做一次重算 —— '
           '如果量測中發現波形圖變頓，先把這個關掉。',
+      'k2_drink_vote_head': '為什麼命中這一條（★ = 對方提示詞寫死的門檻，其餘為本地自訂）',
+      'k2_drink_vote_sym': '交感 +1',
+      'k2_drink_vote_para': '副交感 +1',
+      'k2_drink_vote_override': '否決權觸發',
+      'k2_drink_vote_not_triggered': '未觸發否決權',
+      'k2_drink_vote_none': '不投票',
+      'k2_drink_vote_unused': '規則未引用',
+      'k2_drink_tally': '交感 {s} 票 · 副交感 {p} 票',
+      'k2_drink_tally_override': '心率偏高 → 否決權生效，其餘訊號一律不計',
+      'k2_drink_eff_hr': '偏高是否決權：只給補水、非氣泡、非刺激（electrolytes），蓋掉其他所有訊號；也是 caffeine / cascara 的迴避條件',
+      'k2_drink_eff_lfhf': '唯一的硬數字。> 1.5 投交感票，也是 caffeine 的迴避條件；≤ 1.5 只是不投交感，**不會投副交感**',
+      'k2_drink_eff_stress': '高 → 交感票，排除 caffeine / cascara / bcaa / whey / lCarnitine，偏向 lutein；低 → 副交感票（沒有中間帶）',
+      'k2_drink_eff_pns': '低 → 交感票，是 caffeine / cascara 的迴避條件；高 → 副交感票，解鎖能量與表現類',
+      'k2_drink_eff_rmssd': '代表 HRV。高 → 副交感票；低 → 交感票。雜訊會把它推高',
+      'k2_drink_eff_sdnn': '對方規則寫 high HRV — SDNN/RMSSD，但本地推演只用 RMSSD；模型可能兩個都看',
+      'k2_drink_eff_ans': '由 LF/HF 換算，低 = 偏副交感。規則沒直接引用，但模型可能誤讀成「分數不足」',
+      'k2_drink_eff_conf': '規則與程式都沒有引用，不影響命中哪一條',
       'k2_drink_btn': '推薦飲品',
       'k2_drink_title': '這組數字會換到哪一杯？',
       'k2_drink_sec_payload': '① 會送出去的欄位（逐字照對方模板）',
@@ -1475,6 +1492,33 @@ class LocalizationService {
           'Translucent panels with a blurred backdrop, across every page. '
               '⚠️ Each blur layer is recomputed every frame — '
               'if the waveform starts stuttering while measuring, turn this off first.',
+      'k2_drink_vote_head':
+          'Why this rule (★ = threshold hard-coded in their prompt; the rest are ours)',
+      'k2_drink_vote_sym': 'Sympathetic +1',
+      'k2_drink_vote_para': 'Parasympathetic +1',
+      'k2_drink_vote_override': 'Override fires',
+      'k2_drink_vote_not_triggered': 'No override',
+      'k2_drink_vote_none': 'No vote',
+      'k2_drink_vote_unused': 'Not used by rules',
+      'k2_drink_tally': 'Sympathetic {s} · Parasympathetic {p}',
+      'k2_drink_tally_override':
+          'Elevated heart rate → override fires; every other signal is ignored',
+      'k2_drink_eff_hr':
+          'Elevated = override: hydrating, non-fizzy, non-stimulant only (electrolytes), ignoring all else; also an avoid condition for caffeine / cascara',
+      'k2_drink_eff_lfhf':
+          'The only hard number. > 1.5 votes sympathetic and is a caffeine avoid condition; ≤ 1.5 just withholds that vote — it never votes parasympathetic',
+      'k2_drink_eff_stress':
+          'High → sympathetic vote, excludes caffeine / cascara / bcaa / whey / lCarnitine, favours lutein; low → parasympathetic vote (no middle band)',
+      'k2_drink_eff_pns':
+          'Low → sympathetic vote, an avoid condition for caffeine / cascara; high → parasympathetic vote, unlocks energy & performance',
+      'k2_drink_eff_rmssd':
+          'Stands for HRV. High → parasympathetic vote; low → sympathetic vote. Noise pushes it up',
+      'k2_drink_eff_sdnn':
+          'Their rule says high HRV — SDNN/RMSSD, but the local preview uses RMSSD only; the model may weigh both',
+      'k2_drink_eff_ans':
+          'Derived from LF/HF; low = parasympathetic-leaning. Not referenced by the rules, but a model may misread it as a low score',
+      'k2_drink_eff_conf':
+          'Referenced by neither the rules nor the code; it does not change which rule hits',
       'k2_drink_btn': 'Drink pick',
       'k2_drink_title': 'What drink would these numbers produce?',
       'k2_drink_sec_payload': '① Fields that get sent (verbatim, their template)',
