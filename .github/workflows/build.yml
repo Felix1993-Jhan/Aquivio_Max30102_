@@ -164,3 +164,70 @@ jobs:
         name: max30102-server-linux-amd64
         path: max30102_server
         retention-days: 30
+
+  # ══════════════════════════════════════════════════════════════
+  # (D) macOS arm64(Apple Silicon)無頭 server —— **只在手動觸發時跑**
+  # ══════════════════════════════════════════════════════════════
+  # 給整合方在 MacBook 上測指夾用。dart compile exe 只能編出「執行它的那台」
+  # 的作業系統,所以必須在 macOS runner 上編,Windows / Linux 產不出來。
+  #
+  # 只在 Actions 頁面按「Run workflow」時才跑(平常 push 不產出):
+  #   · 私有 repo 的 macOS 分鐘數以 10 倍計費
+  #   · 執行檔原則上暫不產出,需要時才手動編
+  #
+  # 與 (C) 同一份原始碼、同一個版本號,差別只在平台。
+  # 不跑 flutter test —— 那些測試與平台無關,(C) 已經跑過。
+  #
+  # ⚠️ 執行端需要的東西(寫在這裡,省得交付時漏講):
+  #   · brew install libserialport
+  #   · Apple Silicon 的 Homebrew 在 /opt/homebrew/lib,系統預設找不到 →
+  #     啟動前 export LIBSERIALPORT_PATH=/opt/homebrew/lib
+  #   · 埠用 /dev/cu.usbmodemXXXX(cu. 開頭,不是 tty.)
+  #   · 下載的執行檔未簽署 → xattr -d com.apple.quarantine max30102_server
+  build-server-macos:
+    name: Build macOS Server (arm64)
+    runs-on: macos-14
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'
+
+    - name: Install dependencies
+      run: flutter pub get
+
+    - name: Compile server executable
+      run: dart compile exe bin/max30102_server.dart -o max30102_server
+
+    - name: Smoke test (feed mode)
+      # feed 模式不開串口、不載入 libserialport,只驗證執行檔在 macOS 上跑得起來。
+      run: |
+        ./max30102_server --version
+        ./max30102_server --mode feed --port 8770 &
+        SERVER_PID=$!
+        sleep 2
+        echo "--- /health ---"
+        curl -fsS http://127.0.0.1:8770/health
+        echo ""
+        echo "--- /feed (一組合成樣本) ---"
+        curl -fsS -X POST http://127.0.0.1:8770/feed \
+          -H 'Content-Type: application/json' \
+          -d '{"bytes":[64,113,49,9,0,6,96,234,0,80,102,1,14]}'
+        echo ""
+        echo "--- /vitals ---"
+        curl -fsS http://127.0.0.1:8770/vitals
+        echo ""
+        kill $SERVER_PID
+
+    - name: Upload server artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: max30102-server-macos-arm64
+        path: max30102_server
+        retention-days: 30
