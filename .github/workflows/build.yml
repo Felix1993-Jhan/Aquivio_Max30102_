@@ -178,12 +178,17 @@ jobs:
   # 與 (C) 同一份原始碼、同一個版本號,差別只在平台。
   # 不跑 flutter test —— 那些測試與平台無關,(C) 已經跑過。
   #
-  # ⚠️ 執行端需要的東西(寫在這裡,省得交付時漏講):
-  #   · brew install libserialport
-  #   · Apple Silicon 的 Homebrew 在 /opt/homebrew/lib,系統預設找不到 →
-  #     啟動前 export LIBSERIALPORT_PATH=/opt/homebrew/lib
-  #   · 埠用 /dev/cu.usbmodemXXXX(cu. 開頭,不是 tty.)
-  #   · 下載的執行檔未簽署 → xattr -d com.apple.quarantine max30102_server
+  # ── 產物裡放什麼(解壓就能用,不需要 Homebrew)──────────────────
+  #   max30102_server       server
+  #   libserialport.dylib   從 runner 的 Homebrew 取出,只依賴 macOS 內建元件
+  #   run.sh / README.txt   packaging/macos/
+  #
+  # ⚠️ macOS **不會**在執行檔旁邊找函式庫(Windows 會)—— 這正是整合方第一次
+  #    卡住的地方。所以要嘛用 run.sh,要嘛由啟動 server 的程式帶
+  #    LIBSERIALPORT_PATH。server 程式本身不改。
+  #
+  # ⚠️ 打包成 tar.gz 再上傳:upload-artifact 的 zip **不保留執行權限**,
+  #    直接上傳的話對方解開後 server 跟 run.sh 都不能執行。
   build-server-macos:
     name: Build macOS Server (arm64)
     runs-on: macos-14
@@ -202,13 +207,28 @@ jobs:
       run: flutter pub get
 
     - name: Compile server executable
-      run: dart compile exe bin/max30102_server.dart -o max30102_server
+      run: |
+        mkdir -p dist
+        dart compile exe bin/max30102_server.dart -o dist/max30102_server
+
+    - name: Bundle libserialport.dylib
+      env:
+        HOMEBREW_NO_AUTO_UPDATE: '1'
+      run: |
+        brew install libserialport
+        # -L:Homebrew 的 libserialport.dylib 是符號連結,要複製實體檔案
+        cp -L "$(brew --prefix libserialport)/lib/libserialport.dylib" dist/
+        cp packaging/macos/run.sh packaging/macos/README.txt dist/
+        chmod +x dist/max30102_server dist/run.sh
+        echo "--- dylib 架構與相依(應為 arm64,只連到系統元件)---"
+        file dist/libserialport.dylib
+        otool -L dist/libserialport.dylib
 
     - name: Smoke test (feed mode)
       # feed 模式不開串口、不載入 libserialport,只驗證執行檔在 macOS 上跑得起來。
       run: |
-        ./max30102_server --version
-        ./max30102_server --mode feed --port 8770 &
+        ./dist/max30102_server --version
+        ./dist/max30102_server --mode feed --port 8770 &
         SERVER_PID=$!
         sleep 2
         echo "--- /health ---"
@@ -224,10 +244,120 @@ jobs:
         echo ""
         kill $SERVER_PID
 
+    - name: Smoke test (bundled dylib loads via run.sh)
+      # 對一個不存在的埠開 serial 模式:開埠一定失敗,但**失敗的原因**才是重點 ——
+      # 必須是「開不了埠」,不能是「載入不了函式庫」。後者就是整合方遇過的那個錯。
+      run: |
+        ./dist/run.sh --mode serial --serial /dev/cu.does-not-exist --port 8771 > sp.log 2>&1 &
+        SERVER_PID=$!
+        sleep 3
+        kill $SERVER_PID || true
+        cat sp.log
+        if grep -q 'Failed to load dynamic library' sp.log; then
+          echo "::error::libserialport.dylib 沒有被載入"
+          exit 1
+        fi
+
+    - name: Package
+      if: always()
+      run: |
+        mv dist max30102-server-macos-arm64
+        tar -czf max30102-server-macos-arm64.tar.gz max30102-server-macos-arm64
+
     - name: Upload server artifact
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: max30102-server-macos-arm64
-        path: max30102_server
+        path: max30102-server-macos-arm64.tar.gz
+        retention-days: 30
+
+  # ══════════════════════════════════════════════════════════════
+  # (E) Windows x64 無頭 server —— **只在手動觸發時跑**
+  # ══════════════════════════════════════════════════════════════
+  # 產物:max30102_server.exe + serialport.dll + README.txt
+  #
+  # Windows 會在執行檔所在的資料夾找 DLL,所以兩個檔案放一起就能用,
+  # 不需要環境變數。
+  #
+  # serialport.dll 的來源:flutter_libserialport 套件裡附的 libserialport 原始碼
+  # 與 CMake 設定(windows/libserialport/),這份設定不依賴 Flutter,可以單獨編。
+  # 桌面 App 的 serialport.dll 也是同一份原始碼編出來的。
+  #
+  # CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded:靜態連結 C 執行階段 →
+  # 目標電腦不需要先裝 Visual C++ 可轉散發套件。
+  build-server-windows:
+    name: Build Windows Server (x64)
+    runs-on: windows-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'
+
+    - name: Install dependencies
+      run: flutter pub get
+
+    - name: Compile server executable
+      run: |
+        New-Item -ItemType Directory -Force dist | Out-Null
+        dart compile exe bin/max30102_server.dart -o dist/max30102_server.exe
+
+    - name: Build serialport.dll
+      run: |
+        # 從 package_config.json 找到 flutter_libserialport 套件實際所在的路徑
+        $cfg = Get-Content .dart_tool/package_config.json -Raw | ConvertFrom-Json
+        $root = ($cfg.packages | Where-Object { $_.name -eq 'flutter_libserialport' }).rootUri
+        $pkg = ([Uri]$root).LocalPath
+        Write-Host "flutter_libserialport: $pkg"
+        cmake -S "$pkg/windows/libserialport" -B build-sp -A x64 `
+          -DCMAKE_POLICY_DEFAULT_CMP0091=NEW `
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+        cmake --build build-sp --config Release
+        Copy-Item build-sp/Release/serialport.dll dist/
+        Copy-Item packaging/windows/README.txt dist/
+        Get-ChildItem dist
+
+    - name: Smoke test (feed mode)
+      run: |
+        ./dist/max30102_server.exe --version
+        $p = Start-Process -FilePath ./dist/max30102_server.exe `
+          -ArgumentList '--mode','feed','--port','8770' -PassThru -NoNewWindow
+        Start-Sleep -Seconds 3
+        Write-Host '--- /health ---'
+        Invoke-RestMethod http://127.0.0.1:8770/health | ConvertTo-Json -Depth 5
+        Write-Host '--- /feed (一組合成樣本) ---'
+        Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8770/feed `
+          -ContentType 'application/json' `
+          -Body '{"bytes":[64,113,49,9,0,6,96,234,0,80,102,1,14]}' | ConvertTo-Json -Depth 5
+        Write-Host '--- /vitals ---'
+        Invoke-RestMethod http://127.0.0.1:8770/vitals | ConvertTo-Json -Depth 5
+        Stop-Process $p
+
+    - name: Smoke test (bundled serialport.dll loads)
+      # 同 macOS:對不存在的埠開 serial 模式,失敗原因必須是開不了埠,不是載入不了 DLL。
+      run: |
+        $p = Start-Process -FilePath ./dist/max30102_server.exe `
+          -ArgumentList '--mode','serial','--serial','COM99','--port','8771' `
+          -PassThru -NoNewWindow -RedirectStandardOutput sp.log -RedirectStandardError sp.err
+        Start-Sleep -Seconds 3
+        Stop-Process $p -ErrorAction SilentlyContinue
+        $log = (Get-Content sp.log, sp.err -Raw -ErrorAction SilentlyContinue) -join "`n"
+        Write-Host $log
+        if ($log -match 'Failed to load dynamic library') {
+          Write-Host '::error::serialport.dll 沒有被載入'
+          exit 1
+        }
+
+    - name: Upload server artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: max30102-server-windows-x64
+        path: dist/
         retention-days: 30

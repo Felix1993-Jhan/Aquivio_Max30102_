@@ -345,7 +345,7 @@ Windows 排程工作、USB 選擇性暫停／電源管理、ST-Link 大量儲存
 - **建構 server**：`dart compile exe bin/max30102_server.dart -o max30102_server`
 - **分析**：`flutter analyze`（目前零 issue）
 - **測試**：`flutter test`
-- **CI**：[.github/workflows/build.yml](.github/workflows/build.yml) — 三個 job（Windows App / Linux App / Linux AMD64 server）。這是**獨立 repo**，Flutter 專案就在 repo 根，所以 workflow 沒有 `paths` 過濾也沒有 `working-directory`，所有路徑從根算。
+- **CI**：[.github/workflows/build.yml](.github/workflows/build.yml) — 五個 job：Windows App / Linux App（兩者暫停用）、Linux AMD64 server（每次 push）、macOS arm64 server 與 Windows x64 server（**只在手動 Run workflow 時跑**，產物附上各自需要的 `libserialport.dylib` / `serialport.dll`，打包說明在 `packaging/`）。這是**獨立 repo**，Flutter 專案就在 repo 根，所以 workflow 沒有 `paths` 過濾也沒有 `working-directory`，所有路徑從根算。
 - **串口安全**：所有串口操作 try-catch 保護，USB 拔除自動斷線
 
 ### 已知問題
