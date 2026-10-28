@@ -875,7 +875,7 @@ class LocalizationService {
       'k2_fx_note_snr':
           'P_signal = 基頻 f₀（= 心率 / 60）與 2f₀ 各 ±{hw} Hz 內的功率；P_noise = {lo} ~ {hi} Hz 內其餘的功率。兩個功率在核心內部，未導出',
       'k2_fx_note_conf':
-          '只看脈搏成不成立（SQI），沒手指時 sqi = 0。頻譜那套（snr_db 三級）改放在 confidence_video',
+          'gaps = RR 空洞數（有一拍沒通過、補漏拍也沒補回）。沒手指時 sqi = 0。頻譜那套（snr_db 三級）改放在 confidence_video',
       'k2_fx_na_beats': '拍數不足 {min}（目前 {n}）',
       'k2_fx_na_spec': 'RR 間隔不足 8 個，算不出頻譜',
       'k2_fx_na_snr': '波形不足 5 秒，或還沒有心率',
@@ -1006,13 +1006,13 @@ class LocalizationService {
       'k2_help_snr_db_ref':
           'aquivio-vitals 原始註解：低於約 6 dB 時，RMSSD 的雜訊底線會超過典型的靜息 HRV。',
 
-      'k2_help_confidence_what': '讀數可信度：脈搏有沒有成立。只有 good / very rough 兩級。',
+      'k2_help_confidence_what': '讀數可信度：脈搏有沒有成立、而且一拍都沒掉。只有 good / very rough 兩級。',
       'k2_help_confidence_how':
-          '直接看 SQI（v0.0.0.7 起）：\nsqi = 1 → good\nsqi = 0（含手指離開）→ very rough\n不會出現 rough 與 null。',
+          '三個條件都成立才是 good（v0.0.0.7）：\n1. sqi = 1\n2. 拍數 ≥ 9（少於 9 拍核心不出 HRV）\n3. RR 沒有空洞：相鄰兩拍接得起來（下一拍的起谷 = 上一拍的終谷）\n其他（含手指離開）→ very rough。不會出現 rough 與 null。',
       'k2_help_confidence_use':
           '站台拿它把關：very rough（或 null）就不去要推薦。另外印在提示詞的「Reading confidence: X」，但 fastify 的規則沒有用到它。',
       'k2_help_confidence_note':
-          '手指感測的脈搏本來就強，不需要再用頻譜判斷穩不穩。原本照 aquivio-vitals 看 snr_db 的三級判斷（≥ 6 dB good、≥ 1 dB rough）改放在 confidence_video。看拍數的是另一個欄位 confidence_by_beats。',
+          '空洞代表有一拍沒通過考驗（生理閘門過長、與近 9 拍中位數差 > 40%、SQI 差、clean 剔除、訊號中斷），補漏拍也沒補回來。過短的假谷不會留下空洞。量測只有 12 秒左右，少一拍影響很大，所以補不起來就判 very rough。只看拍數不夠：照木頭時雜訊被剔掉幾拍後還剩 21 拍。原本照 aquivio-vitals 看 snr_db 的三級判斷改放在 confidence_video。',
 
       'k2_drink_btn': '推薦飲品',
       'k2_drink_title': '這組數字會換到哪一杯？',
@@ -1860,7 +1860,7 @@ class LocalizationService {
       'k2_fx_note_snr':
           'P_signal = power within ±{hw} Hz of f₀ (= HR / 60) and 2f₀; P_noise = the rest of {lo} – {hi} Hz. Both powers live inside the core and are not exported',
       'k2_fx_note_conf':
-          'Only whether a pulse is present (SQI); sqi = 0 with no finger. The spectral one (snr_db, three tiers) now goes to confidence_video',
+          'gaps = holes in the RR series (a beat failed a check and was not recovered). sqi = 0 with no finger. The spectral one (snr_db, three tiers) now goes to confidence_video',
       'k2_fx_na_beats': 'Fewer than {min} beats (currently {n})',
       'k2_fx_na_spec': 'Fewer than 8 RR intervals — no spectrum',
       'k2_fx_na_snr': 'Less than 5 s of waveform, or no heart rate yet',
@@ -2002,13 +2002,13 @@ class LocalizationService {
           'aquivio-vitals source comment: below about 6 dB the RMSSD noise floor exceeds typical resting HRV.',
 
       'k2_help_confidence_what':
-          'Reading confidence: whether a pulse is present. Only two tiers, good / very rough.',
+          'Reading confidence: whether a pulse is present with no beat lost. Only two tiers, good / very rough.',
       'k2_help_confidence_how':
-          'Taken directly from SQI (since v0.0.0.7):\nsqi = 1 → good\nsqi = 0 (including finger off) → very rough\nNever rough or null.',
+          'good only when all three hold (v0.0.0.7):\n1. sqi = 1\n2. beats ≥ 9 (below 9 the core gives no HRV)\n3. no holes in the RR series: adjacent beats join up (next start trough = previous end trough)\nOtherwise (including finger off) → very rough. Never rough or null.',
       'k2_help_confidence_use':
           'The station uses it as a gate: on very rough (or null) it does not request a recommendation. It is also printed in the prompt as "Reading confidence: X", but fastify\'s rules do not use it.',
       'k2_help_confidence_note':
-          'A finger sensor already gives a strong pulse, so there is no need to judge steadiness from the spectrum. The previous three-tier judgment from aquivio-vitals (snr_db ≥ 6 dB good, ≥ 1 dB rough) now goes to confidence_video. The beat-based one is a separate field, confidence_by_beats.',
+          'A hole means a beat failed a check (physiological gate too long, > 40% off the median of the last 9 beats, poor SQI, clean() removal, signal break) and missed-beat recovery did not restore it. Short false troughs leave no hole. A reading is only about 12 seconds, so one lost beat matters; if it cannot be recovered the reading is very rough. Beat count alone is not enough: on wood, 21 beats were still left after noise rejections. The previous three-tier judgment from aquivio-vitals (snr_db) now goes to confidence_video.',
 
       'k2_drink_btn': 'Drink pick',
       'k2_drink_title': 'What drink would these numbers produce?',

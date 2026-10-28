@@ -434,7 +434,7 @@ List<K2FormulaRow> k2FormulaRows(VitalsMetrics m, {required int beats}) {
     ),
   );
 
-  // ── confidence ← sqi(v0.0.0.7 起)─────────────────────────────
+  // ── confidence ← sqi + 拍數 + RR 空洞(v0.0.0.7)───────────────
   // 舊的判斷(已停用,保留供回溯)—— 看 snr_db,現在只送給 confidence_video:
   // final good = _f(Max30102VitalsMetrics.snrGoodDb, 0);
   // final rough = _f(Max30102VitalsMetrics.snrRoughDb, 0);
@@ -455,13 +455,28 @@ List<K2FormulaRow> k2FormulaRows(VitalsMetrics m, {required int beats}) {
   //     ],
   //   ),
   // );
-  final conf = m.confidenceBySqi;
+  // 舊的判斷(已停用,保留供回溯)—— 只看 sqi:
+  // final conf = m.confidenceBySqi;
+  // rows.add(
+  //   K2FormulaRow(
+  //     api: 'confidence',
+  //     inputs: const ['sqi'],
+  //     formula: 'sqi = 1 → good · sqi = 0 → very rough',
+  //     sub: 'sqi = ${m.sqi}',
+  //     value: conf,
+  //     result: conf,
+  //     notes: const [(key: 'k2_fx_note_conf', params: <String, dynamic>{})],
+  //   ),
+  // );
+  final conf = m.confidenceByPulse;
+  const minBeats = Max30102HrvCalculator.minBeatsForHrv;
   rows.add(
     K2FormulaRow(
       api: 'confidence',
-      inputs: const ['sqi'],
-      formula: 'sqi = 1 → good · sqi = 0 → very rough',
-      sub: 'sqi = ${m.sqi}',
+      inputs: const ['sqi', 'RR'],
+      formula:
+          'sqi = 1 ∧ beats ≥ $minBeats ∧ gaps = 0 → good · else → very rough',
+      sub: 'sqi = ${m.sqi} · beats = ${m.beats} · gaps = ${m.rrGaps}',
       value: conf,
       result: conf,
       notes: const [(key: 'k2_fx_note_conf', params: <String, dynamic>{})],

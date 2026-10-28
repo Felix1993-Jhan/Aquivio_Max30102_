@@ -311,19 +311,64 @@ void main() {
       expect(Max30102VitalsMetrics.confidenceFromSnr(null), isNull);
     });
 
-    test('v0.0.0.7:送出的 confidence 看 SQI,只有 good / very rough;'
-        'confidence_video 維持 SNR', () {
-      VitalsMetrics m(bool sqiOk) => Max30102VitalsMetrics.compute(
-        pts: const [],
-        hv: null,
-        sqiOk: sqiOk,
-        settling: false,
-      );
-      expect(m(true).toStrapiJson()['confidence'], 'good');
-      expect(m(false).toStrapiJson()['confidence'], 'very rough',
-          reason: '沒手指 / SQI 沒過 → very rough,不是 null');
-      // 沒有波形 → snr_db 算不出來 → SNR 版照舊回 null,與 confidence 分開
-      expect(m(true).toStrapiJson()['confidence_video'], isNull);
+    group('v0.0.0.7:confidence = SQI 過關 且 ≥ 9 拍 且 RR 沒有空洞', () {
+      /// 首尾相接的 [n] 筆 RR(每筆 800ms = 80 樣本)。
+      List<HrvRrPoint> run(int n, {int from = 0}) => [
+            for (int i = 0; i < n; i++)
+              (rr: 800.0, startAbs: from + i * 80, endAbs: from + (i + 1) * 80),
+          ];
+      String conf(List<HrvRrPoint> pts, {bool sqiOk = true}) =>
+          Max30102VitalsMetrics.compute(
+            pts: pts,
+            hv: null,
+            sqiOk: sqiOk,
+            settling: false,
+          ).toStrapiJson()['confidence'] as String;
+
+      test('連續 9 拍以上、SQI 過關 → good', () {
+        // 8 筆 RR = 9 個谷 = 9 拍,剛好在門檻上
+        expect(conf(run(8)), 'good');
+        expect(conf(run(14)), 'good');
+      });
+
+      test('拍數不足 9 → very rough', () {
+        expect(conf(run(7)), 'very rough');
+        expect(conf(const []), 'very rough',
+            reason: '沒資料也是 very rough,不是 null');
+      });
+
+      test('SQI 沒過(含沒手指)→ very rough', () {
+        expect(conf(run(14), sqiOk: false), 'very rough');
+      });
+
+      test('有空洞 → very rough,即使拍數很多', () {
+        // 前 7 筆接著,中間掉一拍(空 1640ms),後 7 筆接著 —— 照 10/8 14:26 那份的形狀
+        final a = run(7);
+        final b = run(7, from: a.last.endAbs + 164);
+        expect(Max30102VitalsMetrics.rrGaps([...a, ...b]), 1);
+        expect(conf([...a, ...b]), 'very rough');
+      });
+
+      test('空洞的判定是「下一拍起谷 ≠ 上一拍終谷」,首尾相接不算', () {
+        expect(Max30102VitalsMetrics.rrGaps(run(20)), 0);
+        expect(Max30102VitalsMetrics.rrGaps(const []), 0);
+        final a = run(3);
+        final b = run(3, from: a.last.endAbs + 1);
+        final c = run(3, from: b.last.endAbs + 50);
+        expect(Max30102VitalsMetrics.rrGaps([...a, ...b, ...c]), 2);
+      });
+
+      test('confidence_video 維持 SNR,與 confidence 分開', () {
+        // 沒有波形 → snr_db 算不出來 → SNR 版照舊回 null
+        final m = Max30102VitalsMetrics.compute(
+          pts: run(14),
+          hv: null,
+          sqiOk: true,
+          settling: false,
+        );
+        expect(m.toStrapiJson()['confidence'], 'good');
+        expect(m.toStrapiJson()['confidence_video'], isNull);
+      });
     });
 
     test('lf/hf 的單位換算:他們 = 我們(ms²) × 1.024e-3', () {

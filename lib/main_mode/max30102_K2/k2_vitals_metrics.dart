@@ -654,6 +654,22 @@ class Max30102VitalsMetrics {
   // 六、打包 —— 一次算齊對方介面要的全部欄位
   // ──────────────────────────────────────────────────────────────
 
+  /// RR 序列裡的**空洞數** —— 相鄰兩拍接不起來(下一拍起谷 ≠ 上一拍終谷)的次數。
+  ///
+  /// 核心收拍時,下一拍的起谷就是直接拿上一拍的終谷,所以連續的拍一定**完全相等**,
+  /// 不需要容差。會留下空洞的:③ 生理閘門過長、④ 40% 長側、① SQI 差那輪、
+  /// ⑤ clean() 剔除、訊號中斷;**不會**的:過短的假谷(基準不推進,直接跨過量)、
+  /// 補漏拍補成功的拍(首尾相接)。所以空洞 = 「有一拍掉了,而且沒補回來」。
+  ///
+  /// 只看得到夾在兩個被接受的拍之間的中斷;第一拍之前、最後一拍之後看不到。
+  static int rrGaps(List<HrvRrPoint> pts) {
+    int n = 0;
+    for (int i = 0; i + 1 < pts.length; i++) {
+      if (pts[i + 1].startAbs != pts[i].endAbs) n++;
+    }
+    return n;
+  }
+
   /// 由「一段 RR + 當下狀態」算出對方介面要的全部欄位。
   ///
   /// [pts] 這段的 RR(帶絕對位置);[hv] 同一段算出來的 HRV 統計;
@@ -670,6 +686,8 @@ class Max30102VitalsMetrics {
     final spec = spectrum(pts);
     final si = stressIndex(rr);
     return VitalsMetrics(
+      beats: pts.isEmpty ? 0 : rr.length + 1,
+      rrGaps: rrGaps(pts),
       hrv: hv,
       spectrum: spec,
       stress: si,
@@ -718,7 +736,15 @@ class VitalsMetrics {
 
   final bool sqiOk;
 
+  /// 這段 RR 的拍數(谷數 = RR 數 + 1;沒有 RR 時為 0)。`confidence` 用。
+  final int beats;
+
+  /// 這段 RR 的空洞數,見 [Max30102VitalsMetrics.rrGaps]。`confidence` 用。
+  final int rrGaps;
+
   const VitalsMetrics({
+    required this.beats,
+    required this.rrGaps,
     required this.hrv,
     required this.spectrum,
     required this.stress,
@@ -788,13 +814,31 @@ class VitalsMetrics {
   // String? get confidenceBySnr =>
   //     Max30102VitalsMetrics.confidenceFromSnr(snrDb);
 
-  /// → `confidence`(v0.0.0.7 起)。**只看脈搏成不成立**:SQI 過關 → good,
-  /// 沒過(含手指離開)→ very rough。只有這兩級,不會出現 rough 與 null。
+  // 舊的判斷(**已停用**,保留供回溯)—— 只看 SQI。實測照木頭時 SQI 照樣過關
+  // (假谷被當成脈搏,心率 150、血氧 99.9),晃動中斷 3.4 秒的那次也是 good。
+  // /// → `confidence`(v0.0.0.7 起)。**只看脈搏成不成立**:SQI 過關 → good,
+  // /// 沒過(含手指離開)→ very rough。只有這兩級,不會出現 rough 與 null。
+  // String get confidenceBySqi => sqiOk ? 'good' : 'very rough';
+
+  /// → `confidence`(v0.0.0.7)。**脈搏成立、而且一拍都沒掉**才是 good:
   ///
-  /// 站台拿這個欄位當把關:`very rough` / `null` 就不去要推薦。
-  /// 手指感測的脈搏本來就強,不需要再用頻譜去判斷穩不穩 —— 那是攝影機
-  /// 訊號弱才需要的;頻譜那套照樣留在 `confidence_video` 與 `snr_db`。
-  String get confidenceBySqi => sqiOk ? 'good' : 'very rough';
+  ///     SQI 過關 且 ≥ 9 拍 且 RR 沒有空洞 → good
+  ///     其他(含手指離開)                → very rough
+  ///
+  /// 只有這兩級,不會出現 rough 與 null。站台拿這個欄位當把關:
+  /// `very rough` / `null` 就不去要推薦。
+  ///
+  /// · 9 拍 = [Max30102HrvCalculator.minBeatsForHrv],少於它核心不出 HRV。
+  /// · 空洞 = 有一拍沒通過考驗、補漏拍也沒補回來(見 [Max30102VitalsMetrics.rrGaps])。
+  ///   量測只有 12 秒左右,少一拍影響很大,所以補不起來就判 very rough。
+  ///   只看「≥ 9 拍」不夠:數的是**通過**的拍,木頭的雜訊剔掉幾拍後還剩 21 拍。
+  ///
+  /// 手指感測的脈搏本來就強,不需要再用頻譜判斷穩不穩;頻譜那套照樣留在
+  /// `confidence_video` 與 `snr_db`。
+  String get confidenceByPulse =>
+      sqiOk && beats >= Max30102HrvCalculator.minBeatsForHrv && rrGaps == 0
+      ? 'good'
+      : 'very rough';
 
   /// → `confidence_video`。攝影機的判法(SNR 三級),見 [confidenceFromSnr]。
   String? get confidenceVideo =>
@@ -810,7 +854,7 @@ class VitalsMetrics {
   ///
   /// 每一個欄位都對齊 `aquivio-vitals` 的實作,所以數值與攝影機端可互換:
   ///   · `pns` / `ans` / `stress` / `activity` —— 逐字照他們的 derived_scores()
-  ///   · `confidence` —— 看 SQI(見 [confidenceBySqi]);SNR 版改放 `confidence_video`
+  ///   · `confidence` —— SQI + 拍數 + RR 空洞(見 [confidenceByPulse]);SNR 版改放 `confidence_video`
   ///   · `lf` / `hf` —— **換算成他們的單位**(見 [HrvSpectrum.lfAquivio]);
   ///     我們原本的 ms² 值另外放在 `lf_ms2` / `hf_ms2`
   ///
@@ -829,10 +873,11 @@ class VitalsMetrics {
       'sqi': sqi,
       'snr_db': snrDb,
       // `confidence` 是對方 VitalsResult 宣告的欄位,名字不能動。
-      // v0.0.0.7 起改看 SQI(只有 good / very rough),見 [confidenceBySqi]。
+      // v0.0.0.7 起改看脈搏(只有 good / very rough),見 [confidenceByPulse]。
       // 舊值(**已停用**,保留供回溯)—— 頻譜 SNR 三級,現在只放在 `confidence_video`:
       // 'confidence': confidenceBySnr,
-      'confidence': confidenceBySqi,
+      // 'confidence': confidenceBySqi,
+      'confidence': confidenceByPulse,
       'pns': pnsScore,
       'ans': ansScore,
       'stress': stressScore,
@@ -853,7 +898,7 @@ class VitalsMetrics {
       // 30 秒窗的 LF 只涵蓋 0.04Hz 的約 1.1 個週期 —— 攝影機端同樣是
       // 30 秒,所以這不是我們獨有的限制,而是兩邊共同的。
       // ⚠️ v0.0.0.6 以前與上面的 `confidence` 是同一個值;v0.0.0.7 起
-      //    `confidence` 改看 SQI,這裡維持 SNR 三級,兩者**不再相同**。
+      //    `confidence` 改看脈搏,這裡維持 SNR 三級,兩者**不再相同**。
       //
       // 「video」指的是**最早期用來測試的攝影機機台**(rPPG,aquivio-vitals)。
       // 那台後來沒有再使用了,但整條軟體鏈(station → Strapi → LLM prompt)
