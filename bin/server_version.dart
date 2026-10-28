@@ -31,7 +31,19 @@
 /// | `0.0.0.4` | SNR 頻帶定義補齊(**`snr_db` 數值變動**);新增 `confidence_video` 別名 |
 /// | `0.0.0.5` | WS `/stream` 加推 `wave` 區塊(IR 截尾平滑的增量波形) |
 /// | `0.0.0.6` | RED/IR 通道方向自動判定(**行為變更**);新增 `channelOrient` |
+/// | `0.0.0.7` | `confidence` 改看 SQI,只剩 `good` / `very rough`(**數值變動**) |
 ///
+/// ## ⚠️ `0.0.0.7`:`confidence` 不再看頻譜
+///
+/// 站台拿 `confidence` 當把關(`very rough` / `null` 就不去要推薦)。原本照攝影機
+/// 的 `hrv_confidence()` 看 SNR,但那是攝影機訊號弱、要先確認「有沒有脈搏」才需要的;
+/// 手指感測的脈搏本來就強,頻譜反而會把心率自然的起伏算成雜訊。
+///
+/// | 欄位 | `0.0.0.6` | `0.0.0.7` |
+/// |---|---|---|
+/// | `confidence` | SNR 三級 / 算不出來給 `null` | `sqi = 1` → `good`,`sqi = 0`(含手指離開)→ `very rough` |
+/// | `confidence_video` | 與 `confidence` 同值 | **維持 SNR 三級**,兩者不再相同 |
+/// | `snr_db` / `confidence_by_beats` | — | 不變 |
 /// ## ⚠️ `0.0.0.6` 是行為變更,不只是加欄位
 ///
 /// 起因:實測 8 片 MAX30102 模組,其中 7 片**把兩顆 LED 晶粒裝反**(今華電子那批;
@@ -77,4 +89,4 @@
 ///
 /// 手上若有自稱 `0.0.0.3` 的執行檔,**一律當成 `8ec45ce` 那版**(偏嚴),
 /// 並建議升到 `0.0.0.4`。
-const String kServerVersion = '0.0.0.6';
+const String kServerVersion = '0.0.0.7';

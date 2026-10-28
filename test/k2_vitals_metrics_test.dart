@@ -311,6 +311,21 @@ void main() {
       expect(Max30102VitalsMetrics.confidenceFromSnr(null), isNull);
     });
 
+    test('v0.0.0.7:送出的 confidence 看 SQI,只有 good / very rough;'
+        'confidence_video 維持 SNR', () {
+      VitalsMetrics m(bool sqiOk) => Max30102VitalsMetrics.compute(
+        pts: const [],
+        hv: null,
+        sqiOk: sqiOk,
+        settling: false,
+      );
+      expect(m(true).toStrapiJson()['confidence'], 'good');
+      expect(m(false).toStrapiJson()['confidence'], 'very rough',
+          reason: '沒手指 / SQI 沒過 → very rough,不是 null');
+      // 沒有波形 → snr_db 算不出來 → SNR 版照舊回 null,與 confidence 分開
+      expect(m(true).toStrapiJson()['confidence_video'], isNull);
+    });
+
     test('lf/hf 的單位換算:他們 = 我們(ms²) × 1.024e-3', () {
       final s = Max30102VitalsMetrics.spectrum(
         synth(durationSec: 120, freq: 0.10),

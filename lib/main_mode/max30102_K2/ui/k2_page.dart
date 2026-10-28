@@ -545,7 +545,18 @@ class _K2PageState extends State<K2Page> {
               stat('自律平衡', f(m.ansScore, d: 1), api: 'ans'),
               stat('壓力', f(m.stressScore, d: 1), api: 'stress'),
               stat('活動量', f(m.activityScore, d: 1), api: 'activity'),
-              stat('可信度', m.confidenceBySnr ?? '—', api: 'confidence'),
+              // confidence 看 SQI(v0.0.0.7 起),與 sqi 一樣:舊快照沒存 sqiOk → 留白
+              stat(
+                '可信度',
+                qualityKnown ? m.confidenceBySqi : '—',
+                api: 'confidence',
+                color: qualityKnown ? null : Colors.grey.shade400,
+              ),
+              stat(
+                '可信度(攝影機)',
+                m.confidenceVideo ?? '—',
+                api: 'confidence_video',
+              ),
               stat(
                 '訊噪比',
                 m.snrDb == null ? '—' : '${f(m.snrDb, d: 1)} dB',
@@ -2026,7 +2037,8 @@ class _K2PageState extends State<K2Page> {
               style: TextStyle(fontSize: 9, color: Colors.orange.shade800),
             ),
           ),
-        _kv('可信度', m.confidenceBySnr ?? '—', api: 'confidence'),
+        _kv('可信度', m.confidenceBySqi, api: 'confidence'),
+        _kv('可信度(攝影機)', m.confidenceVideo ?? '—', api: 'confidence_video'),
         _kv('SQI', '${m.sqi}', api: 'sqi'),
         _kv(
           '訊噪比',

@@ -434,24 +434,37 @@ List<K2FormulaRow> k2FormulaRows(VitalsMetrics m, {required int beats}) {
     ),
   );
 
-  // ── confidence ← snr_db ─────────────────────────────────────────
-  final good = _f(Max30102VitalsMetrics.snrGoodDb, 0);
-  final rough = _f(Max30102VitalsMetrics.snrRoughDb, 0);
-  final conf = m.confidenceBySnr;
+  // ── confidence ← sqi(v0.0.0.7 起)─────────────────────────────
+  // 舊的判斷(已停用,保留供回溯)—— 看 snr_db,現在只送給 confidence_video:
+  // final good = _f(Max30102VitalsMetrics.snrGoodDb, 0);
+  // final rough = _f(Max30102VitalsMetrics.snrRoughDb, 0);
+  // final conf = m.confidenceBySnr;
+  // rows.add(
+  //   K2FormulaRow(
+  //     api: 'confidence',
+  //     inputs: const ['snr_db'],
+  //     formula:
+  //         '≥ $good dB → good · ≥ $rough dB → rough · < $rough dB → very rough',
+  //     sub: snr == null ? null : 'snr_db = ${_f(snr, 2)} dB',
+  //     value: conf,
+  //     result: conf ?? '—',
+  //     notes: [
+  //       snr == null
+  //           ? naDep('snr_db')
+  //           : (key: 'k2_fx_note_conf', params: <String, dynamic>{}),
+  //     ],
+  //   ),
+  // );
+  final conf = m.confidenceBySqi;
   rows.add(
     K2FormulaRow(
       api: 'confidence',
-      inputs: const ['snr_db'],
-      formula:
-          '≥ $good dB → good · ≥ $rough dB → rough · < $rough dB → very rough',
-      sub: snr == null ? null : 'snr_db = ${_f(snr, 2)} dB',
+      inputs: const ['sqi'],
+      formula: 'sqi = 1 → good · sqi = 0 → very rough',
+      sub: 'sqi = ${m.sqi}',
       value: conf,
-      result: conf ?? '—',
-      notes: [
-        snr == null
-            ? naDep('snr_db')
-            : (key: 'k2_fx_note_conf', params: <String, dynamic>{}),
-      ],
+      result: conf,
+      notes: const [(key: 'k2_fx_note_conf', params: <String, dynamic>{})],
     ),
   );
 

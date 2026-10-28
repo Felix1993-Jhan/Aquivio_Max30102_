@@ -874,7 +874,8 @@ class LocalizationService {
       'k2_fx_note_clamp': '算出 {raw}，超出 0 ~ 100 → 夾到 {v}',
       'k2_fx_note_snr':
           'P_signal = 基頻 f₀（= 心率 / 60）與 2f₀ 各 ±{hw} Hz 內的功率；P_noise = {lo} ~ {hi} Hz 內其餘的功率。兩個功率在核心內部，未導出',
-      'k2_fx_note_conf': '只看 snr_db，與拍數無關（看拍數的是 confidence_by_beats，不送給 LLM）',
+      'k2_fx_note_conf':
+          '只看脈搏成不成立（SQI），沒手指時 sqi = 0。頻譜那套（snr_db 三級）改放在 confidence_video',
       'k2_fx_na_beats': '拍數不足 {min}（目前 {n}）',
       'k2_fx_na_spec': 'RR 間隔不足 8 個，算不出頻譜',
       'k2_fx_na_snr': '波形不足 5 秒，或還沒有心率',
@@ -999,19 +1000,19 @@ class LocalizationService {
       'k2_help_snr_db_how':
           '1. IR 原始波形減平均、乘 Hann 窗\n2. FFT（補零到 2 的冪次）\n3. 在 0.5~4 Hz 內，f₀（= 心率 ÷ 60）與 2f₀ 各 ±0.2 Hz 的功率算「訊號」，其餘算「雜訊」\n4. 10 · log₁₀(訊號 ÷ 雜訊)',
       'k2_help_snr_db_use':
-          '送進 fastify 的 JSON，但不在 LLM 提示詞裡；送給 LLM 的 confidence 完全由它決定。',
+          '送進 fastify 的 JSON，但不在 LLM 提示詞裡。v0.0.0.7 起只決定 confidence_video，不再影響送給 LLM 的 confidence。',
       'k2_help_snr_db_note':
           '它其實也在量「心率穩不穩」：訊號窗只有 ±0.2 Hz（約 ±12 bpm），整段心率起伏超過這個範圍，脈搏能量就會落到窗外被算成雜訊——深呼吸造成的心率擺動就會讓 SNR 下降。頻帶與門檻借自前一代量測來源 aquivio-vitals（攝影機機台，現由 MAX30102 接手）的 core.py，是為 rPPG 校準的，和我們的接觸式 PPG 不一定對應。',
       'k2_help_snr_db_ref':
           'aquivio-vitals 原始註解：低於約 6 dB 時，RMSSD 的雜訊底線會超過典型的靜息 HRV。',
 
-      'k2_help_confidence_what': '讀數可信度：good / rough / very rough。',
+      'k2_help_confidence_what': '讀數可信度：脈搏有沒有成立。只有 good / very rough 兩級。',
       'k2_help_confidence_how':
-          '只看 snr_db（門檻借自 aquivio-vitals 的 hrv_confidence()）：\n≥ 6 dB → good\n≥ 1 dB → rough\n其餘 → very rough\nsnr_db 算不出來 → null',
+          '直接看 SQI（v0.0.0.7 起）：\nsqi = 1 → good\nsqi = 0（含手指離開）→ very rough\n不會出現 rough 與 null。',
       'k2_help_confidence_use':
-          '提示詞的「Reading confidence: X」。但 fastify 的規則和程式都沒有任何一處用到它——模型看得到，卻沒有被告知該怎麼用。',
+          '站台拿它把關：very rough（或 null）就不去要推薦。另外印在提示詞的「Reading confidence: X」，但 fastify 的規則沒有用到它。',
       'k2_help_confidence_note':
-          '與拍數無關。看拍數的是另一個欄位 confidence_by_beats，不送給 LLM。所以「good」不代表樣本夠多，只代表波形的頻譜乾淨。',
+          '手指感測的脈搏本來就強，不需要再用頻譜判斷穩不穩。原本照 aquivio-vitals 看 snr_db 的三級判斷（≥ 6 dB good、≥ 1 dB rough）改放在 confidence_video。看拍數的是另一個欄位 confidence_by_beats。',
 
       'k2_drink_btn': '推薦飲品',
       'k2_drink_title': '這組數字會換到哪一杯？',
@@ -1859,7 +1860,7 @@ class LocalizationService {
       'k2_fx_note_snr':
           'P_signal = power within ±{hw} Hz of f₀ (= HR / 60) and 2f₀; P_noise = the rest of {lo} – {hi} Hz. Both powers live inside the core and are not exported',
       'k2_fx_note_conf':
-          'Depends on snr_db only, not on beat count (the beat-based one is confidence_by_beats, which the LLM never sees)',
+          'Only whether a pulse is present (SQI); sqi = 0 with no finger. The spectral one (snr_db, three tiers) now goes to confidence_video',
       'k2_fx_na_beats': 'Fewer than {min} beats (currently {n})',
       'k2_fx_na_spec': 'Fewer than 8 RR intervals — no spectrum',
       'k2_fx_na_snr': 'Less than 5 s of waveform, or no heart rate yet',
@@ -1994,20 +1995,20 @@ class LocalizationService {
       'k2_help_snr_db_how':
           '1. Remove the mean of the raw IR waveform and apply a Hann window\n2. FFT (zero-padded to a power of two)\n3. Within 0.5–4 Hz, power within ±0.2 Hz of f₀ (= HR ÷ 60) and 2f₀ counts as signal, the rest as noise\n4. 10 · log₁₀(signal ÷ noise)',
       'k2_help_snr_db_use':
-          'Sent to fastify in the JSON, but not part of the LLM prompt; it alone decides the confidence the LLM sees.',
+          'Sent to fastify in the JSON, but not part of the LLM prompt. Since v0.0.0.7 it only decides confidence_video, no longer the confidence the LLM sees.',
       'k2_help_snr_db_note':
           'It also measures how steady the heart rate is: the signal window is only ±0.2 Hz (about ±12 bpm), so if HR swings beyond that during the segment, pulse energy falls outside and counts as noise — HR swings from deep breathing lower the SNR. Bands and thresholds are borrowed from core.py of aquivio-vitals, the previous measurement source (the camera machine, now replaced by the MAX30102), calibrated for rPPG and not necessarily for our contact PPG.',
       'k2_help_snr_db_ref':
           'aquivio-vitals source comment: below about 6 dB the RMSSD noise floor exceeds typical resting HRV.',
 
       'k2_help_confidence_what':
-          'Reading confidence: good / rough / very rough.',
+          'Reading confidence: whether a pulse is present. Only two tiers, good / very rough.',
       'k2_help_confidence_how':
-          'Depends only on snr_db (thresholds borrowed from hrv_confidence() of aquivio-vitals):\n≥ 6 dB → good\n≥ 1 dB → rough\notherwise → very rough\nno snr_db → null',
+          'Taken directly from SQI (since v0.0.0.7):\nsqi = 1 → good\nsqi = 0 (including finger off) → very rough\nNever rough or null.',
       'k2_help_confidence_use':
-          '"Reading confidence: X" in the prompt. But neither their rules nor their code use it anywhere — the model sees it without being told what to do with it.',
+          'The station uses it as a gate: on very rough (or null) it does not request a recommendation. It is also printed in the prompt as "Reading confidence: X", but fastify\'s rules do not use it.',
       'k2_help_confidence_note':
-          'Unrelated to beat count. The beat-based one is a separate field, confidence_by_beats, which the LLM never sees. So "good" does not mean enough beats, only a clean spectrum.',
+          'A finger sensor already gives a strong pulse, so there is no need to judge steadiness from the spectrum. The previous three-tier judgment from aquivio-vitals (snr_db ≥ 6 dB good, ≥ 1 dB rough) now goes to confidence_video. The beat-based one is a separate field, confidence_by_beats.',
 
       'k2_drink_btn': 'Drink pick',
       'k2_drink_title': 'What drink would these numbers produce?',

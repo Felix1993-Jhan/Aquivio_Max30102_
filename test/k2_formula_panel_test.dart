@@ -107,8 +107,8 @@ void main() {
       expect(inputs['ans'], ['lf_hf']);
       expect(inputs['stress'], ['pns', 'ans']);
       expect(inputs['confidence'], [
-        'snr_db',
-      ], reason: '送出的 confidence 看 SNR,不是看拍數');
+        'sqi',
+      ], reason: '送出的 confidence 看 SQI(v0.0.0.7 起),不是看 SNR 或拍數');
       // 深色(LLM 看得到)的剛好是提示詞印出的那 8 個,其餘都是中間量
       expect(
         [

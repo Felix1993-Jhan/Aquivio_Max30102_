@@ -782,8 +782,22 @@ class VitalsMetrics {
   double? get activityScore =>
       Max30102VitalsMetrics.activityScore(hrv?.meanHr);
 
-  /// → `confidence`。改用 SNR 門檻,與整合方一致(見 [confidenceFromSnr])。
-  String? get confidenceBySnr =>
+  // 舊的判斷(**已停用**,保留供回溯)—— 頻譜 SNR 三級,v0.0.0.6 以前送給 `confidence`。
+  // 現在只剩 `confidence_video` 用到,直接呼叫 confidenceFromSnr(snrDb)。
+  // /// → `confidence`。改用 SNR 門檻,與整合方一致(見 [confidenceFromSnr])。
+  // String? get confidenceBySnr =>
+  //     Max30102VitalsMetrics.confidenceFromSnr(snrDb);
+
+  /// → `confidence`(v0.0.0.7 起)。**只看脈搏成不成立**:SQI 過關 → good,
+  /// 沒過(含手指離開)→ very rough。只有這兩級,不會出現 rough 與 null。
+  ///
+  /// 站台拿這個欄位當把關:`very rough` / `null` 就不去要推薦。
+  /// 手指感測的脈搏本來就強,不需要再用頻譜去判斷穩不穩 —— 那是攝影機
+  /// 訊號弱才需要的;頻譜那套照樣留在 `confidence_video` 與 `snr_db`。
+  String get confidenceBySqi => sqiOk ? 'good' : 'very rough';
+
+  /// → `confidence_video`。攝影機的判法(SNR 三級),見 [confidenceFromSnr]。
+  String? get confidenceVideo =>
       Max30102VitalsMetrics.confidenceFromSnr(snrDb);
 
   /// → `sqi`。對方的型別是 number,我們的是二元閘門 → 1 / 0。
@@ -796,7 +810,7 @@ class VitalsMetrics {
   ///
   /// 每一個欄位都對齊 `aquivio-vitals` 的實作,所以數值與攝影機端可互換:
   ///   · `pns` / `ans` / `stress` / `activity` —— 逐字照他們的 derived_scores()
-  ///   · `confidence` —— 照他們的 SNR 門檻(6.0 / 1.0 dB)
+  ///   · `confidence` —— 看 SQI(見 [confidenceBySqi]);SNR 版改放 `confidence_video`
   ///   · `lf` / `hf` —— **換算成他們的單位**(見 [HrvSpectrum.lfAquivio]);
   ///     我們原本的 ms² 值另外放在 `lf_ms2` / `hf_ms2`
   ///
@@ -815,9 +829,10 @@ class VitalsMetrics {
       'sqi': sqi,
       'snr_db': snrDb,
       // `confidence` 是對方 VitalsResult 宣告的欄位,名字不能動。
-      // 但光看名字分不出它是照誰的標準算的,所以下面另外給一個
-      // `confidence_video` 的明確別名(同一個值)。
-      'confidence': confidenceBySnr,
+      // v0.0.0.7 起改看 SQI(只有 good / very rough),見 [confidenceBySqi]。
+      // 舊值(**已停用**,保留供回溯)—— 頻譜 SNR 三級,現在只放在 `confidence_video`:
+      // 'confidence': confidenceBySnr,
+      'confidence': confidenceBySqi,
       'pns': pnsScore,
       'ans': ansScore,
       'stress': stressScore,
@@ -837,7 +852,8 @@ class VitalsMetrics {
       // 誠實性資訊:數字照送,但可不可信一起講清楚。
       // 30 秒窗的 LF 只涵蓋 0.04Hz 的約 1.1 個週期 —— 攝影機端同樣是
       // 30 秒,所以這不是我們獨有的限制,而是兩邊共同的。
-      // ⚠️ 與上面的 `confidence` **同一個值**,只是名字講明了出處。
+      // ⚠️ v0.0.0.6 以前與上面的 `confidence` 是同一個值;v0.0.0.7 起
+      //    `confidence` 改看 SQI,這裡維持 SNR 三級,兩者**不再相同**。
       //
       // 「video」指的是**最早期用來測試的攝影機機台**(rPPG,aquivio-vitals)。
       // 那台後來沒有再使用了,但整條軟體鏈(station → Strapi → LLM prompt)
@@ -851,7 +867,7 @@ class VitalsMetrics {
       // ⚠️ 「大致相當」不是「等價」:他們的門檻是對著 rPPG 訊號校準的,
       //    我們是接觸式 PPG。tier 的語意一致,但沒有人驗證過同一個人
       //    在兩台機器上會落在同一級。
-      'confidence_video': confidenceBySnr,
+      'confidence_video': confidenceVideo,
       'lf_reliable': s?.lfUsable ?? false,
       'hf_reliable': s?.hfUsable ?? false,
       'lf_cycles': s?.lfCycles,
