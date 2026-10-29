@@ -696,6 +696,7 @@ class LocalizationService {
       'k2_band_orient': '判定+累積 {sec}s',
       'k2_band_normal': '計入',
       'k2_band_gap': '掉拍 {sec}s',
+      'k2_band_tail': '後文 {sec}s（第 {n} 秒的截尾與 baseline 用到，不計入）',
       'k2_band_sqi_bad': 'SQI ✗',
       // 事件標記(垂直線)
       'k2_ev_settled': '沉澱完成 · 開始判定與累積  t={sec}s',
@@ -1668,6 +1669,7 @@ class LocalizationService {
       'k2_band_orient': 'deciding + buffering {sec}s',
       'k2_band_normal': 'counted',
       'k2_band_gap': 'lost beat {sec}s',
+      'k2_band_tail': 'context {sec}s (used by the trim and baseline of second {n}; not counted)',
       'k2_band_sqi_bad': 'SQI ✗',
       // Event markers (vertical lines)
       'k2_ev_settled': 'settled · deciding + buffering starts  t={sec}s',

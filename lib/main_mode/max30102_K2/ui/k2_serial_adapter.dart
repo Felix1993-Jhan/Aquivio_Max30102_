@@ -489,6 +489,9 @@ class K2SerialAdapter extends ChangeNotifier {
       cap: _waveCap,
       deadSamples: core.config.fingerDeadSamples,
       settleSamples: core.config.settleSamples,
+      // 畫圖用 IR(= server 送出的 wave),定長模式的波形圖直接畫這個
+      waveFirstAbs: r.waveFirstAbs,
+      newIrWave: r.newIrWave,
     );
     if (!_preDone && r.newIr.isNotEmpty) _recoverPreRoll(r);
 

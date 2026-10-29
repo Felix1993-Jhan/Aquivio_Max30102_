@@ -29,6 +29,13 @@ class K2WaveChart extends StatelessWidget {
   /// 谷位置:對應 [ir]/[red] 的索引(UI 自行偵測後傳入)。
   final List<int> troughs;
 
+  /// 已經處理好的 IR 線(截尾 − baseline),與 [ir] 逐筆對齊;null 的位置圖自己算。
+  ///
+  /// 定長模式傳核心的 newIrWave(= server 送出的 wave)—— 那是等右邊資料到齊才算的,
+  /// 每一筆都有完整前後文;圖自己算的話,陣列最右邊那段只能用截斷的視窗。
+  /// 算法是同一支(Max30102Signal.trimDetrend),有值的位置兩者本來就該相同。
+  final List<double?>? irWave;
+
   final int displaySamples;
   final int windowSeconds;
   final int baselineWindow; // = FS / bandLow（中心化移動平均視窗寬）
@@ -61,6 +68,7 @@ class K2WaveChart extends StatelessWidget {
     required this.ir,
     required this.red,
     this.troughs = const [],
+    this.irWave,
     required this.version,
     this.markSeconds = const [],
     required this.displaySamples,
@@ -82,6 +90,7 @@ class K2WaveChart extends StatelessWidget {
         painter: _Waveform2Painter(
           ir: ir,
           red: red,
+          irWave: irWave,
           // 索引直接當「絕對位置」用:totalSamples = 長度 → painter 內的換算成立
           totalSamples: ir.length,
           displaySamples: displaySamples,
@@ -115,6 +124,7 @@ class _Waveform2Painter extends CustomPainter {
   // K2 版:改吃普通 List(UI 層儲存的波形歷史),不再用 ring buffer。
   final List<int> ir;
   final List<int> red;
+  final List<double?>? irWave; // 見 K2WaveChart.irWave
   final int totalSamples;
   final int displaySamples;
   final int windowSeconds;
@@ -143,6 +153,7 @@ class _Waveform2Painter extends CustomPainter {
   _Waveform2Painter({
     required this.ir,
     required this.red,
+    this.irWave,
     required this.totalSamples,
     required this.displaySamples,
     required this.windowSeconds,
@@ -180,7 +191,7 @@ class _Waveform2Painter extends CustomPainter {
 
     if (visible >= 2) {
       if (showIr) {
-        channels.add(_buildChannel(ir, visible, _irColor, 'IR'));
+        channels.add(_buildChannel(ir, visible, _irColor, 'IR', given: irWave));
       }
       if (showRed) {
         channels.add(_buildChannel(red, visible, _redColor, 'RED'));
@@ -493,18 +504,25 @@ class _Waveform2Painter extends CustomPainter {
 
   /// 取 List 尾端可見段 → 算 baseline(中心化移動平均) → detrended
   /// (K2 版:原本是讀 ring buffer,改成從普通 List 的最後 visible 筆取)
+  ///
+  /// [given] = 已經處理好的線(與 [src] 逐筆對齊);有值的位置直接用,null 的位置用自己算的。
   _ChData _buildChannel(
-      List<int> src, int visible, Color color, String name) {
+      List<int> src, int visible, Color color, String name,
+      {List<double?>? given}) {
     final raw = List<int>.filled(visible, 0);
     final from = src.length - visible;
     for (int i = 0; i < visible; i++) {
       raw[i] = src[from + i];
     }
     // 先截尾去突波(同 HR-B),線才乾淨;再用截尾訊號去趨勢
+    // (與核心找谷、newIrWave 同一套:Max30102Signal.trimDetrend 的兩步)
     final rawD = List<double>.generate(visible, (i) => raw[i].toDouble());
     final trimmed = Max30102Signal.slidingTrimmedMean(rawD, trimWindow);
     final base = Max30102Signal.movingAverage(trimmed, baselineWindow);
-    final detr = List<double>.generate(visible, (i) => trimmed[i] - base[i]);
+    final detr = List<double>.generate(visible, (i) {
+      final g = (given != null && from + i < given.length) ? given[from + i] : null;
+      return g ?? trimmed[i] - base[i];
+    });
     double amp = 1;
     for (final d in detr) {
       final a = d.abs();

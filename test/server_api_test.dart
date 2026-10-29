@@ -18,6 +18,8 @@ import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_config.dart';
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_signal.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_vitals_metrics.dart';
 
 import '../bin/max30102_server.dart';
@@ -481,6 +483,36 @@ void main() {
       }
       expect(maxErr, lessThan(1.0),
           reason: '延遲夠了就該完全吻合(0.1 是四捨五入的量級)');
+    });
+
+    test('★ wave 與「拿原始值事後對整段算」逐筆相同(截尾也沒有批尾截斷)', () {
+      // v0.0.0.6 以前截尾用的是核心逐批給的 newIrTrim,每批尾端 4 筆的右側
+      // 是截斷的 —— baseline 再怎麼延遲也修不回來,站台畫出來每批一個小缺口。
+      // 現在 wave = 核心的 newIrWave,這裡拿 /waveform 的原始值重算來對。
+      final e = feedSynthetic(seconds: 20, waveSeconds: 30);
+      final raw = e.waveformJson();
+      final rawFirst = raw['firstAbs'] as int;
+      final ir = [for (final v in raw['ir'] as List) (v as num).toDouble()];
+      final truth = Max30102Signal.trimDetrend(
+        ir,
+        trimWindow: Max30102Config.trimWindow,
+        baselineWindow: 200,
+      );
+      final w = e.waveSinceJson(null).wave;
+      final wFirst = w['firstAbs'] as int;
+      final det = (w['irTrim'] as List).cast<num>();
+      var compared = 0;
+      var maxErr = 0.0;
+      for (int k = 0; k < det.length; k++) {
+        final i = wFirst + k - rawFirst; // 在原始陣列裡的位置
+        // 原始陣列從輸出起點開始,沒有沉澱期當前後文 → 只對兩邊都有 104 筆的
+        if (i < 104 || i >= ir.length - 104) continue;
+        compared++;
+        final err = (det[k] - truth[i]).abs();
+        if (err > maxErr) maxErr = err;
+      }
+      expect(compared, greaterThan(500));
+      expect(maxErr, lessThan(0.06), reason: '只剩四捨五入到一位小數的誤差');
     });
 
     test('★ 最新的 100 筆會被壓著不送(等湊滿置中視窗)', () {

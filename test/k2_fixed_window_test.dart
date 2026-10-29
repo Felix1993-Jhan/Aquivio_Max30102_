@@ -10,6 +10,8 @@
 //   ⑥ 開頭還原段只影響顯示，不影響計算
 //   ⑦ 問題點：空洞區塊 = confidence 數到的空洞，兩端落在谷標點上
 //   ⑧ 問題點：乾淨訊號沒有任何問題區塊
+//   ⑨ 圖上的 IR = 核心 newIrWave，窗後接 104 筆前後文 → 最後一秒也完整
+//   ⑩ 窗還沒收滿 → 沒有後文
 //
 // 全部用 feedSamples 直接餵核心，再把 K2FeedResult 轉交給 K2FixedWindow，
 // 不經串口、不經協定封包、不開 widget。
@@ -20,6 +22,7 @@ import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_config.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_core.dart';
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_signal.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/ui/k2_fixed_window.dart';
 
 const int kFs = Max30102Config.samplingRateHz; // 100
@@ -61,6 +64,8 @@ class _Rig {
       cap: core.config.dataHistorySamples,
       deadSamples: core.config.fingerDeadSamples,
       settleSamples: core.config.settleSamples,
+      waveFirstAbs: r.waveFirstAbs,
+      newIrWave: r.newIrWave,
     );
   }
 
@@ -240,6 +245,49 @@ void main() {
         expect(v.chartTroughs, contains(g.to));
         expect(g.to, greaterThan(g.from));
       }
+    });
+
+    test('⑨ 圖上的 IR = 核心 newIrWave,且窗後接 104 筆前後文 → 最後一秒也完整', () {
+      const tail = 104;
+      final rig = _Rig()..finger(20);
+      final v = rig.fw.view(10, tail: tail)!;
+      expect(v.sealed, isTrue);
+      expect(v.tailLen, tail, reason: '窗收滿而且後面資料夠 → 接滿 104 筆');
+      final preLen = v.chartIr.length - v.ir.length - v.tailLen;
+
+      // 後文只是顯示:計算用的切片、拍、數值都不含它
+      expect(v.ir.length, 10 * kFs);
+      expect(v.pts.every((p) => p.endAbs <= rig.fw.base + 10 * kFs), isTrue);
+
+      // 窗內每一筆都有核心給的值,而且等於「事後對整段原始值算」的結果
+      final all = <double>[];
+      for (int i = 0; i < rig.idx; i += kBatch) {
+        all.addAll([for (final x in fingerBatch(i).ir) x.toDouble()]);
+      }
+      final truth = Max30102Signal.trimDetrend(
+        all,
+        trimWindow: Max30102Config.trimWindow,
+        baselineWindow: Max30102Signal.baselineWindow(kFs, 0.5),
+      );
+      for (int k = 0; k < 10 * kFs; k++) {
+        final got = v.chartWave[preLen + k];
+        expect(got, isNotNull, reason: '窗內第 $k 筆還沒有核心的值');
+        expect(got!, closeTo(truth[rig.fw.base + k], 1e-6), reason: '第 $k 筆');
+      }
+
+      // 後文區塊:接在窗後、蓋到圖的最右邊
+      final t = v.bands.where((b) => b.kind == K2HeadBand.tail).toList();
+      expect(t, hasLength(1));
+      expect(t.single.from, preLen + 10 * kFs);
+      expect(t.single.to, v.chartIr.length);
+    });
+
+    test('⑩ 窗還沒收滿 → 沒有後文(窗的右緣就是「現在」)', () {
+      final rig = _Rig()..finger(8);
+      final v = rig.fw.view(10, tail: 104)!;
+      expect(v.sealed, isFalse);
+      expect(v.tailLen, 0);
+      expect(v.bands.where((b) => b.kind == K2HeadBand.tail), isEmpty);
     });
 
     test('⑧ 問題點:乾淨訊號沒有任何問題區塊,可信度 good', () {

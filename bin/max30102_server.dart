@@ -26,6 +26,7 @@ import 'package:libserialport/libserialport.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_config.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_core.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_protocol.dart';
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_signal.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_vitals_metrics.dart';
 
 // 版本號單獨一支檔 —— 改版只動 server_version.dart,那裡也記著沿革。
@@ -105,14 +106,20 @@ class K2Engine {
   final List<int> _waveIr = [];
   final List<int> _waveRed = [];
 
-  // 截尾平滑後的樣本 —— 核心已經算好了(K2FeedResult.newIrTrim/newRedTrim),
-  // 要畫「乾淨線」就用這組。核心的原則是 raw 與 trim **兩個都給,呈現層自己選**,
-  // server 只是忠實轉發,不該在中間丟掉其中一半。
-  final List<double> _waveIrTrim = [];
-  final List<double> _waveRedTrim = [];
-
   /// `_waveIr[0]` 的**絕對樣本位置**。上層靠它把波形對齊到 troughAbs / rrPoints。
   int _waveBase = 0;
+
+  // 畫圖用的處理後 IR —— 核心算好的 K2FeedResult.newIrWave / newIrWaveTrim,原封轉送。
+  //
+  // ⚠️ 不再用 newIrTrim(v0.0.0.7 起)。那是每批一到就算的截尾值,批尾 4 筆的右側
+  //    是截斷的,送出去就凍住;站台照著畫,每 0.1 秒左右會出現一個小缺口。
+  //    newIrWave 是核心等右邊資料到齊(落後約 1 秒)才給的,與核心找谷用的是同一個
+  //    算法(Max30102Signal.trimDetrend)。server 不再自己算截尾、baseline、延遲。
+  //
+  // 落後原始樣本約 1 秒,所以有自己的起點 [_detBase],不與 [_waveBase] 共用。
+  final List<double> _det = []; // 截尾 − baseline(→ WS `wave`)
+  final List<double> _detTrim = []; // 截尾、帶 DC(→ WS `raw_wave`)
+  int _detBase = 0;
 
   /// 每算出一份新結果就 push 給 WS 訂閱者。
   final StreamController<Map<String, dynamic>> _vitals =
@@ -141,18 +148,29 @@ class K2Engine {
       }
       _waveIr.addAll(r.newIr);
       _waveRed.addAll(r.newRed);
-      // raw 與 trim 逐筆對應(核心保證兩者等長),必須同步累積與裁切,
-      // 否則兩條線的索引會錯開。
-      _waveIrTrim.addAll(r.newIrTrim);
-      _waveRedTrim.addAll(r.newRedTrim);
 
       final over = _waveIr.length - _waveCap;
       if (over > 0) {
         _waveIr.removeRange(0, over);
         _waveRed.removeRange(0, over);
-        _waveIrTrim.removeRange(0, over);
-        _waveRedTrim.removeRange(0, over);
         _waveBase += over; // 裁掉幾筆,base 就往前推幾筆
+      }
+    }
+
+    // 處理後波形:與原始樣本同樣的接法 —— 對不上就整段重接,不硬接。
+    if (r.newIrWave.isNotEmpty) {
+      if (_det.isEmpty || r.waveFirstAbs != _detBase + _det.length) {
+        _det.clear();
+        _detTrim.clear();
+        _detBase = r.waveFirstAbs;
+      }
+      _det.addAll(r.newIrWave);
+      _detTrim.addAll(r.newIrWaveTrim);
+      final over = _det.length - _waveCap;
+      if (over > 0) {
+        _det.removeRange(0, over);
+        _detTrim.removeRange(0, over);
+        _detBase += over;
       }
     }
 
@@ -172,9 +190,10 @@ class K2Engine {
   void _clearWave() {
     _waveIr.clear();
     _waveRed.clear();
-    _waveIrTrim.clear();
-    _waveRedTrim.clear();
     _waveBase = 0;
+    _det.clear();
+    _detTrim.clear();
+    _detBase = 0;
   }
 
   /// 最新一次計算結果。沒手指 / 沉澱中時對應欄位為 null,照核心現況輸出。
@@ -259,8 +278,13 @@ class K2Engine {
   ///
   /// 四個陣列**逐筆對應、等長**:
   ///   · `ir` / `red`         —— 感測器原始讀值
-  ///   · `irTrim` / `redTrim` —— 核心截尾平滑後的值,要畫乾淨線就用這組
+  ///   · `irTrim` / `redTrim` —— 截尾平滑後的值(還帶著 DC)
   /// 兩組都給,由呈現層自己選(與核心 K2FeedResult 的做法一致)。
+  ///
+  /// trim 是在**回應的當下**對整段保留的原始值重算的(與核心同一支
+  /// [Max30102Signal.slidingTrimmedMean]),不是存下核心逐批給的 newIrTrim ——
+  /// 那個每批尾端 4 筆的右側是截斷的。整段重算之後,只剩陣列**最後 4 筆**
+  /// 還沒有右邊的資料,那是「現在」本來就沒有未來,不是錯。
   Map<String, dynamic> waveformJson({int? seconds}) {
     var from = 0;
     if (seconds != null && seconds > 0) {
@@ -269,87 +293,35 @@ class K2Engine {
     }
     // 平滑值取一位小數就夠 —— IR 讀值是 ~90000 的量級,更多位數只是把
     // JSON 撐大(未修剪的 double 一筆可以長到 18 個字元)。
-    List<double> round1(List<double> v) =>
-        [for (final x in v.sublist(from)) (x * 10).roundToDouble() / 10];
+    List<double> trim1(List<int> v) => [
+      for (final x in Max30102Signal.slidingTrimmedMean(
+        [for (final s in v) s.toDouble()],
+        Max30102Config.trimWindow,
+      ).sublist(from))
+        (x * 10).roundToDouble() / 10,
+    ];
     return {
       'firstAbs': _waveBase + from,
       'fs': kFs,
       'count': _waveIr.length - from,
       'ir': _waveIr.sublist(from),
       'red': _waveRed.sublist(from),
-      'irTrim': round1(_waveIrTrim),
-      'redTrim': round1(_waveRedTrim),
+      'irTrim': trim1(_waveIr),
+      'redTrim': trim1(_waveRed),
     };
-  }
-
-  /// WS `/stream` 用的**增量**波形:只給 IR 的截尾平滑值。
-  ///
-  /// 為什麼是「IR + trim」這個組合,而不是四條線都送:
-  ///   · **IR** —— 心跳本身就是從這一路算出來的。手指偵測看 IR DC,谷點偵測
-  ///     (`irTroughs`)跑在 IR 上,RED 只在算 SpO2 的 ratio 時才用到。畫 IR
-  ///     等於畫「演算法看到的那條線」,畫面上的谷就是我們數的拍。
-  ///   · **trim** —— 截尾滑動平均(去突波)。核心的主計算本來就跑在 trim 上
-  ///     (見 k2_algorithm「殺掉尖刺型假谷」),raw 上那些尖刺是我們**判定為
-  ///     雜訊而不採信**的東西。送 trim 不是美化,是與計算一致。
-  /// 想要 RED 或 raw 就走 `GET /waveform`,那邊四條線照舊全給。
-  ///
-  /// [fromAbs] = 呼叫端**上次收到的下一筆**絕對位置;null = 沒收過。
-  /// 遊標落在保留範圍外時**整段重送**,不硬接 —— 有兩種情況會這樣:
-  ///   · 免洗歸零(下一位使用者)→ base 掉回 0,遊標比 nextAbs 還大
-  ///   · 訂閱者太久沒收 / 剛接上 → 要的樣本已經被 `_waveCap` 裁掉了
-  /// 兩種都是「接不上」,硬接會讓波形與 `troughAbs` 錯開,而且錯得很安靜。
-  /// baseline 的移動平均視窗寬 = `fs / bandLowHz` —— 與 UI 的波形圖同一個算法
-  /// (`k2_wave_chart` 的 `baselineWindow`)。預設 hrMin=30 → 0.5Hz → 200 筆(2 秒)。
-  ///
-  /// 為什麼綁在最慢心跳上:baseline 要擋掉「比最慢的心跳還慢」的漂移,
-  /// 視窗比一個心動週期短的話,它會開始跟著心跳跑,反而把脈搏本身抵消掉。
-  int get _baselineWindow =>
-      (kFs / k2.config.bandLowHz).round().clamp(1, 1 << 20);
-
-  /// **輸出要延遲幾筆才算得準。**
-  ///
-  /// baseline 是**置中**移動平均(算第 i 筆要看 i±half)。最新那批樣本拿不到
-  /// 「未來」的一半視窗,只能用截斷的視窗算 —— 而且送出去就凍住了,不會再修正。
-  ///
-  /// 實測(用整段 43 秒的真實資料對照「事後對整段算」的正確值):
-  /// | 延遲 | 誤差 rms | 佔脈搏 |
-  /// |---|---|---|
-  /// | 0 筆   | 89.3 | **65%** ← 而且誤差在每個 frame 內線性成長 → 每秒一次的鋸齒 |
-  /// | 50 筆  | 31.2 | 22% |
-  /// | **100 筆** | **0.0** | **0%** ← 視窗湊滿,與事後算完全相同 |
-  ///
-  /// 所以延遲 half 筆(100 = 1 秒)。**不是近似,是完全正確。**
-  int get _emitDelay => _baselineWindow ~/ 2;
-
-  /// 對整個保留緩衝算 baseline(置中移動平均,前綴和 O(n))。
-  ///
-  /// ⚠️ 每次都對**整段**重算,不做增量 —— 增量會讓舊點的 baseline 凍在
-  ///    當時的截斷視窗上,新資料進來也修不回去(上表 0 筆那一列就是這樣來的)。
-  ///    3000 筆的前綴和一輪不到 0.1ms,沒有優化的必要。
-  List<double> _baseline() {
-    final v = _waveIrTrim;
-    final n = v.length;
-    final half = _baselineWindow ~/ 2;
-    final pre = List<double>.filled(n + 1, 0);
-    for (int i = 0; i < n; i++) {
-      pre[i + 1] = pre[i] + v[i];
-    }
-    return [
-      for (int i = 0; i < n; i++)
-        () {
-          final lo = i - half < 0 ? 0 : i - half;
-          final hi = i + half > n - 1 ? n - 1 : i + half;
-          return (pre[hi + 1] - pre[lo]) / (hi - lo + 1);
-        }(),
-    ];
   }
 
   /// WS `/stream` 用的**增量**波形。回傳兩個區塊:
   ///
   ///   · `wave`     —— **減完 baseline 的訊號,畫圖直接用這個**。
-  ///                   與我們自己 UI 畫的是同一條線(`k2_wave_chart` 的 detrend)。
-  ///   · `raw_wave` —— 截尾平滑後、**還帶著 DC** 的原始值(舊版 `wave` 的內容)。
-  ///                   除錯與看灌流用。
+  ///                   = 核心的 K2FeedResult.newIrWave,原封轉送。
+  ///   · `raw_wave` —— 截尾平滑後、**還帶著 DC** 的值(舊版 `wave` 的內容)。
+  ///                   = 核心的 newIrWaveTrim。除錯與看灌流用。
+  ///
+  /// 兩者都由核心等右邊資料到齊才給(落後約 1 秒),每一筆的截尾與 baseline
+  /// 都有完整的前後文,與核心找谷用的是同一個算法(Max30102Signal.trimDetrend)。
+  /// server 不再自己延遲、自己算(v0.0.0.6 以前是在這裡算的,截尾那一步用了
+  /// 核心逐批給的 newIrTrim,批尾 4 筆的右側是截斷的)。
   ///
   /// 為什麼要分兩個:DC 漂移是脈搏的 20~50 倍(實測漂移 5000~7100、脈搏 rms
   /// 只有 143~269)。直接畫帶 DC 的值,脈搏只佔畫面 3~10%,形狀完全看不出來 ——
@@ -371,14 +343,13 @@ class K2Engine {
   /// 兩種都是「接不上」,硬接會讓波形與 `troughAbs` 錯開,而且錯得很安靜。
   ({Map<String, dynamic> wave, Map<String, dynamic> rawWave}) waveSinceJson(
       int? fromAbs) {
-    // 只到「已經有完整置中視窗」的位置為止,後面那 _emitDelay 筆先壓著。
-    final ready = _waveIrTrim.length - _emitDelay;
-    final nextAbs = _waveBase + (ready < 0 ? 0 : ready);
-    final from = (fromAbs == null || fromAbs < _waveBase || fromAbs > nextAbs)
-        ? _waveBase
+    // 核心給的就已經是「前後文完整」的那段,不必再壓著。
+    final nextAbs = _detBase + _det.length;
+    final from = (fromAbs == null || fromAbs < _detBase || fromAbs > nextAbs)
+        ? _detBase
         : fromAbs;
-    final lo = from - _waveBase;
-    final hi = nextAbs - _waveBase;
+    final lo = from - _detBase;
+    final hi = nextAbs - _detBase;
 
     // 一位小數就夠 —— IR 讀值是 ~90000 的量級(與 waveformJson 同樣的理由)。
     double r1(double x) => (x * 10).roundToDouble() / 10;
@@ -393,13 +364,8 @@ class K2Engine {
       return (wave: Map.of(empty), rawWave: Map.of(empty));
     }
 
-    final base = _baseline();
-    final det = <double>[];
-    final raw = <double>[];
-    for (int i = lo; i < hi; i++) {
-      det.add(r1(_waveIrTrim[i] - base[i]));
-      raw.add(r1(_waveIrTrim[i]));
-    }
+    final det = [for (int i = lo; i < hi; i++) r1(_det[i])];
+    final raw = [for (int i = lo; i < hi; i++) r1(_detTrim[i])];
     return (
       wave: {
         'firstAbs': from,

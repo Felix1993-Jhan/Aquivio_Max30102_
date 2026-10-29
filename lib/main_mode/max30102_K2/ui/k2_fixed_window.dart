@@ -42,10 +42,13 @@ import '../k2_vitals_metrics.dart';
 /// 波形圖上的時間區塊種類。這裡只給語意,顏色與文字由呈現層決定
 /// (本檔不 import material,才能被純 Dart 測試直接使用)。
 ///
+/// [tail] 是定長窗**之後**那一段:不計入任何數值,只是讓窗內最後一秒的截尾與
+/// baseline 有完整的右側前後文(與核心 newIrWave 壓住的 104 筆同一個長度)。
+///
 /// [gap] / [sqiBad] 是**問題點**(哪裡出問題就標在哪裡),疊在 [normal] 之上:
 ///   · [gap]    RR 空洞 —— 有一拍沒通過考驗、補漏拍也沒補回(= `confidence` 的空洞條件)
 ///   · [sqiBad] SQI 沒過的輪次(相鄰的合併成一塊)
-enum K2HeadBand { dead, settle, orientWait, normal, gap, sqiBad }
+enum K2HeadBand { dead, settle, orientWait, normal, tail, gap, sqiBad }
 
 /// 一次 `view(N)` 的完整結果。
 typedef K2FixedView = ({
@@ -56,8 +59,13 @@ typedef K2FixedView = ({
   HrvStats? hv,
   VitalsMetrics metrics,
   // ── 顯示用(含還原的開頭段;索引相對 chartIr[0])──────────────
+  // 排列:開頭段 + 定長窗 + 窗後的 [tailLen] 筆(只當前後文,不計入)
   List<int> chartIr,
   List<int> chartRed,
+  // 核心的 newIrWave(= server 送出的 wave),與 chartIr 逐筆對齊;
+  // 還沒到(開頭段、或右邊資料還沒到齊)的位置是 null
+  List<double?> chartWave,
+  int tailLen,
   List<int> chartTroughs,
   List<({int from, int to, K2HeadBand kind})> bands,
   // ── 狀態 ────────────────────────────────────────────────────
@@ -96,6 +104,11 @@ class K2FixedWindow extends ChangeNotifier {
 
   final List<HrvRrPoint> _pts = [];
   int _lastEndAbs = -1;
+
+  // 核心的 newIrWave(畫圖用 IR,= server 送出的 wave)。落後原始樣本約 1 秒,
+  // 所以有自己的起點;只收 [_base, _base + _cap) 之內的,與 [_ir] 同一個範圍。
+  final List<double> _wave = [];
+  int _waveBase = -1;
 
   /// 目前看過的最新樣本絕對位置。用來判斷「這一輪還在不在開頭窗裡」——
   /// 不可以拿 `_base + _ir.length` 代替:緩衝收滿之後它就不動了,
@@ -169,6 +182,8 @@ class K2FixedWindow extends ChangeNotifier {
     required int cap,
     required int deadSamples,
     required int settleSamples,
+    required int waveFirstAbs,
+    required List<double> newIrWave,
   }) {
     _cap = cap;
     _deadSamples = deadSamples;
@@ -209,6 +224,8 @@ class K2FixedWindow extends ChangeNotifier {
           _lastEndAbs = -1;
           _preIr.clear();
           _preRed.clear();
+          _wave.clear();
+          _waveBase = -1;
           _base = firstAbs;
           _firstBatchLen = newIr.length;
           _rebases++;
@@ -223,6 +240,22 @@ class K2FixedWindow extends ChangeNotifier {
           _red.add(newRed[i]);
         }
         grew = take > 0;
+      }
+    }
+
+    // 處理後波形:接得上才收(核心保證連續;接不上代表中間有斷層,整段作廢重收)。
+    // 範圍只到 _base + _cap,與原始樣本同一段;窗外的不需要。
+    if (newIrWave.isNotEmpty && _base >= 0) {
+      if (_waveBase < 0 || waveFirstAbs != _waveBase + _wave.length) {
+        _wave.clear();
+        _waveBase = waveFirstAbs;
+      }
+      final end = _base + _cap;
+      for (int k = 0; k < newIrWave.length; k++) {
+        final abs = waveFirstAbs + k;
+        if (abs >= end) break;
+        _wave.add(newIrWave[k]);
+        grew = true; // 波形圖要重畫(處理後的值落後原始樣本約 1 秒才到)
       }
     }
 
@@ -278,6 +311,8 @@ class K2FixedWindow extends ChangeNotifier {
     _preRed.clear();
     _pts.clear();
     _rounds.clear();
+    _wave.clear();
+    _waveBase = -1;
     _base = -1;
     _lastEndAbs = -1;
     _lastAbs = -1;
@@ -304,14 +339,22 @@ class K2FixedWindow extends ChangeNotifier {
   /// **memo**:輸入沒變就回傳**同一個物件實例** —— 凍結之後每秒一次的
   /// Lomb-Scargle 與 4096 點 FFT 全部省掉,而且物件 identity 不變本身
   /// 就是測試可以斷言的「真的凍結了」。
-  K2FixedView? view(int seconds) {
+  ///
+  /// [tail] = 圖上在窗**之後**多接幾筆(只當前後文,不進任何計算)。傳核心壓住的
+  /// 筆數(baseline 半窗 + 截尾半窗 = 104),窗內最後一秒的線才有完整的右側。
+  K2FixedView? view(int seconds, {int tail = 0}) {
     if (_ir.isEmpty || _base < 0) return null;
-    final key = '$seconds/${_ir.length}/${_pts.length}/${_preIr.length}'
-        '/${_rounds.length}/$_ended/$_rebases';
-    if (key == _memoKey) return _memo;
-
     final need = seconds * _fs;
     final endAbs = _base + need;
+
+    // 圖上要用到的長度(窗 + 後文)。key 只看這個範圍內的變化 ——
+    // 範圍外的樣本再怎麼進來,圖與數值都不會變,memo 照樣回同一個實例。
+    final shown = _ir.length < need + tail ? _ir.length : need + tail;
+    final waveEnd = _waveBase < 0 ? -1 : _waveBase + _wave.length;
+    final waveShown = waveEnd < endAbs + tail ? waveEnd : endAbs + tail;
+    final key = '$seconds/$tail/$shown/$waveShown/${_pts.length}/${_preIr.length}'
+        '/${_rounds.length}/$_ended/$_rebases';
+    if (key == _memoKey) return _memo;
 
     final pts = [
       for (final p in _pts)
@@ -356,8 +399,22 @@ class K2FixedWindow extends ChangeNotifier {
     }
     final troughs = marks.toList()..sort();
 
-    final chartIr = [..._preIr, ...ir];
-    final chartRed = [..._preRed, ...red];
+    // 窗後的前後文:只有窗已經收滿才接(還在收的時候,窗的右緣就是「現在」)。
+    final tailLen = take == need ? shown - take : 0;
+    final chartIr = [..._preIr, ...ir, ..._ir.sublist(take, take + tailLen)];
+    final chartRed = [..._preRed, ...red, ..._red.sublist(take, take + tailLen)];
+
+    // 核心的 newIrWave 對齊到 chartIr。開頭段(核心從 _base 才開始輸出)與
+    // 右邊資料還沒到齊的位置是 null —— 圖會在那些位置退回自己算。
+    final chartWave = List<double?>.filled(chartIr.length, null);
+    if (_waveBase >= 0) {
+      for (int k = 0; k < _wave.length; k++) {
+        final i = _waveBase + k - _base + preLen;
+        if (i < 0) continue;
+        if (i >= chartWave.length) break;
+        chartWave[i] = _wave[k];
+      }
+    }
 
     final bands = <({int from, int to, K2HeadBand kind})>[];
     if (preLen > 0) {
@@ -373,12 +430,12 @@ class K2FixedWindow extends ChangeNotifier {
     if (orientEnd > preLen) {
       bands.add((from: preLen, to: orientEnd, kind: K2HeadBand.orientWait));
     }
-    if (chartIr.length > orientEnd) {
-      bands.add((
-        from: orientEnd,
-        to: chartIr.length,
-        kind: K2HeadBand.normal,
-      ));
+    final windowEnd = preLen + take;
+    if (windowEnd > orientEnd) {
+      bands.add((from: orientEnd, to: windowEnd, kind: K2HeadBand.normal));
+    }
+    if (tailLen > 0) {
+      bands.add((from: windowEnd, to: chartIr.length, kind: K2HeadBand.tail));
     }
 
     // ── 問題點:哪裡出問題就標在哪裡 ────────────────────────────────
@@ -429,6 +486,8 @@ class K2FixedWindow extends ChangeNotifier {
       metrics: metrics,
       chartIr: chartIr,
       chartRed: chartRed,
+      chartWave: chartWave,
+      tailLen: tailLen,
       chartTroughs: troughs,
       bands: bands,
       base: _base,

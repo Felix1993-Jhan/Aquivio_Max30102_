@@ -24,6 +24,7 @@ import '../k2_core.dart';
 import '../k2_hrv_calculator.dart';
 import '../k2_protocol.dart';
 import '../k2_setting_limits.dart';
+import '../k2_signal.dart';
 import '../k2_vitals_metrics.dart';
 import 'k2_drink_preview.dart';
 import 'k2_fixed_window.dart';
@@ -80,6 +81,22 @@ class _K2PageState extends State<K2Page> {
   /// 定長量測:開 = 只算**這次量測的前 [_shortSec] 秒**,之後進來的不列入;
   /// 關 = 回到滾動視窗。資料來源切換而已,背後的開頭緩衝一直都在收。
   bool _fixedMode = false;
+
+  /// 定長窗的唯一取法。⚠️ 所有地方都要走這裡 —— `view()` 的 memo 只記一組參數,
+  /// 兩處用不同的 tail 呼叫會互相把對方的 memo 擠掉,每次都重算。
+  ///
+  /// tail = 核心 newIrWave 壓住的筆數(baseline 半窗 + 截尾半窗 = 104):
+  /// 圖在窗後多接這一段,窗內最後一秒的線才有完整的右側前後文。
+  K2FixedView? _fixedView() =>
+      _adapter.fixedWindow.view(_shortSec, tail: _waveTail);
+
+  int get _waveTail =>
+      Max30102Signal.baselineWindow(
+            Max30102Config.samplingRateHz,
+            _adapter.core.config.bandLowHz,
+          ) ~/
+          2 +
+      Max30102Config.trimWindow ~/ 2;
 
   /// 視窗長度輸入框。用 controller 而不是 `initialValue` + `key` ——
   /// 整頁每秒 rebuild 一次,那種寫法會在打字打到一半時掉焦點。
@@ -190,7 +207,7 @@ class _K2PageState extends State<K2Page> {
   Future<void> _saveSnapshot() async {
     // 定長模式存凍結的那一段(不是滾動視窗)—— 存兩次應該得到一模一樣的檔。
     final path = await _adapter.saveSnapshot(
-      fixed: _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null,
+      fixed: _fixedMode ? _fixedView() : null,
       windowSec: _shortSec,
       full: _fullSnapshot,
     );
@@ -853,7 +870,7 @@ class _K2PageState extends State<K2Page> {
   Widget _sec1Controls() {
     // 定長模式要顯示凍結那一段的涵蓋時間,不是滾動窗的 —— 兩邊不同步的話,
     // 左欄說「本次前 12 秒」而這裡說「實際 28.4s」,看的人會以為哪邊算錯了。
-    final fx = _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null;
+    final fx = _fixedMode ? _fixedView() : null;
     final shortPts = fx?.pts ?? _adapter.pointsRecentSeconds(_shortSec);
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
@@ -1013,7 +1030,7 @@ class _K2PageState extends State<K2Page> {
   /// 與頁面上的公式帶入面板吃同一批資料(定長 → 凍結窗那份;滾動 → 最近 N 秒)。
   /// 一拍都沒有就回 null。
   ({VitalsMetrics metrics, int beats, K2FixedView? fx})? _currentMetrics() {
-    final fx = _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null;
+    final fx = _fixedMode ? _fixedView() : null;
     final pts = fx?.pts ?? _adapter.pointsRecentSeconds(_shortSec);
     if (pts.isEmpty) return null;
     final hv = fx != null ? fx.hv : _adapter.hrvRecentSeconds(_shortSec);
@@ -1483,6 +1500,10 @@ class _K2PageState extends State<K2Page> {
               'sec': ((b.to - b.from) / 100).toStringAsFixed(1),
             }),
             K2HeadBand.normal => tr('k2_band_normal'),
+            K2HeadBand.tail => trParams('k2_band_tail', {
+              'sec': ((b.to - b.from) / 100).toStringAsFixed(2),
+              'n': _shortSec,
+            }),
             K2HeadBand.gap => trParams('k2_band_gap', {
               'sec': ((b.to - b.from) / 100).toStringAsFixed(2),
             }),
@@ -1494,6 +1515,7 @@ class _K2PageState extends State<K2Page> {
             K2HeadBand.settle => Colors.orange.withValues(alpha: 0.12),
             K2HeadBand.orientWait => Colors.blue.withValues(alpha: 0.10),
             K2HeadBand.normal => Colors.transparent,
+            K2HeadBand.tail => Colors.grey.withValues(alpha: 0.22),
             K2HeadBand.gap => Colors.redAccent.withValues(alpha: 0.30),
             K2HeadBand.sqiBad => Colors.purpleAccent.withValues(alpha: 0.22),
           },
@@ -1509,7 +1531,7 @@ class _K2PageState extends State<K2Page> {
     // ── 唯一的分流點:定長模式改吃凍結的那一份,其餘程式一字不動 ──────
     //    滾動路徑(pointsRecentSeconds / hrvRecentSeconds / displayTroughs)
     //    刻意保持原樣,它是定長模式的對照組。
-    final fx = _fixedMode ? _adapter.fixedWindow.view(_shortSec) : null;
+    final fx = _fixedMode ? _fixedView() : null;
     final shortPts = fx?.pts ?? _adapter.pointsRecentSeconds(_shortSec);
     final shortHrv = fx != null ? fx.hv : _adapter.hrvRecentSeconds(_shortSec);
     final shortRr = [for (final p in shortPts) p.rr];
@@ -1539,7 +1561,7 @@ class _K2PageState extends State<K2Page> {
         _adapter.waveBase == fw.base && // 波形沒被裁過 → 頭還在陣列裡
         _adapter.waveIr.length <= _shortSec * 100;
     final preLen = fx != null
-        ? fx.chartIr.length - fx.ir.length
+        ? fx.chartIr.length - fx.ir.length - fx.tailLen
         : (headInRolling ? fw.preIr.length : 0);
 
     // ── 隱藏空轉段:把陣列開頭那一截整個拿掉,索引全部往前移 ────────────
@@ -1600,9 +1622,12 @@ class _K2PageState extends State<K2Page> {
               color: Colors.white.withValues(alpha: 0.45),
             ),
           ];
-    // 多了開頭段 → 圖要變寬才放得下(裁掉空轉段之後就再縮回來)
+    // 多了開頭段 → 圖要變寬才放得下(裁掉空轉段之後就再縮回來)。
+    // 定長模式再多留窗後的前後文(_waveTail):寬度固定,不隨後文長出來而縮放。
     final waveSamples =
-        (fx != null ? preLen + fx.needSamples : preLen + _shortSec * 100) -
+        (fx != null
+            ? preLen + fx.needSamples + _waveTail
+            : preLen + _shortSec * 100) -
         dropHead;
     // 「N 秒前」參考線:比目前視窗小的那幾檔(視窗 30s → 畫 10s/20s 線,
     //  最左緣本身就是 30s,不另外畫)。波形圖與 RR 趨勢圖用同一組 → 兩張圖對得起來。
@@ -1709,6 +1734,13 @@ class _K2PageState extends State<K2Page> {
                             red: dropHead > 0
                                 ? srcRed.sublist(dropHead)
                                 : srcRed,
+                            // 定長模式:IR 那條線直接畫核心的 newIrWave(= server 送出的
+                            // wave);還沒到的位置(開頭段、右邊資料未齊)圖自己算。
+                            irWave: fx == null
+                                ? null
+                                : (dropHead > 0
+                                      ? fx.chartWave.sublist(dropHead)
+                                      : fx.chartWave),
                             troughs: dropHead > 0
                                 ? [
                                     for (final t in srcTroughs)

@@ -175,9 +175,31 @@ class K2FeedResult {
   final List<int> newIr;
   final List<int> newRed;
 
-  /// 這一批新樣本「截尾平滑後」的值(要畫乾淨線就用這個)。
+  /// 這一批新樣本「截尾平滑後」的值。
+  ///
+  /// ⚠️ **每批尾端 `trimWindow ~/ 2`(4)筆的右側是截斷的** —— 截尾是置中濾波,
+  ///    第 i 筆要用 i+1 ~ i+4,而這批一到就算、下一批還沒來;算完交出去就不會再修正。
+  ///    實機一批約 10 筆,等於約 4 成的點只用了 i−4 ~ i。只適合即時預覽;
+  ///    **要畫正確的線請用 [newIrWave]**(等右邊資料到齊才給)。
+  ///    保留這兩個欄位是為了不改動既有介面。
   final List<double> newIrTrim;
   final List<double> newRedTrim;
+
+  /// [newIrWave] / [newIrWaveTrim] 第 0 筆的絕對位置。與 [firstAbs] **不同** ——
+  /// 處理後的波形要等右邊資料到齊,所以落後原始樣本約 1 秒。
+  final int waveFirstAbs;
+
+  /// **畫圖用的 IR**(已轉正):截尾平滑 → 減 baseline,每一筆的前後文都是完整的。
+  ///
+  /// 與核心找谷用的是同一個算法([Max30102Signal.trimDetrend])。截尾與 baseline 都是
+  /// 置中濾波,所以只輸出「右邊已經有 baseline 半窗 + 截尾半窗(預設 104 筆)」的樣本,
+  /// 比 [newIr] 晚約 1 秒;左邊則有沉澱期那段緩衝當前後文,量測一開始就是完整的。
+  /// 樣本連續:第 i 筆 = `waveFirstAbs + i`。手指離開時,最後那 1 秒不會輸出。
+  final List<double> newIrWave;
+
+  /// 與 [newIrWave] 同一批位置的「截尾平滑、還帶著 DC」的 IR(完整,沒有批尾截斷)。
+  /// 看灌流 / 除錯用;要畫波形用 [newIrWave]。
+  final List<double> newIrWaveTrim;
 
   /// 湊滿 config.computeEvery 筆才會有;**null = 這次只是累積,還沒算**。
   final K2Compute? computed;
@@ -195,6 +217,9 @@ class K2FeedResult {
     required this.newRedTrim,
     required this.computed,
     this.didReset = false,
+    this.waveFirstAbs = 0,
+    this.newIrWave = const [],
+    this.newIrWaveTrim = const [],
   });
 
   /// 這次有沒有算出新結果(等同 computed != null)。
@@ -247,6 +272,10 @@ class Max30102K2 {
 
   /// 上次餵進 NN 序列的谷絕對位置(去重用,避免同一顆谷被重複餵)。
   int _lastFedAbs = -1;
+
+  /// [K2FeedResult.newIrWave] 下一筆要輸出的絕對位置;-1 = 這次量測還沒開始輸出。
+  /// 屬於「這一次量測」的狀態,在 [_clearOrient] 裡歸零(每個清除點都會呼叫它)。
+  int _waveNextAbs = -1;
 
   /// 沉澱期是否已過(手指按上去後湊滿 settleSamples)。手指離開 → 回 false。
   bool _settled = false;
@@ -527,7 +556,8 @@ class Max30102K2 {
     final outIr = _ir.sublist(_ir.length - outN); // 後 3 bytes 那一槽
     final firstAbs = _totalSamples - outN;
 
-    // 截尾平滑:在緩衝上算(才有正確的前後文),取尾端這批新的
+    // 截尾平滑:在緩衝上算,取尾端這批新的。左邊有前後文,但**右邊沒有** ——
+    // 這批最後 4 筆是截斷的(見 K2FeedResult.newIrTrim)。正確的線看 newIrWave。
     final trimRed = _trimTail(_red, outN);
     final trimIr = _trimTail(_ir, outN);
 
@@ -535,6 +565,7 @@ class Max30102K2 {
     //    這樣下游(波形圖、快照、/waveform、WS /stream 的 wave)全部自動拿到
     //    實際的光源,不必逐一分流,也不會有「某處交換了、某處忘了」的漂移。
     final swapped = _orient == K2ChannelOrient.swapped;
+    final wave = _takeWave(swapped ? _red : _ir, firstAbs);
     return K2FeedResult(
       firstAbs: firstAbs,
       newIr: swapped ? outRed : outIr,
@@ -543,6 +574,49 @@ class Max30102K2 {
       newRedTrim: swapped ? trimIr : trimRed,
       computed: computed,
       didReset: didReset,
+      waveFirstAbs: wave.firstAbs,
+      newIrWave: wave.detr,
+      newIrWaveTrim: wave.trim,
+    );
+  }
+
+  /// 取出「右邊資料已經到齊」的處理後波形 → [K2FeedResult.newIrWave]。
+  ///
+  /// 計算(找谷、HRV、血氧)會等:每輪對整段緩衝重算,最右邊那顆谷留到下一輪才收,
+  /// 所以用到的值都有完整的前後文。輸出也要一樣 —— 只交出第 `total − hold` 筆以前的,
+  /// hold = baseline 半窗(預設 100)+ 截尾半窗(4)= 104 筆。
+  ///
+  /// 每批都對**整段緩衝**重算再切出這一段:緩衝裡有沉澱期那 200 筆,所以量測一開始
+  /// 左邊也是完整的;右邊留了 hold 筆,所以切出來的每一筆都與「事後對整段算」相同。
+  /// 3000 筆一輪的成本與 [_trimTail] 同一個量級。
+  ///
+  /// [buf] 已依方向選好那一槽;[outFirstAbs] = 這次 newIr 的起點(第一次輸出從這裡開始)。
+  ({int firstAbs, List<double> detr, List<double> trim}) _takeWave(
+    List<int> buf,
+    int outFirstAbs,
+  ) {
+    const fs = Max30102Config.samplingRateHz;
+    final win = Max30102Signal.baselineWindow(fs, config.bandLowHz);
+    // ⚠️ 要壓住的是「baseline 半窗 + 截尾半窗」,不是只有 baseline 半窗:
+    //    第 a 筆的 baseline 要平均 trim[a−100 .. a+100],而 trim[a+100] 本身
+    //    又要用到原始值 a+104。只壓 100 筆的話,baseline 視窗最右邊那 4 個
+    //    trim 值還是截斷的(測試抓到:誤差 3.8,脈搏振幅約 2000)。
+    final hold = win ~/ 2 + Max30102Config.trimWindow ~/ 2;
+    final bufStart = _totalSamples - buf.length;
+
+    var from = _waveNextAbs < 0 ? outFirstAbs : _waveNextAbs;
+    if (from < bufStart) from = bufStart; // 緩衝已裁掉(理論上不會,保險)
+    final to = _totalSamples - hold; // 不含
+    if (to <= from) return (firstAbs: from, detr: const [], trim: const []);
+
+    final d = List<double>.generate(buf.length, (i) => buf[i].toDouble());
+    final trim = Max30102Signal.slidingTrimmedMean(d, Max30102Config.trimWindow);
+    final detr = Max30102Signal.detrend(trim, win);
+    _waveNextAbs = to;
+    return (
+      firstAbs: from,
+      detr: detr.sublist(from - bufStart, to - bufStart),
+      trim: trim.sublist(from - bufStart, to - bufStart),
     );
   }
 
@@ -614,6 +688,7 @@ class Max30102K2 {
     _orientByVote = false;
     _settledAtAbs = -1;
     _pendingOut = 0;
+    _waveNextAbs = -1; // 處理後波形的輸出游標也是「這一次量測」的
   }
 
   /// 手指離開 / 訊號中斷時呼叫:只斷「RR 連續性」,不清歷史。

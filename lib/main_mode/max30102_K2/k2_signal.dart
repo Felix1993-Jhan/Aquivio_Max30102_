@@ -109,6 +109,36 @@ class Max30102Signal {
     return out;
   }
 
+  // ---------------- 去趨勢(畫圖與計算共用)----------------
+
+  /// baseline 移動平均的視窗寬 = `fs / bandLowHz`(預設 100 / 0.5 = 200 筆 = 2 秒)。
+  ///
+  /// 綁在最慢心跳上:baseline 要擋「比最慢的心跳還慢」的漂移;視窗比一個心動週期
+  /// 短的話,它會跟著心跳跑,反而把脈搏本身抵消掉。
+  static int baselineWindow(int fs, double bandLowHz) =>
+      (fs / bandLowHz).round().clamp(1, 1 << 20);
+
+  /// 減掉 baseline(置中移動平均)。`v[i] − movingAverage(v, window)[i]`。
+  ///
+  /// 核心找谷(k2_algorithm)、App 波形圖、server 送出的 `wave` 都走這一支 ——
+  /// 算法只有這一份。
+  static List<double> detrend(List<double> v, int window) {
+    final base = movingAverage(v, window);
+    return List<double>.generate(v.length, (i) => v[i] - base[i]);
+  }
+
+  /// 截尾平滑 → 減 baseline:畫圖用的那條線。
+  ///
+  /// ⚠️ 兩個都是**置中**濾波,第 i 筆要用到 i 之後的資料(截尾 `trimWindow ~/ 2` 筆、
+  ///    baseline `baselineWindow ~/ 2` 筆)。陣列最後那段拿不到未來,算出來是截斷的;
+  ///    要正確的值,就得等後面的資料進來再算(核心的 `newIrWave` 就是這樣做的)。
+  static List<double> trimDetrend(
+    List<double> raw, {
+    required int trimWindow,
+    required int baselineWindow,
+  }) =>
+      detrend(slidingTrimmedMean(raw, trimWindow), baselineWindow);
+
   // ---------------- DC / AC ----------------
 
   /// 視窗平均（DC 位準）。
