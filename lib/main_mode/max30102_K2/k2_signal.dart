@@ -109,35 +109,56 @@ class Max30102Signal {
     return out;
   }
 
-  // ---------------- 去趨勢(畫圖與計算共用)----------------
+  // ---------------- 找谷用的線(畫圖與計算共用)----------------
+  //
+  //   截尾平滑(9)→ 減 baseline(200)→ 低通平滑(13)
+  //
+  // 核心找谷(k2_algorithm)、核心輸出的 newIrWave(= server 送出的 `wave`)、
+  // App 波形圖都走這裡 —— **畫出來的線就是拿來找谷的那條線**,算法只有這一份。
 
-  /// baseline 移動平均的視窗寬 = `fs / bandLowHz`(預設 100 / 0.5 = 200 筆 = 2 秒)。
+  /// baseline(高通)移動平均的視窗寬 = `fs / bandLowHz`(預設 100 / 0.5 = 200 筆 = 2 秒)。
   ///
   /// 綁在最慢心跳上:baseline 要擋「比最慢的心跳還慢」的漂移;視窗比一個心動週期
   /// 短的話,它會跟著心跳跑,反而把脈搏本身抵消掉。
   static int baselineWindow(int fs, double bandLowHz) =>
       (fs / bandLowHz).round().clamp(1, 1 << 20);
 
+  /// 低通移動平均的視窗寬 = `fs / (2 × bandHighHz)`(預設 100 / 8 = 12.5 → 13 筆)。
+  static int lowpassWindow(int fs, double bandHighHz) =>
+      (fs / (2 * bandHighHz)).round().clamp(1, 1 << 20);
+
   /// 減掉 baseline(置中移動平均)。`v[i] − movingAverage(v, window)[i]`。
-  ///
-  /// 核心找谷(k2_algorithm)、App 波形圖、server 送出的 `wave` 都走這一支 ——
-  /// 算法只有這一份。
   static List<double> detrend(List<double> v, int window) {
     final base = movingAverage(v, window);
     return List<double>.generate(v.length, (i) => v[i] - base[i]);
   }
 
-  /// 截尾平滑 → 減 baseline:畫圖用的那條線。
+  /// 減 baseline → 低通平滑。輸入是**已經截尾**的訊號(核心演算法自己先截尾,
+  /// 因為 RED 也要截尾、血氧要用)。
+  static List<double> detrendSmooth(
+    List<double> trimmed, {
+    required int baselineWindow,
+    required int lowpassWindow,
+  }) =>
+      movingAverage(detrend(trimmed, baselineWindow), lowpassWindow);
+
+  /// 原始值 → 找谷用的線:截尾平滑 → 減 baseline → 低通平滑。
   ///
-  /// ⚠️ 兩個都是**置中**濾波,第 i 筆要用到 i 之後的資料(截尾 `trimWindow ~/ 2` 筆、
-  ///    baseline `baselineWindow ~/ 2` 筆)。陣列最後那段拿不到未來,算出來是截斷的;
+  /// ⚠️ 三個都是**置中**濾波,第 i 筆要用到 i 之後的資料:截尾 `trimWindow ~/ 2`、
+  ///    baseline `baselineWindow ~/ 2`、低通 `lowpassWindow ~/ 2`,串起來要往後看
+  ///    三者相加(預設 4 + 100 + 6 = 110 筆)。陣列最後那段拿不到未來,算出來是截斷的;
   ///    要正確的值,就得等後面的資料進來再算(核心的 `newIrWave` 就是這樣做的)。
-  static List<double> trimDetrend(
+  static List<double> troughLine(
     List<double> raw, {
     required int trimWindow,
     required int baselineWindow,
+    required int lowpassWindow,
   }) =>
-      detrend(slidingTrimmedMean(raw, trimWindow), baselineWindow);
+      detrendSmooth(
+        slidingTrimmedMean(raw, trimWindow),
+        baselineWindow: baselineWindow,
+        lowpassWindow: lowpassWindow,
+      );
 
   // ---------------- DC / AC ----------------
 

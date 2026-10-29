@@ -685,8 +685,9 @@ class LocalizationService {
       'k2_fixed_sqi_rounds': 'SQI {ok}/{n} 輪',
       'k2_fixed_pre_missing': '開頭未還原',
       'k2_fixed_conf': '可信度 {conf}',
+      'k2_fixed_conf_anomalies': '  異常 {n} 次（容許 {max}）',
       'k2_fixed_conf_sqi': '  · SQI 多數票沒過（{ok}/{n} 輪過關）',
-      'k2_fixed_conf_beats': '  · 拍數 {n}，不到 {min}',
+      'k2_fixed_conf_beats': '  · 拍數 {n}，需要 ≥ {min}（9 + 空洞數）',
       'k2_fixed_conf_gaps': '  · 掉拍 {n} 處（{list}）',
       'k2_fixed_waiting': '等待本次量測的資料',
       'k2_hrv_fixed': 'HRV 心率變異(本次前 {sec}s)',
@@ -882,7 +883,7 @@ class LocalizationService {
       'k2_fx_note_snr':
           'P_signal = 基頻 f₀（= 心率 / 60）與 2f₀ 各 ±{hw} Hz 內的功率；P_noise = {lo} ~ {hi} Hz 內其餘的功率。兩個功率在核心內部，未導出',
       'k2_fx_note_conf':
-          'gaps = RR 空洞數（有一拍沒通過、補漏拍也沒補回）。沒手指時 sqi = 0。頻譜那套（snr_db 三級）改放在 confidence_video',
+          'gaps = RR 空洞數（有一拍沒通過、補漏拍也沒補回）。異常容許 1 次：漏掉的拍本來就已剔除、不進 HRV。沒手指時 sqi = 0、拍數 0。頻譜那套（snr_db 三級）改放在 confidence_video',
       'k2_fx_na_beats': '拍數不足 {min}（目前 {n}）',
       'k2_fx_na_spec': 'RR 間隔不足 8 個，算不出頻譜',
       'k2_fx_na_snr': '波形不足 5 秒，或還沒有心率',
@@ -1013,13 +1014,13 @@ class LocalizationService {
       'k2_help_snr_db_ref':
           'aquivio-vitals 原始註解：低於約 6 dB 時，RMSSD 的雜訊底線會超過典型的靜息 HRV。',
 
-      'k2_help_confidence_what': '讀數可信度：脈搏有沒有成立、而且一拍都沒掉。只有 good / very rough 兩級。',
+      'k2_help_confidence_what': '讀數可信度：脈搏有沒有成立、量測中出狀況的次數有沒有超過容許。只有 good / very rough 兩級。',
       'k2_help_confidence_how':
-          '三個條件都成立才是 good（v0.0.0.7）：\n1. sqi = 1\n2. 拍數 ≥ 9（少於 9 拍核心不出 HRV）\n3. RR 沒有空洞：相鄰兩拍接得起來（下一拍的起谷 = 上一拍的終谷）\n其他（含手指離開）→ very rough。不會出現 rough 與 null。',
+          '兩個條件都成立才是 good（v0.0.0.7）：\n1. 異常 ≤ 1 次。異常 = RR 空洞數 + (SQI 沒過 ? 1 : 0)；空洞 = 相鄰兩拍接不起來（下一拍的起谷 ≠ 上一拍的終谷）\n2. 拍數 ≥ 9 + 空洞數（每多一個空洞就少一對相鄰，多要一拍補回來）\n其他（含手指離開）→ very rough。不會出現 rough 與 null。',
       'k2_help_confidence_use':
           '站台拿它把關：very rough（或 null）就不去要推薦。另外印在提示詞的「Reading confidence: X」，但 fastify 的規則沒有用到它。',
       'k2_help_confidence_note':
-          '空洞代表有一拍沒通過考驗（生理閘門過長、與近 9 拍中位數差 > 40%、SQI 差、clean 剔除、訊號中斷），補漏拍也沒補回來。過短的假谷不會留下空洞。量測只有 12 秒左右，少一拍影響很大，所以補不起來就判 very rough。只看拍數不夠：照木頭時雜訊被剔掉幾拍後還剩 21 拍。原本照 aquivio-vitals 看 snr_db 的三級判斷改放在 confidence_video。',
+          '空洞代表有一拍沒通過考驗（生理閘門過長、與近 9 拍中位數差 > 40%、SQI 差、clean 剔除、訊號中斷），補漏拍也沒補回來。過短的假谷不會留下空洞。掉的拍本來就已剔除、不進 HRV（RMSSD 也不跨空洞相減），所以容許 1 次；超過才判 very rough。只看拍數不夠：照木頭時雜訊被剔掉幾拍後還剩 21 拍（有 3 個空洞，照樣 very rough）。已知漏洞：一長一短（谷被推偏，兩個 RR 加起來約兩拍）會被算進 HRV、也不留空洞，這條規則抓不到。原本照 aquivio-vitals 看 snr_db 的三級判斷改放在 confidence_video。',
 
       'k2_drink_btn': '推薦飲品',
       'k2_drink_title': '這組數字會換到哪一杯？',
@@ -1658,8 +1659,9 @@ class LocalizationService {
       'k2_fixed_sqi_rounds': 'SQI {ok}/{n} rounds',
       'k2_fixed_pre_missing': 'head not recovered',
       'k2_fixed_conf': 'confidence {conf}',
+      'k2_fixed_conf_anomalies': '  {n} anomalies (allowed {max})',
       'k2_fixed_conf_sqi': '  · SQI majority failed ({ok}/{n} rounds passed)',
-      'k2_fixed_conf_beats': '  · {n} beats, fewer than {min}',
+      'k2_fixed_conf_beats': '  · {n} beats, need ≥ {min} (9 + gaps)',
       'k2_fixed_conf_gaps': '  · {n} lost beat gap(s) ({list})',
       'k2_fixed_waiting': 'waiting for this measurement',
       'k2_hrv_fixed': 'HRV (first {sec}s)',
@@ -1874,7 +1876,7 @@ class LocalizationService {
       'k2_fx_note_snr':
           'P_signal = power within ±{hw} Hz of f₀ (= HR / 60) and 2f₀; P_noise = the rest of {lo} – {hi} Hz. Both powers live inside the core and are not exported',
       'k2_fx_note_conf':
-          'gaps = holes in the RR series (a beat failed a check and was not recovered). sqi = 0 with no finger. The spectral one (snr_db, three tiers) now goes to confidence_video',
+          'gaps = holes in the RR series (a beat failed a check and was not recovered). One anomaly is allowed: the lost beat is already excluded from HRV. With no finger, sqi = 0 and beats = 0. The spectral one (snr_db, three tiers) now goes to confidence_video',
       'k2_fx_na_beats': 'Fewer than {min} beats (currently {n})',
       'k2_fx_na_spec': 'Fewer than 8 RR intervals — no spectrum',
       'k2_fx_na_snr': 'Less than 5 s of waveform, or no heart rate yet',
@@ -2016,13 +2018,13 @@ class LocalizationService {
           'aquivio-vitals source comment: below about 6 dB the RMSSD noise floor exceeds typical resting HRV.',
 
       'k2_help_confidence_what':
-          'Reading confidence: whether a pulse is present with no beat lost. Only two tiers, good / very rough.',
+          'Reading confidence: whether a pulse is present and the number of anomalies stays within the allowance. Only two tiers, good / very rough.',
       'k2_help_confidence_how':
-          'good only when all three hold (v0.0.0.7):\n1. sqi = 1\n2. beats ≥ 9 (below 9 the core gives no HRV)\n3. no holes in the RR series: adjacent beats join up (next start trough = previous end trough)\nOtherwise (including finger off) → very rough. Never rough or null.',
+          'good only when both hold (v0.0.0.7):\n1. anomalies ≤ 1, where anomalies = RR holes + (SQI failed ? 1 : 0); a hole = adjacent beats do not join up (next start trough ≠ previous end trough)\n2. beats ≥ 9 + holes (each hole removes one adjacent pair, so one more beat is required)\nOtherwise (including finger off) → very rough. Never rough or null.',
       'k2_help_confidence_use':
           'The station uses it as a gate: on very rough (or null) it does not request a recommendation. It is also printed in the prompt as "Reading confidence: X", but fastify\'s rules do not use it.',
       'k2_help_confidence_note':
-          'A hole means a beat failed a check (physiological gate too long, > 40% off the median of the last 9 beats, poor SQI, clean() removal, signal break) and missed-beat recovery did not restore it. Short false troughs leave no hole. A reading is only about 12 seconds, so one lost beat matters; if it cannot be recovered the reading is very rough. Beat count alone is not enough: on wood, 21 beats were still left after noise rejections. The previous three-tier judgment from aquivio-vitals (snr_db) now goes to confidence_video.',
+          'A hole means a beat failed a check (physiological gate too long, > 40% off the median of the last 9 beats, poor SQI, clean() removal, signal break) and missed-beat recovery did not restore it. Short false troughs leave no hole. The lost beat is already excluded from HRV (RMSSD never subtracts across a hole), so one anomaly is allowed; more than that is very rough. Beat count alone is not enough: on wood, 21 beats were still left after noise rejections (with 3 holes, still very rough). Known gap: a long-short pair (a trough pushed off, two RRs summing to about two beats) is counted into HRV and leaves no hole, so this rule cannot catch it. The previous three-tier judgment from aquivio-vitals (snr_db) now goes to confidence_video.',
 
       'k2_drink_btn': 'Drink pick',
       'k2_drink_title': 'What drink would these numbers produce?',

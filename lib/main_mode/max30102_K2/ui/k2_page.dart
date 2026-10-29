@@ -85,18 +85,18 @@ class _K2PageState extends State<K2Page> {
   /// 定長窗的唯一取法。⚠️ 所有地方都要走這裡 —— `view()` 的 memo 只記一組參數,
   /// 兩處用不同的 tail 呼叫會互相把對方的 memo 擠掉,每次都重算。
   ///
-  /// tail = 核心 newIrWave 壓住的筆數(baseline 半窗 + 截尾半窗 = 104):
+  /// tail = 核心 newIrWave 壓住的筆數(截尾 4 + baseline 100 + 低通 6 = 110):
   /// 圖在窗後多接這一段,窗內最後一秒的線才有完整的右側前後文。
   K2FixedView? _fixedView() =>
       _adapter.fixedWindow.view(_shortSec, tail: _waveTail);
 
-  int get _waveTail =>
-      Max30102Signal.baselineWindow(
-            Max30102Config.samplingRateHz,
-            _adapter.core.config.bandLowHz,
-          ) ~/
-          2 +
-      Max30102Config.trimWindow ~/ 2;
+  int get _waveTail {
+    const fs = Max30102Config.samplingRateHz;
+    final cfg = _adapter.core.config;
+    return Max30102Config.trimWindow ~/ 2 +
+        Max30102Signal.baselineWindow(fs, cfg.bandLowHz) ~/ 2 +
+        Max30102Signal.lowpassWindow(fs, cfg.bandHighHz) ~/ 2;
+  }
 
   /// 視窗長度輸入框。用 controller 而不是 `initialValue` + `key` ——
   /// 整頁每秒 rebuild 一次,那種寫法會在打字打到一半時掉焦點。
@@ -448,6 +448,10 @@ class _K2PageState extends State<K2Page> {
                           displaySamples: s.windowSeconds * s.fs,
                           windowSeconds: s.windowSeconds,
                           baselineWindow: (100 / cfg.bandLowHz).round(),
+                          lowpassWindow: Max30102Signal.lowpassWindow(
+                            Max30102Config.samplingRateHz,
+                            cfg.bandHighHz,
+                          ),
                           trimWindow: 9,
                           promRatio: cfg.promRatio,
                         ),
@@ -568,6 +572,17 @@ class _K2PageState extends State<K2Page> {
                 qualityKnown ? m.confidenceByPulse : '—',
                 api: 'confidence',
                 color: qualityKnown ? null : Colors.grey.shade400,
+              ),
+              stat(
+                '異常次數',
+                qualityKnown
+                    ? '${m.anomalies} / 容許 ${VitalsMetrics.maxAnomalies}'
+                    : '—',
+                color: !qualityKnown
+                    ? Colors.grey.shade400
+                    : (m.anomalies > VitalsMetrics.maxAnomalies
+                          ? Colors.red.shade700
+                          : (m.anomalies > 0 ? Colors.orange.shade800 : null)),
               ),
               stat(
                 '可信度(攝影機)',
@@ -1342,20 +1357,33 @@ class _K2PageState extends State<K2Page> {
           text: trParams('k2_fixed_conf', {'conf': conf}),
           color: conf == 'good' ? Colors.green.shade700 : Colors.red.shade700,
         ));
+        // 異常次數:容許範圍內 → 橘色(有發生、但還算可信);超過 → 紅色
+        final over = m.anomalies > VitalsMetrics.maxAnomalies;
+        final anomalyColor = m.anomalies == 0
+            ? Colors.grey.shade600
+            : (over ? Colors.red.shade700 : Colors.orange.shade800);
+        lines.add((
+          text: trParams('k2_fixed_conf_anomalies', {
+            'n': m.anomalies,
+            'max': VitalsMetrics.maxAnomalies,
+          }),
+          color: anomalyColor,
+        ));
         if (!m.sqiOk) {
           lines.add((
             text: trParams('k2_fixed_conf_sqi', {
               'ok': fx.sqiOkRounds,
               'n': fx.rounds,
             }),
-            color: Colors.red.shade700,
+            color: anomalyColor,
           ));
         }
-        if (m.beats < Max30102HrvCalculator.minBeatsForHrv) {
+        // 拍數是先決條件,不算異常:不夠就直接 very rough
+        if (m.beats < m.minBeatsNeeded) {
           lines.add((
             text: trParams('k2_fixed_conf_beats', {
               'n': m.beats,
-              'min': Max30102HrvCalculator.minBeatsForHrv,
+              'min': m.minBeatsNeeded,
             }),
             color: Colors.red.shade700,
           ));
@@ -1371,7 +1399,7 @@ class _K2PageState extends State<K2Page> {
               'n': m.rrGaps,
               'list': secs.join(', '),
             }),
-            color: Colors.red.shade700,
+            color: anomalyColor,
           ));
         }
         // SQI 在定長窗裡是「窗內多數票」,所以把原始比例一起亮出來讓人自己判斷。
@@ -1769,6 +1797,10 @@ class _K2PageState extends State<K2Page> {
                             windowSeconds: (waveSamples / 100).round(),
                             baselineWindow:
                                 (100 / _adapter.core.config.bandLowHz).round(),
+                            lowpassWindow: Max30102Signal.lowpassWindow(
+                              Max30102Config.samplingRateHz,
+                              _adapter.core.config.bandHighHz,
+                            ),
                             trimWindow: 9,
                             promRatio: _adapter.core.config.promRatio,
                           );
@@ -2117,6 +2149,14 @@ class _K2PageState extends State<K2Page> {
             ),
           ),
         _kv('可信度', m.confidenceByPulse, api: 'confidence'),
+        // 異常次數(空洞 + SQI 沒過)—— 不是送出去的欄位,是 confidence 的依據
+        _kv(
+          '異常次數',
+          '${m.anomalies} / 容許 ${VitalsMetrics.maxAnomalies}',
+          color: m.anomalies > VitalsMetrics.maxAnomalies
+              ? Colors.red.shade700
+              : (m.anomalies > 0 ? Colors.orange.shade800 : null),
+        ),
         _kv('可信度(攝影機)', m.confidenceVideo ?? '—', api: 'confidence_video'),
         _kv('SQI', '${m.sqi}', api: 'sqi'),
         _kv(

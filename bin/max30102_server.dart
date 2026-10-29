@@ -114,10 +114,10 @@ class K2Engine {
   // ⚠️ 不再用 newIrTrim(v0.0.0.7 起)。那是每批一到就算的截尾值,批尾 4 筆的右側
   //    是截斷的,送出去就凍住;站台照著畫,每 0.1 秒左右會出現一個小缺口。
   //    newIrWave 是核心等右邊資料到齊(落後約 1 秒)才給的,與核心找谷用的是同一個
-  //    算法(Max30102Signal.trimDetrend)。server 不再自己算截尾、baseline、延遲。
+  //    算法(Max30102Signal.troughLine:截尾 → 減 baseline → 低通)。server 不再自己算。
   //
-  // 落後原始樣本約 1 秒,所以有自己的起點 [_detBase],不與 [_waveBase] 共用。
-  final List<double> _det = []; // 截尾 − baseline(→ WS `wave`)
+  // 落後原始樣本約 1.1 秒,所以有自己的起點 [_detBase],不與 [_waveBase] 共用。
+  final List<double> _det = []; // 找谷用的線:截尾 → 減 baseline → 低通(→ WS `wave`)
   final List<double> _detTrim = []; // 截尾、帶 DC(→ WS `raw_wave`)
   int _detBase = 0;
 
@@ -313,13 +313,13 @@ class K2Engine {
 
   /// WS `/stream` 用的**增量**波形。回傳兩個區塊:
   ///
-  ///   · `wave`     —— **減完 baseline 的訊號,畫圖直接用這個**。
-  ///                   = 核心的 K2FeedResult.newIrWave,原封轉送。
+  ///   · `wave`     —— **核心找谷用的那條線,畫圖直接用這個**:截尾 → 減 baseline
+  ///                   → 低通。= 核心的 K2FeedResult.newIrWave,原封轉送。
   ///   · `raw_wave` —— 截尾平滑後、**還帶著 DC** 的值(舊版 `wave` 的內容)。
   ///                   = 核心的 newIrWaveTrim。除錯與看灌流用。
   ///
-  /// 兩者都由核心等右邊資料到齊才給(落後約 1 秒),每一筆的截尾與 baseline
-  /// 都有完整的前後文,與核心找谷用的是同一個算法(Max30102Signal.trimDetrend)。
+  /// 兩者都由核心等右邊資料到齊才給(落後約 1.1 秒),每一筆的三步濾波
+  /// 都有完整的前後文,與核心找谷用的是同一個算法(Max30102Signal.troughLine)。
   /// server 不再自己延遲、自己算(v0.0.0.6 以前是在這裡算的,截尾那一步用了
   /// 核心逐批給的 newIrTrim,批尾 4 筆的右側是截斷的)。
   ///

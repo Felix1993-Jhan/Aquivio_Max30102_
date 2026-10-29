@@ -10,7 +10,7 @@
 //   ⑥ 開頭還原段只影響顯示，不影響計算
 //   ⑦ 問題點：空洞區塊 = confidence 數到的空洞，兩端落在谷標點上
 //   ⑧ 問題點：乾淨訊號沒有任何問題區塊
-//   ⑨ 圖上的 IR = 核心 newIrWave，窗後接 104 筆前後文 → 最後一秒也完整
+//   ⑨ 圖上的 IR = 核心 newIrWave，窗後接 110 筆前後文 → 最後一秒也完整
 //   ⑩ 窗還沒收滿 → 沒有後文
 //
 // 全部用 feedSamples 直接餵核心，再把 K2FeedResult 轉交給 K2FixedWindow，
@@ -238,7 +238,13 @@ void main() {
       ];
       expect(gaps.length, v.metrics.rrGaps, reason: '畫出幾塊 = confidence 數到幾個');
       expect(gaps, isNotEmpty, reason: '3 秒沒脈搏一定會掉拍');
-      expect(v.metrics.confidenceByPulse, 'very rough');
+      // 可信度照規則走:異常(空洞 + SQI)≤ 1 且拍數夠才 good
+      final m = v.metrics;
+      expect(m.anomalies, m.rrGaps + (m.sqiOk ? 0 : 1));
+      expect(
+        m.confidenceByPulse,
+        m.anomalies <= 1 && m.beats >= m.minBeatsNeeded ? 'good' : 'very rough',
+      );
       // 空洞兩端都正好落在谷標點上(前一拍終谷、後一拍起谷)
       for (final g in gaps) {
         expect(v.chartTroughs, contains(g.from));
@@ -247,12 +253,12 @@ void main() {
       }
     });
 
-    test('⑨ 圖上的 IR = 核心 newIrWave,且窗後接 104 筆前後文 → 最後一秒也完整', () {
-      const tail = 104;
+    test('⑨ 圖上的 IR = 核心 newIrWave,且窗後接 110 筆前後文 → 最後一秒也完整', () {
+      const tail = 110;
       final rig = _Rig()..finger(20);
       final v = rig.fw.view(10, tail: tail)!;
       expect(v.sealed, isTrue);
-      expect(v.tailLen, tail, reason: '窗收滿而且後面資料夠 → 接滿 104 筆');
+      expect(v.tailLen, tail, reason: '窗收滿而且後面資料夠 → 接滿 110 筆');
       final preLen = v.chartIr.length - v.ir.length - v.tailLen;
 
       // 後文只是顯示:計算用的切片、拍、數值都不含它
@@ -264,10 +270,11 @@ void main() {
       for (int i = 0; i < rig.idx; i += kBatch) {
         all.addAll([for (final x in fingerBatch(i).ir) x.toDouble()]);
       }
-      final truth = Max30102Signal.trimDetrend(
+      final truth = Max30102Signal.troughLine(
         all,
         trimWindow: Max30102Config.trimWindow,
         baselineWindow: Max30102Signal.baselineWindow(kFs, 0.5),
+        lowpassWindow: Max30102Signal.lowpassWindow(kFs, 4.0),
       );
       for (int k = 0; k < 10 * kFs; k++) {
         final got = v.chartWave[preLen + k];
@@ -284,7 +291,7 @@ void main() {
 
     test('⑩ 窗還沒收滿 → 沒有後文(窗的右緣就是「現在」)', () {
       final rig = _Rig()..finger(8);
-      final v = rig.fw.view(10, tail: 104)!;
+      final v = rig.fw.view(10, tail: 110)!;
       expect(v.sealed, isFalse);
       expect(v.tailLen, 0);
       expect(v.bands.where((b) => b.kind == K2HeadBand.tail), isEmpty);

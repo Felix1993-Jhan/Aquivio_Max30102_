@@ -189,9 +189,13 @@ class Max30102Algorithm {
     // 1) 去趨勢 IR（減長視窗移動平均 = 高通，擋呼吸漂移），輕度平滑
     final hpWin = (fs / bandLow).round().clamp(1, n);
     final lpWin = (fs / (2 * bandHigh)).round().clamp(1, n);
-    // 與畫圖用的 `trimDetrend` 是同一支(irRaw 在這裡已經截尾過,見 compute())
-    final detrended = Max30102Signal.detrend(irRaw, hpWin);
-    final smoothed = Max30102Signal.movingAverage(detrended, lpWin);
+    // 與畫圖用的線(Max30102Signal.troughLine)是同一支 ——
+    // irRaw 在這裡已經截尾過(見 compute()),所以從「減 baseline」接著做。
+    final smoothed = Max30102Signal.detrendSmooth(
+      irRaw,
+      baselineWindow: hpWin,
+      lowpassWindow: lpWin,
+    );
 
     // 2) 找谷：對 -smoothed 找峰（谷=供血）。門檻用「百分位數」抗突波
     final neg = List<double>.generate(n, (i) => -smoothed[i]);

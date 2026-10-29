@@ -311,7 +311,7 @@ void main() {
       expect(Max30102VitalsMetrics.confidenceFromSnr(null), isNull);
     });
 
-    group('v0.0.0.7:confidence = SQI 過關 且 ≥ 9 拍 且 RR 沒有空洞', () {
+    group('v0.0.0.7:confidence = 異常 ≤ 1 次 且 拍數 ≥ 9 + 空洞數', () {
       /// 首尾相接的 [n] 筆 RR(每筆 800ms = 80 樣本)。
       List<HrvRrPoint> run(int n, {int from = 0}) => [
             for (int i = 0; i < n; i++)
@@ -337,16 +337,51 @@ void main() {
             reason: '沒資料也是 very rough,不是 null');
       });
 
-      test('SQI 沒過(含沒手指)→ very rough', () {
-        expect(conf(run(14), sqiOk: false), 'very rough');
+      test('SQI 沒過算 1 次異常:單獨發生 → 仍 good;再加一個空洞 → very rough', () {
+        expect(conf(run(14), sqiOk: false), 'good', reason: '異常 1 次,在容許內');
+        final a = run(7);
+        final b = run(7, from: a.last.endAbs + 164);
+        expect(conf([...a, ...b], sqiOk: false), 'very rough', reason: '異常 2 次');
       });
 
-      test('有空洞 → very rough,即使拍數很多', () {
+      test('沒手指:拍數 0 → very rough(拍數是先決條件,不算在異常裡)', () {
+        expect(conf(const [], sqiOk: false), 'very rough');
+      });
+
+      test('1 個空洞 → 容許(掉的拍已剔除、不進 HRV);2 個 → very rough', () {
         // 前 7 筆接著,中間掉一拍(空 1640ms),後 7 筆接著 —— 照 10/8 14:26 那份的形狀
         final a = run(7);
         final b = run(7, from: a.last.endAbs + 164);
         expect(Max30102VitalsMetrics.rrGaps([...a, ...b]), 1);
+        expect(conf([...a, ...b]), 'good');
+
+        final c = run(7, from: b.last.endAbs + 164);
+        expect(Max30102VitalsMetrics.rrGaps([...a, ...b, ...c]), 2);
+        expect(conf([...a, ...b, ...c]), 'very rough');
+      });
+
+      test('有空洞時要多一拍:1 個空洞需要 ≥ 10 拍', () {
+        // 4 + 4 筆 RR = 9 拍(RR + 1),但有 1 個空洞 → 要 10 拍
+        final a = run(4);
+        final b = run(4, from: a.last.endAbs + 80);
         expect(conf([...a, ...b]), 'very rough');
+        // 再多一拍 → 10 拍,過
+        final c = run(5, from: a.last.endAbs + 80);
+        expect(conf([...a, ...c]), 'good');
+      });
+
+      test('異常次數與最少拍數的定義', () {
+        final a = run(7);
+        final b = run(7, from: a.last.endAbs + 164);
+        final m = Max30102VitalsMetrics.compute(
+          pts: [...a, ...b],
+          hv: null,
+          sqiOk: false,
+          settling: false,
+        );
+        expect(m.anomalies, 2, reason: '1 個空洞 + SQI 沒過');
+        expect(m.minBeatsNeeded, 10, reason: '9 + 1 個空洞');
+        expect(VitalsMetrics.maxAnomalies, 1);
       });
 
       test('空洞的判定是「下一拍起谷 ≠ 上一拍終谷」,首尾相接不算', () {

@@ -43,7 +43,7 @@ import '../k2_vitals_metrics.dart';
 /// (本檔不 import material,才能被純 Dart 測試直接使用)。
 ///
 /// [tail] 是定長窗**之後**那一段:不計入任何數值,只是讓窗內最後一秒的截尾與
-/// baseline 有完整的右側前後文(與核心 newIrWave 壓住的 104 筆同一個長度)。
+/// baseline 有完整的右側前後文(與核心 newIrWave 壓住的 110 筆同一個長度)。
 ///
 /// [gap] / [sqiBad] 是**問題點**(哪裡出問題就標在哪裡),疊在 [normal] 之上:
 ///   · [gap]    RR 空洞 —— 有一拍沒通過考驗、補漏拍也沒補回(= `confidence` 的空洞條件)
@@ -341,7 +341,7 @@ class K2FixedWindow extends ChangeNotifier {
   /// 就是測試可以斷言的「真的凍結了」。
   ///
   /// [tail] = 圖上在窗**之後**多接幾筆(只當前後文,不進任何計算)。傳核心壓住的
-  /// 筆數(baseline 半窗 + 截尾半窗 = 104),窗內最後一秒的線才有完整的右側。
+  /// 筆數(截尾 4 + baseline 100 + 低通 6 = 110),窗內最後一秒的線才有完整的右側。
   K2FixedView? view(int seconds, {int tail = 0}) {
     if (_ir.isEmpty || _base < 0) return null;
     final need = seconds * _fs;

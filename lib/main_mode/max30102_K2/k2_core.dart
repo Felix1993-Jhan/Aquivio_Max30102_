@@ -189,12 +189,13 @@ class K2FeedResult {
   /// 處理後的波形要等右邊資料到齊,所以落後原始樣本約 1 秒。
   final int waveFirstAbs;
 
-  /// **畫圖用的 IR**(已轉正):截尾平滑 → 減 baseline,每一筆的前後文都是完整的。
+  /// **畫圖用的 IR**(已轉正)= **核心找谷用的那條線**:截尾平滑 → 減 baseline →
+  /// 低通平滑([Max30102Signal.troughLine]),每一筆的前後文都是完整的。
   ///
-  /// 與核心找谷用的是同一個算法([Max30102Signal.trimDetrend])。截尾與 baseline 都是
-  /// 置中濾波,所以只輸出「右邊已經有 baseline 半窗 + 截尾半窗(預設 104 筆)」的樣本,
-  /// 比 [newIr] 晚約 1 秒;左邊則有沉澱期那段緩衝當前後文,量測一開始就是完整的。
-  /// 樣本連續:第 i 筆 = `waveFirstAbs + i`。手指離開時,最後那 1 秒不會輸出。
+  /// 三步都是置中濾波,所以只輸出「右邊已經有截尾半窗 + baseline 半窗 + 低通半窗
+  /// (預設 4 + 100 + 6 = 110 筆)」的樣本,比 [newIr] 晚約 1.1 秒;左邊則有沉澱期
+  /// 那段緩衝當前後文,量測一開始就是完整的。
+  /// 樣本連續:第 i 筆 = `waveFirstAbs + i`。手指離開時,最後那 1.1 秒不會輸出。
   final List<double> newIrWave;
 
   /// 與 [newIrWave] 同一批位置的「截尾平滑、還帶著 DC」的 IR(完整,沒有批尾截斷)。
@@ -584,7 +585,7 @@ class Max30102K2 {
   ///
   /// 計算(找谷、HRV、血氧)會等:每輪對整段緩衝重算,最右邊那顆谷留到下一輪才收,
   /// 所以用到的值都有完整的前後文。輸出也要一樣 —— 只交出第 `total − hold` 筆以前的,
-  /// hold = baseline 半窗(預設 100)+ 截尾半窗(4)= 104 筆。
+  /// hold = 截尾半窗(4)+ baseline 半窗(100)+ 低通半窗(6)= 110 筆。
   ///
   /// 每批都對**整段緩衝**重算再切出這一段:緩衝裡有沉澱期那 200 筆,所以量測一開始
   /// 左邊也是完整的;右邊留了 hold 筆,所以切出來的每一筆都與「事後對整段算」相同。
@@ -597,11 +598,12 @@ class Max30102K2 {
   ) {
     const fs = Max30102Config.samplingRateHz;
     final win = Max30102Signal.baselineWindow(fs, config.bandLowHz);
-    // ⚠️ 要壓住的是「baseline 半窗 + 截尾半窗」,不是只有 baseline 半窗:
-    //    第 a 筆的 baseline 要平均 trim[a−100 .. a+100],而 trim[a+100] 本身
-    //    又要用到原始值 a+104。只壓 100 筆的話,baseline 視窗最右邊那 4 個
-    //    trim 值還是截斷的(測試抓到:誤差 3.8,脈搏振幅約 2000)。
-    final hold = win ~/ 2 + Max30102Config.trimWindow ~/ 2;
+    final lp = Max30102Signal.lowpassWindow(fs, config.bandHighHz);
+    // ⚠️ 要壓住的是三個半窗**相加**,不是取最大的那個:第 a 筆的低通要平均
+    //    detr[a−6 .. a+6];detr[a+6] 的 baseline 要平均 trim[a−94 .. a+106];
+    //    trim[a+106] 又要用到原始值 a+110。少壓任何一段,最右邊那幾個值就是截斷的
+    //    (只壓 baseline 半窗 100 時,server 測試抓到誤差 3.8,脈搏振幅約 2000)。
+    final hold = Max30102Config.trimWindow ~/ 2 + win ~/ 2 + lp ~/ 2;
     final bufStart = _totalSamples - buf.length;
 
     var from = _waveNextAbs < 0 ? outFirstAbs : _waveNextAbs;
@@ -611,7 +613,11 @@ class Max30102K2 {
 
     final d = List<double>.generate(buf.length, (i) => buf[i].toDouble());
     final trim = Max30102Signal.slidingTrimmedMean(d, Max30102Config.trimWindow);
-    final detr = Max30102Signal.detrend(trim, win);
+    final detr = Max30102Signal.detrendSmooth(
+      trim,
+      baselineWindow: win,
+      lowpassWindow: lp,
+    );
     _waveNextAbs = to;
     return (
       firstAbs: from,

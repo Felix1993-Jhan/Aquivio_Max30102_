@@ -1,19 +1,28 @@
 # 可信度（`confidence`）
 
-> 目前版本：server **0.0.0.7**（commit `86f0436`，2026-10-28）
-> 實作：[k2_vitals_metrics.dart](../lib/main_mode/max30102_K2/k2_vitals_metrics.dart) 的 `confidenceByPulse` / `rrGaps()`
+> 目前版本：server **0.0.0.7**（2026-10-29 起容許 1 次異常）
+> 實作：[k2_vitals_metrics.dart](../lib/main_mode/max30102_K2/k2_vitals_metrics.dart) 的 `confidenceByPulse` / `anomalies` / `minBeatsNeeded` / `rrGaps()`
 
 ---
 
 ## 1. 現行規則
 
 ```
-SQI 過關  且  拍數 ≥ 9  且  RR 沒有空洞   →  good
-其他（含手指離開、沒資料）              →  very rough
+異常次數 = RR 空洞數 + (SQI 沒過 ? 1 : 0)
+
+異常 ≤ 1 次  且  拍數 ≥ 9 + 空洞數   →  good
+其他（含手指離開、沒資料）          →  very rough
 ```
 
 - 只有兩級，**不會出現 `rough` 與 `null`**。
 - 拍數 = RR 數 + 1（谷數）。9 = `Max30102HrvCalculator.minBeatsForHrv`，少於 9 拍核心不出 HRV。
+- **拍數是先決條件，不算在異常裡**。每多一個空洞就少一對相鄰（RMSSD 不跨空洞相減），所以多要一拍：1 個空洞要 10 拍，相鄰對的數量才與「沒有空洞的 9 拍」一樣。
+- **為什麼容許 1 次**：掉的拍本來就已被剔除、不進 HRV，留下來的數字是乾淨的。零容忍時，34 份快照中有 3 份只是單純漏一拍（RMSSD 17~54）也被判 very rough。
+- 容許之後的已知漏洞：一長一短（谷被推偏，兩個 RR 加起來約兩拍）會通過所有關卡、被算進 HRV、也不留空洞，這條規則抓不到；1 個空洞加上一長一短的量測（4 份）因此會變成 good。見 §7。
+- 演進：
+  1. 只看 SQI（`f3ac733`，未交付）
+  2. SQI + ≥ 9 拍 + 0 空洞（`86f0436`）
+  3. 現行：容許 1 次異常
 - 判斷範圍：
   - server：整段保留中的 RR（手指放上去起算，最長 30 秒，手指離開就清空）
   - App 固定窗模式：畫面上那 12 秒

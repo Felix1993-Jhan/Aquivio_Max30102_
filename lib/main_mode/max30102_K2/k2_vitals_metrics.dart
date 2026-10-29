@@ -820,23 +820,47 @@ class VitalsMetrics {
   // /// 沒過(含手指離開)→ very rough。只有這兩級,不會出現 rough 與 null。
   // String get confidenceBySqi => sqiOk ? 'good' : 'very rough';
 
-  /// → `confidence`(v0.0.0.7)。**脈搏成立、而且一拍都沒掉**才是 good:
+  // 舊的判斷(**已停用**,保留供回溯)—— 一次異常都不容許。實測 34 份快照,
+  // 有 3 份只是單純漏一拍(其餘拍都乾淨,RMSSD 17~54)也被判 very rough。
+  // 漏掉的那拍本來就已經剔除、不進 HRV,數字是乾淨的,不該因此整次作廢。
+  // String get confidenceByPulse =>
+  //     sqiOk && beats >= Max30102HrvCalculator.minBeatsForHrv && rrGaps == 0
+  //     ? 'good'
+  //     : 'very rough';
+
+  /// 可信度容許的異常次數。超過才判 very rough。
+  static const int maxAnomalies = 1;
+
+  /// 異常次數 = RR 空洞數 + (SQI 沒過 ? 1 : 0)。
   ///
-  ///     SQI 過關 且 ≥ 9 拍 且 RR 沒有空洞 → good
+  /// 異常的拍已經被剔除、不進 HRV(RMSSD 也不會跨空洞相減),這裡只是**數**
+  /// 這次量測出了幾次狀況,用來決定整次量測可不可信。
+  int get anomalies => rrGaps + (sqiOk ? 0 : 1);
+
+  /// 可信度要求的最少拍數 = 9 + 空洞數。
+  ///
+  /// 9 拍(8 個 RR、7 對相鄰)是核心出 HRV 的門檻。每多一個空洞就少一對相鄰,
+  /// 所以多要一拍,讓能拿來算 RMSSD 的相鄰對數量與「沒有空洞的 9 拍」一樣。
+  int get minBeatsNeeded => Max30102HrvCalculator.minBeatsForHrv + rrGaps;
+
+  /// → `confidence`(v0.0.0.7)。
+  ///
+  ///     異常 ≤ 1 次  且  拍數 ≥ 9 + 空洞數 → good
   ///     其他(含手指離開)                → very rough
   ///
-  /// 只有這兩級,不會出現 rough 與 null。站台拿這個欄位當把關:
-  /// `very rough` / `null` 就不去要推薦。
+  /// 只有這兩級,不會出現 rough 與 null。站台的攝影機流程拿這個欄位當把關
+  /// (`very rough` / `null` 就不去要推薦);手指流程目前看的是 12 秒倒數。
   ///
-  /// · 9 拍 = [Max30102HrvCalculator.minBeatsForHrv],少於它核心不出 HRV。
   /// · 空洞 = 有一拍沒通過考驗、補漏拍也沒補回來(見 [Max30102VitalsMetrics.rrGaps])。
-  ///   量測只有 12 秒左右,少一拍影響很大,所以補不起來就判 very rough。
-  ///   只看「≥ 9 拍」不夠:數的是**通過**的拍,木頭的雜訊剔掉幾拍後還剩 21 拍。
+  ///   只看拍數不夠:數的是**通過**的拍,木頭的雜訊剔掉幾拍後還剩 21 拍
+  ///   (木頭有 3 個空洞,照樣 very rough)。
+  /// · 已知漏洞:一長一短(谷被推偏,兩個 RR 加起來約兩拍)會通過所有關卡、
+  ///   被算進 HRV,也不會留下空洞 —— 這條規則抓不到,另外處理。
   ///
   /// 手指感測的脈搏本來就強,不需要再用頻譜判斷穩不穩;頻譜那套照樣留在
   /// `confidence_video` 與 `snr_db`。
   String get confidenceByPulse =>
-      sqiOk && beats >= Max30102HrvCalculator.minBeatsForHrv && rrGaps == 0
+      anomalies <= maxAnomalies && beats >= minBeatsNeeded
       ? 'good'
       : 'very rough';
 

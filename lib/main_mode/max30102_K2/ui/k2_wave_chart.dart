@@ -29,12 +29,16 @@ class K2WaveChart extends StatelessWidget {
   /// 谷位置:對應 [ir]/[red] 的索引(UI 自行偵測後傳入)。
   final List<int> troughs;
 
-  /// 已經處理好的 IR 線(截尾 − baseline),與 [ir] 逐筆對齊;null 的位置圖自己算。
+  /// 已經處理好的 IR 線(找谷用的那條),與 [ir] 逐筆對齊;null 的位置圖自己算。
   ///
   /// 定長模式傳核心的 newIrWave(= server 送出的 wave)—— 那是等右邊資料到齊才算的,
   /// 每一筆都有完整前後文;圖自己算的話,陣列最右邊那段只能用截斷的視窗。
-  /// 算法是同一支(Max30102Signal.trimDetrend),有值的位置兩者本來就該相同。
+  /// 算法是同一支(Max30102Signal.troughLine),有值的位置兩者本來就該相同。
   final List<double?>? irWave;
+
+  /// 低通移動平均的視窗寬(找谷前的最後一步,見 Max30102Signal.lowpassWindow)。
+  /// 畫出來的線要與找谷用的線相同,這一步不能省。
+  final int lowpassWindow;
 
   final int displaySamples;
   final int windowSeconds;
@@ -74,6 +78,7 @@ class K2WaveChart extends StatelessWidget {
     required this.displaySamples,
     required this.windowSeconds,
     required this.baselineWindow,
+    required this.lowpassWindow,
     required this.trimWindow,
     required this.promRatio,
     this.showIr = true,
@@ -96,6 +101,7 @@ class K2WaveChart extends StatelessWidget {
           displaySamples: displaySamples,
           windowSeconds: windowSeconds,
           baselineWindow: baselineWindow,
+          lowpassWindow: lowpassWindow,
           trimWindow: trimWindow,
           promRatio: promRatio,
           bands: bands,
@@ -129,6 +135,7 @@ class _Waveform2Painter extends CustomPainter {
   final int displaySamples;
   final int windowSeconds;
   final int baselineWindow;
+  final int lowpassWindow;
   final int trimWindow;
   final double promRatio;
   final bool showIr;
@@ -158,6 +165,7 @@ class _Waveform2Painter extends CustomPainter {
     required this.displaySamples,
     required this.windowSeconds,
     required this.baselineWindow,
+    required this.lowpassWindow,
     required this.trimWindow,
     required this.promRatio,
     required this.showIr,
@@ -514,14 +522,19 @@ class _Waveform2Painter extends CustomPainter {
     for (int i = 0; i < visible; i++) {
       raw[i] = src[from + i];
     }
-    // 先截尾去突波(同 HR-B),線才乾淨;再用截尾訊號去趨勢
-    // (與核心找谷、newIrWave 同一套:Max30102Signal.trimDetrend 的兩步)
+    // 截尾 → 減 baseline → 低通:與核心找谷、newIrWave 同一套(Max30102Signal.troughLine),
+    // 畫出來的線就是找谷用的那條線。base 另外留著給下面的 DC 虛線用。
     final rawD = List<double>.generate(visible, (i) => raw[i].toDouble());
     final trimmed = Max30102Signal.slidingTrimmedMean(rawD, trimWindow);
     final base = Max30102Signal.movingAverage(trimmed, baselineWindow);
+    final line = Max30102Signal.detrendSmooth(
+      trimmed,
+      baselineWindow: baselineWindow,
+      lowpassWindow: lowpassWindow,
+    );
     final detr = List<double>.generate(visible, (i) {
       final g = (given != null && from + i < given.length) ? given[from + i] : null;
-      return g ?? trimmed[i] - base[i];
+      return g ?? line[i];
     });
     double amp = 1;
     for (final d in detr) {
@@ -715,6 +728,7 @@ class _Waveform2Painter extends CustomPainter {
       old.displaySamples != displaySamples ||
       old.windowSeconds != windowSeconds ||
       old.baselineWindow != baselineWindow ||
+      old.lowpassWindow != lowpassWindow ||
       old.trimWindow != trimWindow ||
       old.promRatio != promRatio ||
       old.showIr != showIr ||

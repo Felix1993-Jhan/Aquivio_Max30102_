@@ -5,14 +5,14 @@
 // 舊做法(newIrTrim)每批一到就算,批尾 4 筆的右側是截斷的,交出去就凍住;
 // server 拿它減 baseline 送給站台,站台照著畫,每 0.1 秒左右一個小缺口。
 //
-// newIrWave 改成核心等右邊資料到齊(baseline 半窗 100 + 截尾半窗 4 = 104 筆)
-// 才給,算法與核心找谷是同一支(Max30102Signal.trimDetrend)。
+// newIrWave 改成核心等右邊資料到齊(截尾 4 + baseline 100 + 低通 6 = 110 筆)
+// 才給,算法與核心找谷是同一支(Max30102Signal.troughLine)。
 //
 // 這裡驗:
 //   ① 每一筆都與「事後對整段算」相同 —— 包含量測一開始那幾筆(左邊有沉澱期當前後文)
 //   ② 裝反的模組:輸出的是真正的 IR
 //   ③ 與批次大小無關(10 筆 / 24 筆一批,同一個位置的值完全相同)
-//   ④ 首尾相接,而且最新的 104 筆一定壓著不送
+//   ④ 首尾相接,而且最新的 110 筆一定壓著不送
 //   ⑤ 手指離開 → 下一位從自己的零點重新開始,不帶上一位的游標
 //   ⑥ newIrWaveTrim = 同一段的截尾值(帶 DC)
 // ============================================================================
@@ -25,7 +25,7 @@ import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_core.da
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_signal.dart';
 
 const int kFs = Max30102Config.samplingRateHz; // 100
-const int kHold = 104; // baseline 半窗 100 + 截尾半窗 4(預設 hrMin = 30)
+const int kHold = 110; // 截尾 4 + baseline 100 + 低通 6(預設 hrMin 30 / hrMax 240)
 
 /// 合成 [seconds] 秒的 PPG(真實的 IR / RED,尚未依模組接法排列)。
 ///
@@ -84,10 +84,11 @@ const int kHold = 104; // baseline 半窗 100 + 截尾半窗 4(預設 hrMin = 30
 
 /// 「事後對整段算」的正確答案。核心的絕對位置從第 0 筆起算(空轉期也計時),
 /// 所以陣列索引就是絕對位置。
-List<double> offline(List<int> ir) => Max30102Signal.trimDetrend(
+List<double> offline(List<int> ir) => Max30102Signal.troughLine(
       [for (final v in ir) v.toDouble()],
       trimWindow: Max30102Config.trimWindow,
       baselineWindow: Max30102Signal.baselineWindow(kFs, 0.5),
+      lowpassWindow: Max30102Signal.lowpassWindow(kFs, 4.0),
     );
 
 void main() {
@@ -104,7 +105,7 @@ void main() {
         if (err > maxErr) maxErr = err;
       }
       expect(maxErr, lessThan(1e-6),
-          reason: '右邊等齊 104 筆才給,左邊有沉澱期當前後文 → 不是近似,是完全相同');
+          reason: '右邊等齊 110 筆才給,左邊有沉澱期當前後文 → 不是近似,是完全相同');
     });
 
     test('② 裝反的模組:輸出的是真正的 IR,不是線上那一槽', () {
@@ -133,7 +134,7 @@ void main() {
       expect(shared, greaterThan(1000));
     });
 
-    test('④ 首尾相接,且最新的 104 筆一定壓著不送', () {
+    test('④ 首尾相接,且最新的 110 筆一定壓著不送', () {
       final r = run(sig);
       int? next;
       for (final c in r.calls) {

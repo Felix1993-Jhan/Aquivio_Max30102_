@@ -458,27 +458,26 @@ void main() {
           reason: 'wave 已經減掉 baseline,應該在 0 上下震盪');
     });
 
-    test('★ 延遲輸出 → baseline 與「事後對整段算」完全一致', () {
-      // 這是整個設計的根據:baseline 是置中移動平均,最新那批拿不到未來的
-      // 半個視窗。不延遲的話誤差是脈搏的 65%,而且在每個 frame 內線性成長
-      // → 每秒一次的鋸齒。延遲半個視窗(100 筆)之後誤差歸零。
+    test('★ 延遲輸出 → wave 與「拿 raw_wave 事後對整段算」完全一致', () {
+      // 這是整個設計的根據:baseline 與低通都是置中移動平均,最新那批拿不到
+      // 未來的半個視窗。不延遲的話 baseline 的誤差是脈搏的 65%,而且在每個
+      // frame 內線性成長 → 每秒一次的鋸齒。核心壓住 110 筆之後誤差歸零。
       final e = feedSynthetic(seconds: 25, waveSeconds: 30);
       final det = (e.waveSinceJson(null).wave['irTrim'] as List).cast<num>();
       final raw = (e.waveSinceJson(null).rawWave['irTrim'] as List).cast<num>();
 
-      // 拿 raw 自己重算一次「完整前後文」的 baseline,兩者必須吻合
-      final n = raw.length;
-      const win = 200, half = win ~/ 2;
-      final pre = List<double>.filled(n + 1, 0);
-      for (int i = 0; i < n; i++) {
-        pre[i + 1] = pre[i] + raw[i];
-      }
+      // raw_wave 是截尾後的值 → 自己做「減 baseline → 低通」,兩者必須吻合
+      final line = Max30102Signal.detrendSmooth(
+        [for (final v in raw) v.toDouble()],
+        baselineWindow: 200,
+        lowpassWindow: 13,
+      );
       var maxErr = 0.0;
       // 只驗中段 —— 兩端在 raw 這個子序列裡本來就缺前後文,
-      // server 是對整個 30 秒緩衝算的,條件不同。
-      for (int i = half; i < n - half; i++) {
-        final b = (pre[i + half + 1] - pre[i - half]) / (2 * half + 1);
-        final err = (det[i] - (raw[i] - b)).abs();
+      // 核心是對整個緩衝(含沉澱期)算的,條件不同。
+      const edge = 100 + 6;
+      for (int i = edge; i < raw.length - edge; i++) {
+        final err = (det[i] - line[i]).abs();
         if (err > maxErr) maxErr = err;
       }
       expect(maxErr, lessThan(1.0),
@@ -493,10 +492,11 @@ void main() {
       final raw = e.waveformJson();
       final rawFirst = raw['firstAbs'] as int;
       final ir = [for (final v in raw['ir'] as List) (v as num).toDouble()];
-      final truth = Max30102Signal.trimDetrend(
+      final truth = Max30102Signal.troughLine(
         ir,
         trimWindow: Max30102Config.trimWindow,
         baselineWindow: 200,
+        lowpassWindow: 13,
       );
       final w = e.waveSinceJson(null).wave;
       final wFirst = w['firstAbs'] as int;
@@ -505,8 +505,8 @@ void main() {
       var maxErr = 0.0;
       for (int k = 0; k < det.length; k++) {
         final i = wFirst + k - rawFirst; // 在原始陣列裡的位置
-        // 原始陣列從輸出起點開始,沒有沉澱期當前後文 → 只對兩邊都有 104 筆的
-        if (i < 104 || i >= ir.length - 104) continue;
+        // 原始陣列從輸出起點開始,沒有沉澱期當前後文 → 只對兩邊都有 110 筆的
+        if (i < 110 || i >= ir.length - 110) continue;
         compared++;
         final err = (det[k] - truth[i]).abs();
         if (err > maxErr) maxErr = err;

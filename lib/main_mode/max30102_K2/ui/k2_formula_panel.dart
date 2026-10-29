@@ -475,8 +475,11 @@ List<K2FormulaRow> k2FormulaRows(VitalsMetrics m, {required int beats}) {
       api: 'confidence',
       inputs: const ['sqi', 'RR'],
       formula:
-          'sqi = 1 ∧ beats ≥ $minBeats ∧ gaps = 0 → good · else → very rough',
-      sub: 'sqi = ${m.sqi} · beats = ${m.beats} · gaps = ${m.rrGaps}',
+          'anomalies = gaps + (sqi = 0) ≤ ${VitalsMetrics.maxAnomalies} '
+          '∧ beats ≥ $minBeats + gaps → good · else → very rough',
+      sub:
+          'gaps = ${m.rrGaps} · sqi = ${m.sqi} → anomalies = ${m.anomalies} · '
+          'beats = ${m.beats} (≥ ${m.minBeatsNeeded})',
       value: conf,
       result: conf,
       notes: const [(key: 'k2_fx_note_conf', params: <String, dynamic>{})],
