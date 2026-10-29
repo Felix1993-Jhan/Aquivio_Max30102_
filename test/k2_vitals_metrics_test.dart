@@ -393,16 +393,36 @@ void main() {
         expect(Max30102VitalsMetrics.rrGaps([...a, ...b, ...c]), 2);
       });
 
-      test('confidence_video 維持 SNR,與 confidence 分開', () {
-        // 沒有波形 → snr_db 算不出來 → SNR 版照舊回 null
+      test('三個可信度欄位送同一個值,只會是 good / very rough', () {
+        for (final (pts, sqiOk) in [
+          (run(14), true), // good
+          (run(14), false), // 異常 1 次 → good
+          (run(7), true), // 拍數不夠 → very rough
+          (const <HrvRrPoint>[], false), // 沒手指 → very rough
+        ]) {
+          final j = Max30102VitalsMetrics.compute(
+            pts: pts,
+            hv: null,
+            sqiOk: sqiOk,
+            settling: false,
+          ).toStrapiJson();
+          expect(j['confidence'], isIn(['good', 'very rough']));
+          expect(j['confidence_video'], j['confidence']);
+          expect(j['confidence_by_beats'], j['confidence']);
+        }
+      });
+
+      test('SNR 版與拍數版仍可在 UI 當對照取用(只是不送出)', () {
+        // 沒有波形 → snr_db 算不出來 → SNR 版回 null;拍數版 14 拍 → rough
         final m = Max30102VitalsMetrics.compute(
           pts: run(14),
           hv: null,
           sqiOk: true,
           settling: false,
         );
-        expect(m.toStrapiJson()['confidence'], 'good');
-        expect(m.toStrapiJson()['confidence_video'], isNull);
+        expect(m.confidenceVideo, isNull);
+        expect(m.confidence, 'rough');
+        expect(m.toStrapiJson()['confidence_video'], 'good');
       });
     });
 

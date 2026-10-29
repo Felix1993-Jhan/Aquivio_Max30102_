@@ -42,8 +42,12 @@
 /// | 欄位 | `0.0.0.6` | `0.0.0.7` |
 /// |---|---|---|
 /// | `confidence` | SNR 三級 / 算不出來給 `null` | 異常(RR 空洞數 + SQI 沒過)≤ 1 次 且 拍數 ≥ 9 + 空洞數 → `good`,其他(含手指離開)→ `very rough` |
-/// | `confidence_video` | 與 `confidence` 同值 | **維持 SNR 三級**,兩者不再相同 |
-/// | `snr_db` / `confidence_by_beats` | — | 不變 |
+/// | `confidence_video` | 與 `confidence` 同值(SNR 三級) | **與 `confidence` 同值**(good / very rough) |
+/// | `confidence_by_beats` | 拍數版(good / rough / very rough / null) | **與 `confidence` 同值**(good / very rough) |
+/// | `snr_db` | — | 不變(原始 dB 照送) |
+///
+/// 三個可信度欄位一律送同一個值:對方看到三個名字、三種答案,分不出該信哪個。
+/// SNR 版與拍數版仍在我們的 UI 上當對照顯示,只是不再送出。
 ///
 /// 空洞 = 相鄰兩拍接不起來(有一拍沒通過考驗、補漏拍也沒補回)。掉的拍已剔除、不進 HRV,
 /// 所以容許 1 次異常;一開始是零容忍,實測連單純漏一拍(其餘拍都乾淨)也被判 very rough,

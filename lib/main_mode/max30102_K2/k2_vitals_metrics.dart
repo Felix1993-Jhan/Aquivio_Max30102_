@@ -936,7 +936,15 @@ class VitalsMetrics {
       // ⚠️ 「大致相當」不是「等價」:他們的門檻是對著 rPPG 訊號校準的,
       //    我們是接觸式 PPG。tier 的語意一致,但沒有人驗證過同一個人
       //    在兩台機器上會落在同一級。
-      'confidence_video': confidenceVideo,
+      //
+      // ⚠️ v0.0.0.7 起三個可信度欄位(confidence / confidence_video /
+      //    confidence_by_beats)**一律送同一個值**(good / very rough)。
+      //    原本這兩個欄位會出現 `rough` 與 `null`,對方看到三個名字、三種答案,
+      //    分不出該信哪個;實際被讀的只有 `confidence`。SNR 版與拍數版仍在 UI 上
+      //    當對照顯示(confidenceVideo / confidence),只是不再送出。
+      // 舊值(**已停用**,保留供回溯)—— SNR 三級:
+      // 'confidence_video': confidenceVideo,
+      'confidence_video': confidenceByPulse,
       'lf_reliable': s?.lfUsable ?? false,
       'hf_reliable': s?.hfUsable ?? false,
       'lf_cycles': s?.lfCycles,
@@ -959,7 +967,10 @@ class VitalsMetrics {
       'sns_z': sns,
       'ans_time_domain': ansTimeDomain,
       'stress_baevsky': stress,
-      'confidence_by_beats': confidence,
+      // 與 `confidence` 同值(見上面 confidence_video 那段的說明)。
+      // 舊值(**已停用**,保留供回溯)—— 拍數版(20 / 13 拍,為 30 秒窗訂的):
+      // 'confidence_by_beats': confidence,
+      'confidence_by_beats': confidenceByPulse,
     };
   }
 }

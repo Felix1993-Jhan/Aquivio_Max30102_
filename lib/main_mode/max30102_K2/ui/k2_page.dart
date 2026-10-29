@@ -584,11 +584,8 @@ class _K2PageState extends State<K2Page> {
                           ? Colors.red.shade700
                           : (m.anomalies > 0 ? Colors.orange.shade800 : null)),
               ),
-              stat(
-                '可信度(攝影機)',
-                m.confidenceVideo ?? '—',
-                api: 'confidence_video',
-              ),
+              // SNR 版只當對照,不再送出(confidence_video 欄位改送與 confidence 同值)
+              stat('可信度(SNR,不送出)', m.confidenceVideo ?? '—'),
               stat(
                 '訊噪比',
                 m.snrDb == null ? '—' : '${f(m.snrDb, d: 1)} dB',
@@ -2157,7 +2154,8 @@ class _K2PageState extends State<K2Page> {
               ? Colors.red.shade700
               : (m.anomalies > 0 ? Colors.orange.shade800 : null),
         ),
-        _kv('可信度(攝影機)', m.confidenceVideo ?? '—', api: 'confidence_video'),
+        // SNR 版只當對照,不再送出(confidence_video 欄位改送與 confidence 同值)
+        _kv('可信度(SNR,不送出)', m.confidenceVideo ?? '—'),
         _kv('SQI', '${m.sqi}', api: 'sqi'),
         _kv(
           '訊噪比',

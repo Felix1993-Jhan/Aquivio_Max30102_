@@ -218,13 +218,17 @@ IR 與紅光同步同比例下降 → 真實的光學變化。可能是手指壓
 
 ## 6. 送出的相關欄位
 
-| 欄位 | 內容 | 0.0.0.6 | 0.0.0.7 |
-|---|---|---|---|
-| `confidence` | 站台把關用 | SNR 三級 / `null` | **SQI + 拍數 + 空洞，兩級** |
-| `confidence_video` | 攝影機的判法 | 與 `confidence` 同值 | 維持 SNR 三級，**不再同值** |
-| `snr_db` | 原始 dB | 照送 | 照送 |
-| `sqi` | SQI 閘門 1 / 0 | 照送 | 照送 |
-| `confidence_by_beats` | 拍數版（20 / 13 拍，為 28 秒視窗訂的） | 照送 | 照送 |
+| 欄位 | 0.0.0.6 | 0.0.0.7 |
+|---|---|---|
+| `confidence` | SNR 三級 / `null` | **good / very rough**（§1 的規則） |
+| `confidence_video` | 與 `confidence` 同值（SNR 三級） | **與 `confidence` 同值** |
+| `confidence_by_beats` | 拍數版（good / rough / very rough / null） | **與 `confidence` 同值** |
+| `snr_db` | 原始 dB | 照送 |
+| `sqi` | SQI 閘門 1 / 0 | 照送 |
+
+**server 對外所有帶可信度等級的欄位都只有 `good` / `very rough`**：三個欄位送同一個值，對方讀哪一個都一樣（原本三個名字、三種答案，分不出該信哪個）。可信度只出現在 `strapi` 區塊，`/vitals` 與 WS `/stream` 用同一個函式產生；`/health`、`/waveform` 沒有可信度。SNR 版與拍數版仍在 App 上當對照顯示（標「不送出」）。
+
+其他品質相關的欄位是數字或布林，不是等級：`sqi`（1 / 0）、頂層的 `sqiOk`（true / false）、`snr_db`（dB）、`lf_reliable` / `hf_reliable`（true / false）。
 
 `confidence` 現在**永遠不是 `null`**：以前沒資料時送 `null`，現在送 `very rough`。站台對兩者處理相同（都不推薦），但若對方的手指流程用「`confidence` 有沒有值」判斷「有沒有結果」，行為會不同。
 
