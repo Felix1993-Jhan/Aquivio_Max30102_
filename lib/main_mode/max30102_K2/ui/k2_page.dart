@@ -1317,6 +1317,46 @@ class _K2PageState extends State<K2Page> {
             color: Colors.blue.shade700,
           ));
         }
+        // 可信度與原因 —— 沒過的條件逐條列出;有位置的(空洞、SQI 輪次)
+        // 同時標在波形上,拍數不足沒有位置,只寫在這裡。
+        final m = fx.metrics;
+        final conf = m.confidenceByPulse;
+        lines.add((
+          text: trParams('k2_fixed_conf', {'conf': conf}),
+          color: conf == 'good' ? Colors.green.shade700 : Colors.red.shade700,
+        ));
+        if (!m.sqiOk) {
+          lines.add((
+            text: trParams('k2_fixed_conf_sqi', {
+              'ok': fx.sqiOkRounds,
+              'n': fx.rounds,
+            }),
+            color: Colors.red.shade700,
+          ));
+        }
+        if (m.beats < Max30102HrvCalculator.minBeatsForHrv) {
+          lines.add((
+            text: trParams('k2_fixed_conf_beats', {
+              'n': m.beats,
+              'min': Max30102HrvCalculator.minBeatsForHrv,
+            }),
+            color: Colors.red.shade700,
+          ));
+        }
+        if (m.rrGaps > 0) {
+          final secs = [
+            for (int i = 0; i + 1 < fx.pts.length; i++)
+              if (fx.pts[i + 1].startAbs != fx.pts[i].endAbs)
+                '${((fx.pts[i + 1].startAbs - fx.pts[i].endAbs) / 100).toStringAsFixed(2)}s',
+          ];
+          lines.add((
+            text: trParams('k2_fixed_conf_gaps', {
+              'n': m.rrGaps,
+              'list': secs.join(', '),
+            }),
+            color: Colors.red.shade700,
+          ));
+        }
         // SQI 在定長窗裡是「窗內多數票」,所以把原始比例一起亮出來讓人自己判斷。
         if (fx.rounds > 0) {
           lines.add((
@@ -1443,12 +1483,19 @@ class _K2PageState extends State<K2Page> {
               'sec': ((b.to - b.from) / 100).toStringAsFixed(1),
             }),
             K2HeadBand.normal => tr('k2_band_normal'),
+            K2HeadBand.gap => trParams('k2_band_gap', {
+              'sec': ((b.to - b.from) / 100).toStringAsFixed(2),
+            }),
+            K2HeadBand.sqiBad => tr('k2_band_sqi_bad'),
           },
+          // 問題點比開頭那幾塊深,一眼就分得出「流程階段」與「出問題的地方」
           color: switch (b.kind) {
             K2HeadBand.dead => Colors.red.withValues(alpha: 0.14),
             K2HeadBand.settle => Colors.orange.withValues(alpha: 0.12),
             K2HeadBand.orientWait => Colors.blue.withValues(alpha: 0.10),
             K2HeadBand.normal => Colors.transparent,
+            K2HeadBand.gap => Colors.redAccent.withValues(alpha: 0.30),
+            K2HeadBand.sqiBad => Colors.purpleAccent.withValues(alpha: 0.22),
           },
         ),
     ];

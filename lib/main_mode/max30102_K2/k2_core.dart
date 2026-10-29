@@ -677,9 +677,7 @@ class Max30102K2 {
     // ⚠️ **方向只在這裡套用到計算** —— 判定期間先照 datasheet 假設跑一次,
     //    看算出來的 R 再修正(見 _voteOrient)。第一次猜錯不影響心率:
     //    兩路的脈搏是同一個(實測相關 0.995),谷照樣找得到。
-    final assumed = _orient != K2ChannelOrient.unknown
-        ? _orient
-        : (_orientVote ?? K2ChannelOrient.normal);
+    final assumed = _assumedOrient;
     final swapped = assumed == K2ChannelOrient.swapped;
     final ir = swapped ? bufRed : bufIr;
     final red = swapped ? bufIr : bufRed;
@@ -799,10 +797,26 @@ class Max30102K2 {
     return t.sublist(from < 0 ? 0 : from);
   }
 
-  /// 供 BeatSeries 回讀原始 IR(search-back 用);超出緩衝回 -1。
+  /// 計算用的通道方向:判定完成用判定結果,判定期間用投票暫定,都沒有就照 datasheet。
+  /// [_compute] 與 [_irAt] 共用 —— 兩邊必須永遠讀同一路。
+  K2ChannelOrient get _assumedOrient => _orient != K2ChannelOrient.unknown
+      ? _orient
+      : (_orientVote ?? K2ChannelOrient.normal);
+
+  /// 供 BeatSeries 回讀 IR(search-back 用);超出緩衝回 -1。
+  ///
+  /// ⚠️ **要套用通道方向。** 緩衝存的是線上原始槽位,LED 裝反的模組(實測 8 片中 7 片)
+  ///    `_ir` 那一槽其實是紅光。舊版直接讀 `_ir`,補漏拍等於一直在紅光上找谷 ——
+  ///    紅光脈動弱,放寬門檻後雜訊起伏也被當成谷,「只漏 1 拍卻找到 2 個谷」→ 判誤抓放棄。
+  ///    實測 10/28 15:37:真 IR 上缺的那一拍顯著度 1286、一抓就中;紅光上多抓一個
+  ///    顯著度 108 的雜訊谷,整批作廢,留下空洞 → confidence 變 very rough。
+  ///
+  /// 對照:手指偵測([feedSamples] 開頭)也讀原始 `ir` 槽位,但那裡**無法**套用方向 ——
+  /// 手指要先放上去才開始判定方向,順序上一定在前面。
   int _irAt(int absPos) {
     final back = _totalSamples - absPos;
     if (back < 1 || back > _ir.length) return -1;
-    return _ir[_ir.length - back];
+    final buf = _assumedOrient == K2ChannelOrient.swapped ? _red : _ir;
+    return buf[buf.length - back];
   }
 }

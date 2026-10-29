@@ -8,6 +8,8 @@
 //   ④ 切 N 的單調性 —— view(10).pts 是 view(20).pts 的前綴
 //   ⑤ 手指離開 —— 標記結束但資料留著；再放上才清空重收
 //   ⑥ 開頭還原段只影響顯示，不影響計算
+//   ⑦ 問題點：空洞區塊 = confidence 數到的空洞，兩端落在谷標點上
+//   ⑧ 問題點：乾淨訊號沒有任何問題區塊
 //
 // 全部用 feedSamples 直接餵核心，再把 K2FeedResult 轉交給 K2FixedWindow，
 // 不經串口、不經協定封包、不開 widget。
@@ -196,16 +198,61 @@ void main() {
       expect(kinds.contains(K2HeadBand.dead), isTrue);
       expect(kinds.contains(K2HeadBand.settle), isTrue);
       expect(kinds.contains(K2HeadBand.orientWait), isTrue);
-      // 區塊必須首尾相接且覆蓋整張圖
-      expect(after.bands.first.from, 0);
-      expect(after.bands.last.to, after.chartIr.length);
-      for (int i = 1; i < after.bands.length; i++) {
-        expect(after.bands[i].from, after.bands[i - 1].to);
+      // 流程階段的區塊必須首尾相接且覆蓋整張圖(問題點區塊是疊在上面的,不算)
+      final stage = [
+        for (final b in after.bands)
+          if (b.kind != K2HeadBand.gap && b.kind != K2HeadBand.sqiBad) b,
+      ];
+      expect(stage.first.from, 0);
+      expect(stage.last.to, after.chartIr.length);
+      for (int i = 1; i < stage.length; i++) {
+        expect(stage[i].from, stage[i - 1].to);
       }
       // 谷標點要跟著平移到圖的座標
       for (final t in after.chartTroughs) {
         expect(t, greaterThanOrEqualTo(pre));
       }
+    });
+
+    test('⑦ 問題點:空洞區塊與 confidence 的空洞是同一批,位置對得上谷標點', () {
+      // 中間插 3 秒「手指在、但沒有脈搏」的平線 → 那段抓不到谷 → 留下空洞
+      final rig = _Rig()..finger(8);
+      for (int i = 0; i < 3 * kFs ~/ kBatch; i++) {
+        rig._forward(rig.core.feedSamples(
+          List<int>.filled(kBatch, 60000),
+          List<int>.filled(kBatch, 90000),
+        ));
+        rig.idx += kBatch;
+      }
+      rig.finger(10);
+
+      final v = rig.fw.view(15)!;
+      final gaps = [
+        for (final b in v.bands)
+          if (b.kind == K2HeadBand.gap) b,
+      ];
+      expect(gaps.length, v.metrics.rrGaps, reason: '畫出幾塊 = confidence 數到幾個');
+      expect(gaps, isNotEmpty, reason: '3 秒沒脈搏一定會掉拍');
+      expect(v.metrics.confidenceByPulse, 'very rough');
+      // 空洞兩端都正好落在谷標點上(前一拍終谷、後一拍起谷)
+      for (final g in gaps) {
+        expect(v.chartTroughs, contains(g.from));
+        expect(v.chartTroughs, contains(g.to));
+        expect(g.to, greaterThan(g.from));
+      }
+    });
+
+    test('⑧ 問題點:乾淨訊號沒有任何問題區塊,可信度 good', () {
+      final rig = _Rig()..finger(20);
+      final v = rig.fw.view(15)!;
+      expect(
+        v.bands.where(
+          (b) => b.kind == K2HeadBand.gap || b.kind == K2HeadBand.sqiBad,
+        ),
+        isEmpty,
+      );
+      expect(v.sqiOkRounds, v.rounds);
+      expect(v.metrics.confidenceByPulse, 'good');
     });
   });
 }

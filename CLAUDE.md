@@ -371,6 +371,7 @@ Windows 排程工作、USB 選擇性暫停／電源管理、ST-Link 大量儲存
 |------|------|------|
 | K2 架構 | `aidocs/k2_architecture.html` | **MAX30102 K2 交接核心的完整說明，最重要** |
 | **數值推導速查** | `aidocs/vitals_metrics_derivation.md` | **每個輸出數字怎麼算出來的：公式 + 出處 + 短視窗可用性，依資料流排序（ADC → 拍 → HRV → 28 個欄位）** |
+| **可信度** | `aidocs/confidence.md` | **`confidence` 的現行規則（SQI + ≥ 9 拍 + 無 RR 空洞）、站台怎麼拿它把關、為什麼不用 SNR / 只看 SQI、快照實測、尚未採用的候選條件** |
 | 算法沿革 | `aidocs/vitals_metrics_history.md` | 已退場的算法、曾經訂錯的門檻、為什麼換掉 |
 | ~~MAX30102 運算方式~~ | `aidocs/max30102_algorithms.md` | 已拆進上面兩份，只剩轉址頁 |
 | 串口通訊協定 | `aidocs/serial_protocol.md` | STM32 通訊協定、封包格式、ADC 對應表（含已移除功能的協定，僅供參考）|

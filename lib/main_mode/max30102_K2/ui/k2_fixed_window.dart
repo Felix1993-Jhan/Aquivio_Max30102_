@@ -41,7 +41,11 @@ import '../k2_vitals_metrics.dart';
 
 /// 波形圖上的時間區塊種類。這裡只給語意,顏色與文字由呈現層決定
 /// (本檔不 import material,才能被純 Dart 測試直接使用)。
-enum K2HeadBand { dead, settle, orientWait, normal }
+///
+/// [gap] / [sqiBad] 是**問題點**(哪裡出問題就標在哪裡),疊在 [normal] 之上:
+///   · [gap]    RR 空洞 —— 有一拍沒通過考驗、補漏拍也沒補回(= `confidence` 的空洞條件)
+///   · [sqiBad] SQI 沒過的輪次(相鄰的合併成一塊)
+enum K2HeadBand { dead, settle, orientWait, normal, gap, sqiBad }
 
 /// 一次 `view(N)` 的完整結果。
 typedef K2FixedView = ({
@@ -375,6 +379,46 @@ class K2FixedWindow extends ChangeNotifier {
         to: chartIr.length,
         kind: K2HeadBand.normal,
       ));
+    }
+
+    // ── 問題點:哪裡出問題就標在哪裡 ────────────────────────────────
+    // 加在 normal 之後 → 畫在它上面。位置換算與谷標點同一套(abs − base + preLen)。
+    int idx(int abs) => abs - _base + preLen;
+
+    // SQI 沒過的輪次。每輪涵蓋「上一輪結尾 → 這一輪結尾」,相鄰的合併成一塊。
+    int prevAbs = _base;
+    int? badFrom;
+    for (final r in inWin) {
+      if (!r.sqiOk) {
+        badFrom ??= prevAbs < _base ? _base : prevAbs;
+      } else if (badFrom != null) {
+        bands.add((
+          from: idx(badFrom),
+          to: idx(prevAbs),
+          kind: K2HeadBand.sqiBad,
+        ));
+        badFrom = null;
+      }
+      prevAbs = r.abs;
+    }
+    if (badFrom != null) {
+      bands.add((
+        from: idx(badFrom),
+        to: idx(prevAbs),
+        kind: K2HeadBand.sqiBad,
+      ));
+    }
+
+    // RR 空洞:前一拍終谷 → 後一拍起谷。判定與 Max30102VitalsMetrics.rrGaps()
+    // 完全相同(同一份 pts),所以畫出幾塊 = confidence 數到幾個。
+    for (int i = 0; i + 1 < pts.length; i++) {
+      if (pts[i + 1].startAbs != pts[i].endAbs) {
+        bands.add((
+          from: idx(pts[i].endAbs),
+          to: idx(pts[i + 1].startAbs),
+          kind: K2HeadBand.gap,
+        ));
+      }
     }
 
     final v = (
