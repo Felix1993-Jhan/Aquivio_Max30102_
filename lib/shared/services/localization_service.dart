@@ -674,9 +674,9 @@ class LocalizationService {
           '關閉(預設)時產出的檔案與以往完全相同。'
           '⚠ 這是桌面上的快照檔,與 server 送出去的 JSON 無關。',
       'k2_fixed_hint':
-          '只算這次量測的前 {sec} 秒,之後的不列入。'
-          '計時起點 = 核心吐出第一筆乾淨樣本(手指偵測後約 3.5 秒:'
-          '空轉 1.5s + 沉澱 2.0s),所以剛開啟時進度不是從 0.0 開始。',
+          '只算這次量測「計入」之後的 {sec} 秒,之後的不列入。'
+          '計時起點 = 計入(方向鎖定、壓著的資料一次釋放那一刻;手指偵測後約 4~6 秒:'
+          '空轉 1.5s + 沉澱 2.0s + 判定 + 累積)。判定 + 累積那段手指常還沒壓穩,只顯示、不計入。',
       'k2_fixed_collecting': '收集中 {got} / {sec} s',
       'k2_fixed_frozen': '已凍結 · 本次前 {sec} s',
       'k2_fixed_ended': '量測已結束(手指離開)',
@@ -715,7 +715,10 @@ class LocalizationService {
       'k2_orient': '通道',
       'k2_orient_unknown': '判定中',
       'k2_orient_normal': '正常',
-      'k2_orient_swapped': '已轉正',
+      'k2_orient_swapped': '相反',
+      'k2_orient_unchanged': '不變',
+      'k2_orient_mode_auto': '自動偵測',
+      'k2_orient_mode_fixed': '指標 {n}',
       // 憋氣血氧曲線(驗證波長用:血氧壓低才分得出兩片板子的差)
       'k2_bh_title': '憋氣血氧曲線',
       'k2_bh_start': '開始憋氣',
@@ -1647,10 +1650,12 @@ class LocalizationService {
           'When off (default) the file is identical to before. '
           'Note: this is the desktop snapshot file, not the server JSON.',
       'k2_fixed_hint':
-          'Uses only the first {sec}s of this measurement; '
-          'later data is excluded. The clock starts at the first clean sample '
-          'the core emits (about 3.5s after the finger is detected: '
-          '1.5s dead + 2.0s settling), so it does not start at 0.0.',
+          'Uses only {sec}s from the "counted" point of this measurement; '
+          'later data is excluded. The clock starts when the channel orientation '
+          'locks and the held samples are released (about 4–6s after the finger '
+          'is detected: 1.5s dead + 2.0s settling + deciding/buffering). The '
+          'deciding/buffering part is shown but not counted, since the finger '
+          'is often still settling there.',
       'k2_fixed_collecting': 'collecting {got} / {sec} s',
       'k2_fixed_frozen': 'frozen · first {sec}s',
       'k2_fixed_ended': 'measurement ended (finger off)',
@@ -1692,7 +1697,10 @@ class LocalizationService {
       'k2_orient': 'Channel',
       'k2_orient_unknown': 'checking',
       'k2_orient_normal': 'normal',
-      'k2_orient_swapped': 'corrected',
+      'k2_orient_swapped': 'swapped',
+      'k2_orient_unchanged': 'unchanged',
+      'k2_orient_mode_auto': 'auto',
+      'k2_orient_mode_fixed': 'mode {n}',
       // Breath-hold SpO2 curve (for validating wavelength: the two modules can
       // only be told apart once SpO2 is driven down)
       'k2_bh_title': 'Breath-hold SpO₂ curve',

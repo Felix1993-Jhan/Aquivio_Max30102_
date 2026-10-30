@@ -238,12 +238,18 @@ void main() {
   // 而不走 HTTP:要湊滿 HRV 的暖機拍數需要 30 秒以上的波形,走 HTTP 得打
   // 幾百次請求,在行程內餵快得多,而且驗的是同一條計算鏈。
 
-  /// 組一個合法的 QUERY_FIFO 回應封包(擴充板 0x31)。
+  /// 組一個合法的 QUERY_FIFO 回應封包(擴充板 0x31)。[samples] 是實際的(紅光, 紅外)。
+  ///
+  /// 線上槽位依**預設指標**排:server 用預設值建核心,指標 1(強制對調)時就模擬
+  /// 裝反的模組(第 1 槽放紅外)—— 驗的是實際出貨的設定。指標 0 / 2 照 datasheet 排。
   List<int> packetOf(List<(int red, int ir)> samples) {
+    const swapped =
+        Max30102Config.channelModeDefault == Max30102Config.channelModeSwapped;
     final b = <int>[0x40, 0x71, 0x31, 0x09, 0x00, samples.length * 6];
     for (final (red, ir) in samples) {
-      b.addAll([red & 0xFF, (red >> 8) & 0xFF, (red >> 16) & 0xFF]);
-      b.addAll([ir & 0xFF, (ir >> 8) & 0xFF, (ir >> 16) & 0xFF]);
+      final (s1, s2) = swapped ? (ir, red) : (red, ir);
+      b.addAll([s1 & 0xFF, (s1 >> 8) & 0xFF, (s1 >> 16) & 0xFF]);
+      b.addAll([s2 & 0xFF, (s2 >> 8) & 0xFF, (s2 >> 16) & 0xFF]);
     }
     var sum = 0;
     for (final v in b) {

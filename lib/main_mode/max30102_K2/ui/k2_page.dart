@@ -1595,6 +1595,10 @@ class _K2PageState extends State<K2Page> {
         ? math.min(fw.deadSamples, preLen)
         : 0;
     final headLen = preLen - dropHead; // 裁切後,開頭段還剩多長
+    // 還原段(空轉 + 沉澱)的長度。定長模式的開頭段 preLen 還多了判定段
+    // (窗從「計入」才開始),事件線的位置要以還原段的尾端(= 沉澱結束)為準。
+    final rollLen = fx != null ? fw.preIr.length : preLen;
+    final rollEnd = rollLen - dropHead; // 裁切後,沉澱結束在圖上的位置
 
     // ── 事件標記:核心裡那幾個精確的瞬間 ────────────────────────────
     //
@@ -1620,19 +1624,19 @@ class _K2PageState extends State<K2Page> {
     final chartEvents = !showEvents
         ? const <({int at, String label, Color color})>[]
         : <({int at, String label, Color color})>[
-            if (headLen > 0) ...[
+            if (headLen > 0 && rollEnd > 0) ...[
               (
-                at: headLen,
+                at: rollEnd,
                 label: trParams('k2_ev_settled', {
-                  'sec': (preLen / 100).toStringAsFixed(2),
+                  'sec': (rollLen / 100).toStringAsFixed(2),
                 }),
                 color: Colors.lightBlueAccent.withValues(alpha: 0.75),
               ),
               if (fw.firstBatchLen > 0)
                 (
-                  at: headLen + fw.firstBatchLen,
+                  at: rollEnd + fw.firstBatchLen,
                   label: trParams('k2_ev_release', {
-                    'sec': ((preLen + fw.firstBatchLen) / 100).toStringAsFixed(
+                    'sec': ((rollLen + fw.firstBatchLen) / 100).toStringAsFixed(
                       2,
                     ),
                   }),
@@ -3070,20 +3074,30 @@ class _K2PageState extends State<K2Page> {
   /// 每次量測自己判定一次。沒有這個指示的話,只能從「波形晚兩秒出現」、
   /// 「血氧一開始是空的」這些間接現象去猜,插上板子看不出答案。
   ///
-  /// 三個狀態刻意用不同顏色:
-  ///   · 判定中(灰)—— 此時沒有波形、沒有血氧,心率照給
-  ///   · 正常(綠)  —— 符合 datasheet
-  ///   · 已轉正(橘)—— 這片裝反了,**核心已經把輸出轉正**,不是錯誤狀態,
-  ///                  但值得注意,所以用橘色而不是綠色
+  /// 標題帶上目前的指標(見 [Max30102Config.channelModeDefault]),內容依指標決定:
+  ///   · 指標 0(自動偵測)—— 判定中(灰)/ 正常(綠)/ 相反(橘)
+  ///       判定中時沒有波形、沒有血氧,心率照給;相反 = 這片裝反了、核心已經轉正,
+  ///       不是錯誤狀態但值得注意,所以用橘色而不是綠色
+  ///   · 指標 1 —— 相反(橘),寫死,不看核心回報(沒手指時也不會跳回「判定中」)
+  ///   · 指標 2 —— 不變(綠),同上
+  /// 標題分得出「判定出來的相反」與「指標寫死的相反」,看快照時才知道是哪一種。
   Widget _orientFlag(K2ChannelOrient o) {
-    final (String key, Color bg, Color fg) = switch (o) {
+    final mode = _adapter.core.config.channelMode;
+    final shown = switch (mode) {
+      Max30102Config.channelModeSwapped => K2ChannelOrient.swapped,
+      Max30102Config.channelModeNormal => K2ChannelOrient.normal,
+      _ => o,
+    };
+    final (String key, Color bg, Color fg) = switch (shown) {
       K2ChannelOrient.unknown => (
         'k2_orient_unknown',
         Colors.grey.shade300,
         Colors.grey.shade600,
       ),
       K2ChannelOrient.normal => (
-        'k2_orient_normal',
+        mode == Max30102Config.channelModeNormal
+            ? 'k2_orient_unchanged'
+            : 'k2_orient_normal',
         Colors.green.shade100,
         Colors.green.shade800,
       ),
@@ -3093,11 +3107,14 @@ class _K2PageState extends State<K2Page> {
         Colors.orange.shade900,
       ),
     };
+    final modeLabel = mode == Max30102Config.channelModeAuto
+        ? tr('k2_orient_mode_auto')
+        : trParams('k2_orient_mode_fixed', {'n': '$mode'});
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          tr('k2_orient'),
+          '${tr('k2_orient')} · $modeLabel',
           style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
         ),
         const SizedBox(height: 4),

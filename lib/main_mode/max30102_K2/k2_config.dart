@@ -90,6 +90,23 @@ class Max30102Config {
   /// [orientTimeoutMs] 換算成筆數。
   static int get orientTimeoutSamples => orientTimeoutMs * samplingRateHz ~/ 1000;
 
+  // ── 通道方向模式(指標)───────────────────────────────────────────────
+  //
+  // ★ **改這裡、重新執行才生效** —— 執行中沒有任何地方可以切換。
+  //
+  //   0 = 自動判定:照上面的 R 值投票流程判方向(判定完才輸出樣本)
+  //   1 = 強制對調:收到封包、拆 RED / IR 時**直接對調**(LED 裝反的模組,今華那批)
+  //   2 = 強制正常:照 datasheet 直接拆,不對調(方向正常的模組,廣鏵那片)
+  //
+  // 1、2 不走判定,所以沒有判定期(沉澱一結束就輸出),血氧也直接放行 ——
+  // **前提是手上的模組確實是那個方向**。裝錯的話血氧會整個算錯,而且沒有警告。
+  static const int channelModeAuto = 0;
+  static const int channelModeSwapped = 1;
+  static const int channelModeNormal = 2;
+
+  /// ★ 預設的通道方向模式。要換就改這個數字(0 / 1 / 2),再重新執行。
+  static const int channelModeDefault = 1;
+
   /// NN 序列**硬上限(拍)** —— 純記憶體保險,不是主要界線。
   /// 真正的界線是 [dataHistoryMs](時間)。拍數表達不了時間:300 拍在 40bpm 是
   /// 7.5 分鐘、在 120bpm 只有 2.5 分鐘,同一個數字意義完全不同。
@@ -201,6 +218,13 @@ class Max30102Config {
 
   int _computeEvery;
 
+  /// 通道方向模式(0 自動 / 1 強制對調 / 2 強制正常),見 [channelModeDefault]。
+  ///
+  /// `final`:建構後不能改。App 與 server 都不傳 → 用 [channelModeDefault];
+  /// 測試要驗證自動判定時傳 [channelModeAuto]。
+  /// 超出 0~2 → 退回 0(自動判定):判定流程有血氧閘門,是最安全的那一個。
+  final int channelMode;
+
   Max30102Config({
     this.fingerThreshold = 50000,
     this.hrMin = 30,
@@ -218,8 +242,12 @@ class Max30102Config {
     this.cleanEnabled = true,
     this.spo2SmoothFactor = 0.7,
     this.hrSmoothFactor = 0.8,
-  }) : _computeEvery =
-            computeEvery < minComputeEvery ? minComputeEvery : computeEvery;
+    int channelMode = channelModeDefault,
+  })  : _computeEvery =
+            computeEvery < minComputeEvery ? minComputeEvery : computeEvery,
+        channelMode = (channelMode < channelModeAuto || channelMode > channelModeNormal)
+            ? channelModeAuto
+            : channelMode;
 
   // ── HR(bpm) ↔ 濾波(Hz) 連動:Hz = bpm / 60 ───────────────────────
   // 只存 bpm 一份;用 Hz 設定時自動換算回 bpm → 兩者永遠一致、不會脫鉤。

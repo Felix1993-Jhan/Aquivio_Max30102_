@@ -694,11 +694,20 @@ class K2SerialAdapter extends ChangeNotifier {
         // 核心丟掉的開頭:空轉期直接丟棄、沉澱期只當 baseline 前後文,
         // 兩段都不會出現在上面的 ir/red 裡。這是從原始封包另外解回來的。
         if (fixedWindow.preIr.isNotEmpty) ...{
-          'preIr': List<int>.of(fixedWindow.preIr),
-          'preRed': List<int>.of(fixedWindow.preRed),
+          // 定長模式的窗從「計入」才開始 → 開頭段 = 空轉 + 沉澱 + 判定段,
+          // 接上 ir 正好連續;滾動模式照舊只有空轉 + 沉澱。
+          'preIr': fixed != null
+              ? fixed.chartIr.sublist(
+                  0, fixed.chartIr.length - fixed.ir.length - fixed.tailLen)
+              : List<int>.of(fixedWindow.preIr),
+          'preRed': fixed != null
+              ? fixed.chartRed.sublist(
+                  0, fixed.chartRed.length - fixed.red.length - fixed.tailLen)
+              : List<int>.of(fixedWindow.preRed),
           'preDeadSamples': fixedWindow.deadSamples,
           'preSettleSamples': fixedWindow.settleSamples,
-          'preBaseAbs': fixedWindow.base, // 開頭段的最後一筆 + 1 = 這個值
+          // 開頭段的最後一筆 + 1 = 這個值 = ir[0] 的絕對位置
+          'preBaseAbs': fixed != null ? fixed.base : fixedWindow.base,
           'orientWaitSamples': fixedWindow.firstBatchLen,
         },
         if (fixed != null)

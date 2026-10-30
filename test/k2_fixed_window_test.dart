@@ -12,6 +12,7 @@
 //   ⑧ 問題點：乾淨訊號沒有任何問題區塊
 //   ⑨ 圖上的 IR = 核心 newIrWave，窗後接 110 筆前後文 → 最後一秒也完整
 //   ⑩ 窗還沒收滿 → 沒有後文
+//   ⑪ 窗從「計入」開始：判定段只顯示、不計入
 //
 // 全部用 feedSamples 直接餵核心，再把 K2FeedResult 轉交給 K2FixedWindow，
 // 不經串口、不經協定封包、不開 widget。
@@ -92,11 +93,11 @@ class _Rig {
 void main() {
   group('K2FixedWindow', () {
     test('① 凍結後真的不變：再餵 30 秒，view 回傳同一個物件實例', () {
-      // 要填滿 30 秒的窗，得量 30 + 開頭那 3.4 秒（空轉 + 沉澱不輸出）。
-      final rig = _Rig()..finger(35);
+      // 要填滿 30 秒的窗，得量 30 + 開頭 3.4 秒（空轉 + 沉澱）+ 判定段（窗從計入才開始）。
+      final rig = _Rig()..finger(38);
       final first = rig.fw.view(30);
       expect(first, isNotNull);
-      expect(first!.sealed, isTrue, reason: '餵了 35 秒，30 秒的窗應該已經收滿');
+      expect(first!.sealed, isTrue, reason: '餵了 38 秒，30 秒的窗應該已經收滿');
       final rmssd = first.hv?.rmssd;
       final n = first.pts.length;
 
@@ -120,8 +121,8 @@ void main() {
       expect(rig.fw.base, rig.fw.expectedPreSamples);
 
       final v = rig.fw.view(10)!;
-      expect(v.pts.every((p) => p.startAbs >= rig.fw.base), isTrue);
-      expect(v.pts.every((p) => p.endAbs <= rig.fw.base + 10 * kFs), isTrue);
+      expect(v.pts.every((p) => p.startAbs >= v.base), isTrue);
+      expect(v.pts.every((p) => p.endAbs <= v.base + 10 * kFs), isTrue);
     });
 
     test('③ 與「何時打開開關」無關', () {
@@ -143,7 +144,7 @@ void main() {
     });
 
     test('④ 切 N 的單調性：短窗是長窗的前綴', () {
-      final rig = _Rig()..finger(35);
+      final rig = _Rig()..finger(38);
       final v10 = rig.fw.view(10)!;
       final v20 = rig.fw.view(20)!;
       final v30 = rig.fw.view(30)!;
@@ -195,7 +196,7 @@ void main() {
       expect(after.pts.length, before.pts.length);
       expect(after.ir, before.ir, reason: '計算用的切片不含還原段');
       expect(after.hv?.rmssd, before.hv?.rmssd);
-      expect(after.chartIr.length, pre + before.ir.length);
+      expect(after.chartIr.length, pre + before.chartIr.length);
       expect(after.preMissing, isFalse);
 
       // 四段區塊：空轉 / 沉澱 / 方向判定 / 正常
@@ -221,7 +222,7 @@ void main() {
 
     test('⑦ 問題點:空洞區塊與 confidence 的空洞是同一批,位置對得上谷標點', () {
       // 中間插 3 秒「手指在、但沒有脈搏」的平線 → 那段抓不到谷 → 留下空洞
-      final rig = _Rig()..finger(8);
+      final rig = _Rig()..finger(12);
       for (int i = 0; i < 3 * kFs ~/ kBatch; i++) {
         rig._forward(rig.core.feedSamples(
           List<int>.filled(kBatch, 60000),
@@ -263,7 +264,7 @@ void main() {
 
       // 後文只是顯示:計算用的切片、拍、數值都不含它
       expect(v.ir.length, 10 * kFs);
-      expect(v.pts.every((p) => p.endAbs <= rig.fw.base + 10 * kFs), isTrue);
+      expect(v.pts.every((p) => p.endAbs <= v.base + 10 * kFs), isTrue);
 
       // 窗內每一筆都有核心給的值,而且等於「事後對整段原始值算」的結果
       final all = <double>[];
@@ -279,7 +280,7 @@ void main() {
       for (int k = 0; k < 10 * kFs; k++) {
         final got = v.chartWave[preLen + k];
         expect(got, isNotNull, reason: '窗內第 $k 筆還沒有核心的值');
-        expect(got!, closeTo(truth[rig.fw.base + k], 1e-6), reason: '第 $k 筆');
+        expect(got!, closeTo(truth[v.base + k], 1e-6), reason: '第 $k 筆');
       }
 
       // 後文區塊:接在窗後、蓋到圖的最右邊
@@ -287,6 +288,21 @@ void main() {
       expect(t, hasLength(1));
       expect(t.single.from, preLen + 10 * kFs);
       expect(t.single.to, v.chartIr.length);
+    });
+
+    test('⑪ 窗從「計入」開始:判定段只顯示、不計入', () {
+      final rig = _Rig()..finger(20);
+      final v = rig.fw.view(10)!;
+      final release = rig.fw.base + rig.fw.firstBatchLen; // 計入
+      expect(rig.fw.firstBatchLen, greaterThan(0));
+      expect(v.base, release, reason: '窗的第 0 筆 = 計入那一刻');
+      expect(v.pts.every((p) => p.startAbs >= release), isTrue,
+          reason: '判定段的拍不進 HRV / 可信度');
+      // 判定段在圖上:緊接在還原段之後、窗之前
+      final head = v.chartIr.length - v.ir.length - v.tailLen;
+      final o = v.bands.where((b) => b.kind == K2HeadBand.orientWait).single;
+      expect(o.to, head, reason: '判定段結束 = 窗開始');
+      expect(o.to - o.from, rig.fw.firstBatchLen);
     });
 
     test('⑩ 窗還沒收滿 → 沒有後文(窗的右緣就是「現在」)', () {

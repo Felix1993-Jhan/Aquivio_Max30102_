@@ -27,6 +27,13 @@ import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_signal.
 const int kFs = Max30102Config.samplingRateHz; // 100
 const int kHold = 110; // 截尾 4 + baseline 100 + 低通 6(預設 hrMin 30 / hrMax 240)
 
+/// 指標 0(自動判定):這裡用 feedSamples 模擬「線上槽位」,靠核心判定方向轉正。
+/// 指標 1 / 2 的 newIrWave 在 k2_channel_orient_test 的 ⑥ 另外驗。
+Max30102Config _autoCfg() => Max30102Config(
+      resetOnFingerOff: true,
+      channelMode: Max30102Config.channelModeAuto,
+    );
+
 /// 合成 [seconds] 秒的 PPG(真實的 IR / RED,尚未依模組接法排列)。
 ///
 /// 脈搏 72bpm + 呼吸漂移 + 固定種子的雜訊 + 每 0.37 秒一個尖刺 ——
@@ -58,7 +65,7 @@ const int kHold = 110; // 截尾 4 + baseline 100 + 低通 6(預設 hrMin 30 / h
   int batch = 10,
   bool swapped = false,
 }) {
-  final k2 = Max30102K2(config: Max30102Config(resetOnFingerOff: true));
+  final k2 = Max30102K2(config: _autoCfg());
   final waveAbs = <int>[];
   final wave = <double>[];
   final waveTrim = <double>[];
@@ -152,7 +159,7 @@ void main() {
     });
 
     test('⑤ 手指離開 → 下一位從自己的零點重新開始,不帶上一位的游標', () {
-      final k2 = Max30102K2(config: Max30102Config(resetOnFingerOff: true));
+      final k2 = Max30102K2(config: _autoCfg());
       void feedAll(({List<int> ir, List<int> red}) s) {
         for (int i = 0; i + 10 <= s.ir.length; i += 10) {
           k2.feedSamples(s.red.sublist(i, i + 10), s.ir.sublist(i, i + 10));
@@ -194,7 +201,7 @@ void main() {
     });
 
     test('對照:舊的 newIrTrim 批尾確實是截斷的(這正是改用 newIrWave 的原因)', () {
-      final k2 = Max30102K2(config: Max30102Config(resetOnFingerOff: true));
+      final k2 = Max30102K2(config: _autoCfg());
       final trim = Max30102Signal.slidingTrimmedMean(
         [for (final v in sig.ir) v.toDouble()],
         Max30102Config.trimWindow,

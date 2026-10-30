@@ -247,6 +247,7 @@ class Max30102SettingLimits {
       cleanEnabled: c.cleanEnabled,
       spo2SmoothFactor: c.spo2SmoothFactor,
       hrSmoothFactor: c.hrSmoothFactor,
+      channelMode: c.channelMode,
     );
     for (final e in enforce(copy)) {
       issues.add((

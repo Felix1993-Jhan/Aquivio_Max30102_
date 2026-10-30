@@ -25,11 +25,12 @@
 //   abs 0 ────────── 150 ────────── 350 ──────── X ──────────▶
 //       │  空轉 1.5s  │  沉澱 2.0s   │ 方向判定  │  正常輸出
 //       │  核心丟棄   │ 只進核心緩衝 │ 壓著不送  │
-//                                   └ _base     └ 第一批輸出的尾端
+//                                   └ _base     └ 第一批輸出的尾端 = 計入
 //
-//   定長窗的 N 秒一律從 [_base] 起算 —— 那是「開始吐訊號」的那一刻。
-//   空轉與沉澱兩段由 adapter 另外還原後塞進 [preIr](見 setPreRoll),
-//   **只用來顯示,不進任何計算**。
+//   定長窗的 N 秒從**計入**起算(2026-10-29 起;之前是從 [_base])。
+//   判定 + 累積那段手指常常還沒壓穩(實測有 540 這種拍、還會拖累後面幾輪的
+//   SQI),所以與空轉、沉澱一樣**只顯示、不計入**。空轉與沉澱兩段由 adapter
+//   另外還原後塞進 [preIr](見 setPreRoll);判定段在 [_ir] 開頭,view() 切窗時跳過。
 // ============================================================================
 
 import 'package:flutter/foundation.dart';
@@ -69,6 +70,8 @@ typedef K2FixedView = ({
   List<int> chartTroughs,
   List<({int from, int to, K2HeadBand kind})> bands,
   // ── 狀態 ────────────────────────────────────────────────────
+  // 窗的起點(計入那一刻)的絕對位置 = ir[0];
+  // 圖上的開頭段長度 = chartIr.length − ir.length − tailLen(空轉 + 沉澱 + 判定段)
   int base,
   int filledSamples,
   int needSamples,
@@ -130,6 +133,11 @@ class K2FixedWindow extends ChangeNotifier {
   int _cap = 0;
   int _deadSamples = 0;
   int _settleSamples = 0;
+
+  /// 實際收多少:窗最長 [_cap],但窗從「計入」才開始(前面還有判定期,最長到
+  /// 逾時 10 秒),後面還要接後文 → 多留判定逾時 + 2 秒,窗才收得滿。
+  int get _keep =>
+      _cap + Max30102Config.orientTimeoutSamples + 2 * _fs;
 
   /// 樣本**真的變長**時才 +1 → 凍結之後波形圖一次都不會重繪。
   /// 「畫面真的靜止」本身就是最直覺的凍結證明。
@@ -216,7 +224,7 @@ class K2FixedWindow extends ChangeNotifier {
         // 零點挪了就不是同一段時間,必須整段作廢並明確記錄,否則第 0 秒無法解釋。
         //
         // 已經收滿的話就不理會:那是一段完整的開頭,之後的斷層與它無關。
-        if (_ir.length < _cap) {
+        if (_ir.length < _keep) {
           _ir.clear();
           _red.clear();
           _pts.clear();
@@ -232,8 +240,8 @@ class K2FixedWindow extends ChangeNotifier {
         }
       }
 
-      if (_ir.length < _cap) {
-        final room = _cap - _ir.length;
+      if (_ir.length < _keep) {
+        final room = _keep - _ir.length;
         final take = newIr.length < room ? newIr.length : room;
         for (int i = 0; i < take; i++) {
           _ir.add(newIr[i]);
@@ -244,13 +252,13 @@ class K2FixedWindow extends ChangeNotifier {
     }
 
     // 處理後波形:接得上才收(核心保證連續;接不上代表中間有斷層,整段作廢重收)。
-    // 範圍只到 _base + _cap,與原始樣本同一段;窗外的不需要。
+    // 範圍只到 _base + _keep,與原始樣本同一段;窗外的不需要。
     if (newIrWave.isNotEmpty && _base >= 0) {
       if (_waveBase < 0 || waveFirstAbs != _waveBase + _wave.length) {
         _wave.clear();
         _waveBase = waveFirstAbs;
       }
-      final end = _base + _cap;
+      final end = _base + _keep;
       for (int k = 0; k < newIrWave.length; k++) {
         final abs = waveFirstAbs + k;
         if (abs >= end) break;
@@ -261,7 +269,7 @@ class K2FixedWindow extends ChangeNotifier {
 
     final c = computed;
     if (c != null && _base >= 0) {
-      final end = _base + _cap;
+      final end = _base + _keep;
       for (final p in c.rrPoints) {
         // 沉澱期那 200 筆仍在核心緩衝裡參與找谷,所以第一輪會有早於 _base 的拍。
         // 不濾掉的話,窗頭會多出沒有波形對應的拍,左欄拍數與波形標點就對不起來。
@@ -345,34 +353,45 @@ class K2FixedWindow extends ChangeNotifier {
   K2FixedView? view(int seconds, {int tail = 0}) {
     if (_ir.isEmpty || _base < 0) return null;
     final need = seconds * _fs;
-    final endAbs = _base + need;
 
-    // 圖上要用到的長度(窗 + 後文)。key 只看這個範圍內的變化 ——
+    // ── 窗從「計入」開始 ─────────────────────────────────────────────
+    // 計入 = 方向鎖定、壓著的第一批一次釋放的尾端(= _base + _firstBatchLen)。
+    // 前面的判定 + 累積那段手指常常還沒壓穩(實測有 540 這種拍、還會拖累後面
+    // 幾輪的 SQI),所以與沉澱期一樣**只顯示、不計入**。
+    final start = _firstBatchLen < _ir.length ? _firstBatchLen : _ir.length;
+    final startAbs = _base + start;
+    final endAbs = startAbs + need;
+
+    // 圖上要用到的長度(判定段 + 窗 + 後文)。key 只看這個範圍內的變化 ——
     // 範圍外的樣本再怎麼進來,圖與數值都不會變,memo 照樣回同一個實例。
-    final shown = _ir.length < need + tail ? _ir.length : need + tail;
+    final avail = _ir.length - start;
+    final shown = avail < need + tail ? avail : need + tail;
     final waveEnd = _waveBase < 0 ? -1 : _waveBase + _wave.length;
     final waveShown = waveEnd < endAbs + tail ? waveEnd : endAbs + tail;
-    final key = '$seconds/$tail/$shown/$waveShown/${_pts.length}/${_preIr.length}'
-        '/${_rounds.length}/$_ended/$_rebases';
-    if (key == _memoKey) return _memo;
 
+    // 窗內的拍與輪次。key 要用「窗內」的數量,不能用總數 —— 緩衝比窗長
+    // (見 _keep),窗收滿之後窗外還會一直進來,用總數的話 memo 永遠失效。
     final pts = [
       for (final p in _pts)
-        if (p.endAbs <= endAbs) p,
+        if (p.startAbs >= startAbs && p.endAbs <= endAbs) p,
     ];
-    final take = _ir.length < need ? _ir.length : need;
-    final ir = _ir.sublist(0, take);
-    final red = _red.sublist(0, take);
+    // 結尾落在計入之前的輪次屬於判定段,不算。
+    final inWin = [
+      for (final r in _rounds)
+        if (r.abs > startAbs && r.abs <= endAbs) r,
+    ];
+    final key = '$seconds/$tail/$start/$shown/$waveShown/${pts.length}'
+        '/${_preIr.length}/${inWin.length}/$_ended/$_rebases';
+    if (key == _memoKey) return _memo;
+    final take = avail < need ? avail : need;
+    final ir = _ir.sublist(start, start + take);
+    final red = _red.sublist(start, start + take);
 
     final hv = pts.isEmpty ? null : Max30102HrvCalculator.hrvFrom(pts);
 
-    // 窗內的輪次:SQI 取多數票,血氧/方向取窗內最後一輪。
+    // 窗內的輪次(inWin,上面已切好):SQI 取多數票,血氧/方向取窗內最後一輪。
     // 為什麼不是「最後一輪」或「全部 AND」:一輪壞運氣不該代表整段,
     // 28 輪裡 1 輪不過就歸零又太嚴。多數票 + 旁邊公開比例,讓人自己判斷。
-    final inWin = [
-      for (final r in _rounds)
-        if (r.abs <= endAbs) r,
-    ];
     final okRounds = inWin.where((r) => r.sqiOk).length;
     final sqiOk = inWin.isNotEmpty && okRounds * 2 >= inWin.length;
 
@@ -400,9 +419,11 @@ class K2FixedWindow extends ChangeNotifier {
     final troughs = marks.toList()..sort();
 
     // 窗後的前後文:只有窗已經收滿才接(還在收的時候,窗的右緣就是「現在」)。
+    // 圖 = 還原段(空轉 + 沉澱)+ 判定段 + 窗 + 後文,位置換算照舊是 abs − _base + preLen。
     final tailLen = take == need ? shown - take : 0;
-    final chartIr = [..._preIr, ...ir, ..._ir.sublist(take, take + tailLen)];
-    final chartRed = [..._preRed, ...red, ..._red.sublist(take, take + tailLen)];
+    final chartEnd = start + take + tailLen;
+    final chartIr = [..._preIr, ..._ir.sublist(0, chartEnd)];
+    final chartRed = [..._preRed, ..._red.sublist(0, chartEnd)];
 
     // 核心的 newIrWave 對齊到 chartIr。開頭段(核心從 _base 才開始輸出)與
     // 右邊資料還沒到齊的位置是 null —— 圖會在那些位置退回自己算。
@@ -426,11 +447,11 @@ class K2FixedWindow extends ChangeNotifier {
         bands.add((from: dead, to: preLen, kind: K2HeadBand.settle));
       }
     }
-    final orientEnd = preLen + (_firstBatchLen < take ? _firstBatchLen : take);
+    final orientEnd = preLen + start; // = 計入
     if (orientEnd > preLen) {
       bands.add((from: preLen, to: orientEnd, kind: K2HeadBand.orientWait));
     }
-    final windowEnd = preLen + take;
+    final windowEnd = orientEnd + take;
     if (windowEnd > orientEnd) {
       bands.add((from: orientEnd, to: windowEnd, kind: K2HeadBand.normal));
     }
@@ -443,11 +464,11 @@ class K2FixedWindow extends ChangeNotifier {
     int idx(int abs) => abs - _base + preLen;
 
     // SQI 沒過的輪次。每輪涵蓋「上一輪結尾 → 這一輪結尾」,相鄰的合併成一塊。
-    int prevAbs = _base;
+    int prevAbs = startAbs;
     int? badFrom;
     for (final r in inWin) {
       if (!r.sqiOk) {
-        badFrom ??= prevAbs < _base ? _base : prevAbs;
+        badFrom ??= prevAbs < startAbs ? startAbs : prevAbs;
       } else if (badFrom != null) {
         bands.add((
           from: idx(badFrom),
@@ -490,10 +511,10 @@ class K2FixedWindow extends ChangeNotifier {
       tailLen: tailLen,
       chartTroughs: troughs,
       bands: bands,
-      base: _base,
-      filledSamples: _ir.length,
+      base: startAbs, // = ir[0] 的絕對位置(計入那一刻),不是核心開始輸出的 _base
+      filledSamples: take,
       needSamples: need,
-      sealed: _ir.length >= need,
+      sealed: take >= need,
       ended: _ended,
       rebases: _rebases,
       preMissing: preLen == 0,

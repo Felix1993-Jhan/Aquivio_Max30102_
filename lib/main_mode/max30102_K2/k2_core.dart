@@ -257,7 +257,23 @@ class Max30102K2 {
       irAt: _irAt,
       maxBeats: Max30102Config.maxBeats,
     );
+    _clearOrient(); // 強制模式(指標 1 / 2)一開機就是「已鎖定」,不必等第一次手指離開
   }
+
+  /// 指標 1 / 2:方向寫死,不走判定(見 [Max30102Config.channelModeDefault])。
+  bool get _orientForced => config.channelMode != Max30102Config.channelModeAuto;
+
+  /// **對外回報**的方向 —— 給 [K2Compute.orient] 與 [channelOrient]。
+  ///
+  /// ⚠️ 與 [_orient] 是兩件事:[_orient] 是「計算 / 輸出時**還要不要**對調」。
+  ///    指標 1 時資料在 [feedData] 拆的那一刻就已經對調好了,[_orient] 必須是
+  ///    normal(不然下游會再對調一次);但對外要照實說這片模組是裝反的。
+  ///    App 還原開頭段時,拿的就是這個值去對調它自己另外解的原始封包。
+  K2ChannelOrient get _reportedOrient => switch (config.channelMode) {
+        Max30102Config.channelModeSwapped => K2ChannelOrient.swapped,
+        Max30102Config.channelModeNormal => K2ChannelOrient.normal,
+        _ => _orient,
+      };
 
   late final Max30102BeatSeries _beats;
 
@@ -316,8 +332,8 @@ class Max30102K2 {
   /// (與沉澱期「200 筆一次吐」是同一個做法)。
   int _pendingOut = 0;
 
-  /// 這次量測判定出來的通道方向(唯讀)。
-  K2ChannelOrient get channelOrient => _orient;
+  /// 這次量測判定出來的通道方向(唯讀)。指標 1 / 2 時是寫死的那個方向。
+  K2ChannelOrient get channelOrient => _reportedOrient;
 
   /// 谷去重容差(樣本):120ms @100Hz。視窗滑動時同一顆谷可能位移 1~2 樣本。
   static const int _dedupTol = 12;
@@ -341,15 +357,25 @@ class Max30102K2 {
     final samples = Max30102Protocol.decodeFifoResponse(pkt);
     if (samples.isEmpty) return K2FeedResult.empty;
 
+    // ★ 指標 1(強制對調):**拆成 RED / IR 的這一刻就對調**,之後緩衝存的就是實際光源,
+    //   下游(手指偵測、計算、輸出)全部照原樣拿,[_orient] 是 normal 不會再對調一次。
+    //   刻意放在這裡而不是 decodeFifoResponse / feedSamples:
+    //     · decodeFifoResponse —— App 另外解一份原始封包還原開頭段,會依 [channelOrient]
+    //       自己對調;解碼就先對調的話那段會被對調兩次。
+    //     · feedSamples —— 快照重放走那裡,快照存的已經是轉正後的資料。
+    final swap = config.channelMode == Max30102Config.channelModeSwapped;
     return feedSamples(
-      [for (final s in samples) s.red],
-      [for (final s in samples) s.ir],
+      [for (final s in samples) swap ? s.ir : s.red],
+      [for (final s in samples) swap ? s.red : s.ir],
     );
   }
 
   /// **進資料窗口 A** —— 直接餵「已拆好的樣本」(RED / IR 等長,oldest→newest)。
   ///
   /// 適用:① 軟體端自己解析協定 ② 離線重放(把錄下的波形餵進來對拍驗證)。
+  ///
+  /// ⚠️ 指標 1(強制對調)**只在 [feedData] 對調**。這裡收到的一律當成實際光源
+  ///    (快照存的就是轉正後的資料);自己解協定的軟體端要自己先對調好再餵。
   ///
   /// 流程:判手指 → 進滾動緩衝 → 沉澱期擋住 → 累積達
   /// [Max30102Config.computeEvery] 筆才跑一次計算。
@@ -562,9 +588,10 @@ class Max30102K2 {
     final trimRed = _trimTail(_red, outN);
     final trimIr = _trimTail(_ir, outN);
 
-    // ⚠️ **方向只在這裡套用到輸出** —— 緩衝永遠存線上收到的原始槽位,不做交換。
+    // ⚠️ **方向只在這裡套用到輸出** —— 指標 0 時緩衝存的是線上收到的原始槽位,不做交換。
     //    這樣下游(波形圖、快照、/waveform、WS /stream 的 wave)全部自動拿到
     //    實際的光源,不必逐一分流,也不會有「某處交換了、某處忘了」的漂移。
+    //    (指標 1 / 2:緩衝在 feedData 拆的時候就是實際光源,_orient 恆為 normal,這裡不換。)
     final swapped = _orient == K2ChannelOrient.swapped;
     final wave = _takeWave(swapped ? _red : _ir, firstAbs);
     return K2FeedResult(
@@ -609,7 +636,14 @@ class Max30102K2 {
     var from = _waveNextAbs < 0 ? outFirstAbs : _waveNextAbs;
     if (from < bufStart) from = bufStart; // 緩衝已裁掉(理論上不會,保險)
     final to = _totalSamples - hold; // 不含
-    if (to <= from) return (firstAbs: from, detr: const [], trim: const []);
+    if (to <= from) {
+      // ⚠️ 還不能給也要**先記住起點**。不記的話下一批的 from 又變成「那一批的開頭」,
+      //    而那一批永遠是最新的 → to 永遠落後 hold 筆追不上 → 這次量測一筆都不會輸出。
+      //    第一批 ≤ hold(110)筆就會觸發:指標 1 / 2 每批只有 10 筆一定中;
+      //    指標 0 若方向在沉澱後第 2 輪就鎖定,第一批剛好 10 + 100 = 110 筆,也會中。
+      _waveNextAbs = from;
+      return (firstAbs: from, detr: const [], trim: const []);
+    }
 
     final d = List<double>.generate(buf.length, (i) => buf[i].toDouble());
     final trim = Max30102Signal.slidingTrimmedMean(d, Max30102Config.trimWindow);
@@ -688,10 +722,13 @@ class Max30102K2 {
   ///    下一位」。方向本來就是**這一次量測**的屬性,不是設備常數 ——
   ///    中途換模組、或同一台機器接不同板子,都靠這裡歸零才會自動處理。
   void _clearOrient() {
-    _orient = K2ChannelOrient.unknown;
+    // 指標 1 / 2:不判定,直接「已鎖定、不必再對調」(指標 1 的對調在 feedData 已經做了),
+    // 血氧也直接放行 —— 等於使用者替核心保證了方向。
+    // 指標 0:照原本,回到「未知」重新判定。
+    _orient = _orientForced ? K2ChannelOrient.normal : K2ChannelOrient.unknown;
     _orientVote = null;
     _orientVotes = 0;
-    _orientByVote = false;
+    _orientByVote = _orientForced;
     _settledAtAbs = -1;
     _pendingOut = 0;
     _waveNextAbs = -1; // 處理後波形的輸出游標也是「這一次量測」的
@@ -752,6 +789,7 @@ class Max30102K2 {
     //   _red = FIFO 每組的前 3 bytes(datasheet 說那是紅光)
     //   _ir  = 後 3 bytes(datasheet 說那是紅外)
     // 名字沿用歷史,但**方向未經判定之前那只是 datasheet 的宣稱**,不是事實。
+    // (指標 1 / 2 例外:feedData 拆的時候已經依指標放好,兩個緩衝就是實際光源。)
     final bufRed = _red.sublist(_red.length - take);
     final bufIr = _ir.sublist(_ir.length - take);
 
@@ -858,7 +896,7 @@ class Max30102K2 {
     return K2Compute(
       fingerPresent: r.fingerPresent,
       sqiOk: r.sqiOk,
-      orient: _orient,
+      orient: _reportedOrient,
       bpm: _beats.hrRecent(6),
       spo2: spo2,
       hrv: _beats.hrvStats(),
@@ -894,6 +932,7 @@ class Max30102K2 {
   ///
   /// 對照:手指偵測([feedSamples] 開頭)也讀原始 `ir` 槽位,但那裡**無法**套用方向 ——
   /// 手指要先放上去才開始判定方向,順序上一定在前面。
+  /// (指標 1 / 2 例外:feedData 已經依指標拆好,手指偵測看的就是實際的紅外光。)
   int _irAt(int absPos) {
     final back = _totalSamples - absPos;
     if (back < 1 || back > _ir.length) return -1;
