@@ -93,9 +93,14 @@ jobs:
   # ══════════════════════════════════════════════════════════════
   # 注意:這個 job **不需要** GTK 那一整包桌面相依 —— server 是純 Dart,
   # 不連結 Flutter engine。它只需要 libserialport 這個 C 函式庫(FFI 用)。
+  #
+  # ⚠️ 自動建置(push / PR)只在主 repo 跑。同一份程式也會推到
+  #    SmartHydrationService/Aquivio_Max30102,那邊平常 push 不建置,
+  #    要產物就手動按「Run workflow」—— 這個 job 與 (D)(E) 一起跑,一次產出三個平台。
   build-server:
     name: Build Linux Server (AMD64)
     runs-on: ubuntu-latest
+    if: github.repository == 'Felix1993-Jhan/Aquivio_Max30102_' || github.event_name == 'workflow_dispatch'
 
     steps:
     - name: Checkout code
