@@ -186,16 +186,18 @@ class K2FeedResult {
   final List<double> newRedTrim;
 
   /// [newIrWave] / [newIrWaveTrim] 第 0 筆的絕對位置。與 [firstAbs] **不同** ——
-  /// 處理後的波形要等右邊資料到齊,所以落後原始樣本約 1 秒。
+  /// 處理後的波形要等線定下來,所以落後原始樣本約 1.5 秒。
   final int waveFirstAbs;
 
-  /// **畫圖用的 IR**(已轉正)= **核心找谷用的那條線**:截尾平滑 → 減 baseline →
-  /// 低通平滑([Max30102Signal.troughLine]),每一筆的前後文都是完整的。
+  /// **畫圖用的 IR**(已轉正)= **核心找谷用的那條線**:截尾平滑 → 0.7~3.5 Hz 帶通
+  /// ([Max30102Signal.troughLine]),對整段緩衝算(與找谷同一次計算的同一支函式)。
   ///
-  /// 三步都是置中濾波,所以只輸出「右邊已經有截尾半窗 + baseline 半窗 + 低通半窗
-  /// (預設 4 + 100 + 6 = 110 筆)」的樣本,比 [newIr] 晚約 1.1 秒;左邊則有沉澱期
-  /// 那段緩衝當前後文,量測一開始就是完整的。
-  /// 樣本連續:第 i 筆 = `waveFirstAbs + i`。手指離開時,最後那 1.1 秒不會輸出。
+  /// 帶通是 IIR、正反各跑一次,最新那段的值每多一筆資料就會變;所以只輸出離最新資料
+  /// 「截尾半窗 4 + 150 筆」(= 154 筆,見 Max30102Config.troughGuardSamples)以前的樣本,
+  /// 比 [newIr] 晚約 1.5 秒 —— 核心也只收這之前的谷,收谷時看到的線就是這裡交出去的線。
+  /// 左邊有沉澱期那段緩衝當前後文,量測一開始就是完整的。
+  /// 樣本連續:第 i 筆 = `waveFirstAbs + i`。手指離開時,最後那 1.5 秒不會輸出。
+  /// (v0.0.0.7 是「截尾 → 減 2 秒移動平均 → 13 點平均」,壓 110 筆。)
   final List<double> newIrWave;
 
   /// 與 [newIrWave] 同一批位置的「截尾平滑、還帶著 DC」的 IR(完整,沒有批尾截斷)。
@@ -608,29 +610,44 @@ class Max30102K2 {
     );
   }
 
-  /// 取出「右邊資料已經到齊」的處理後波形 → [K2FeedResult.newIrWave]。
+  /// **找谷 / 畫圖共用的那條線**,對整段緩衝算一次(截尾 → 帶通,= Max30102Signal.troughLine)。
   ///
-  /// 計算(找谷、HRV、血氧)會等:每輪對整段緩衝重算,最右邊那顆谷留到下一輪才收,
-  /// 所以用到的值都有完整的前後文。輸出也要一樣 —— 只交出第 `total − hold` 筆以前的,
-  /// hold = 截尾半窗(4)+ baseline 半窗(100)+ 低通半窗(6)= 110 筆。
+  /// [_compute] 拿它切出演算視窗找谷,[_takeWave] 拿它交出 newIrWave ——
+  /// 兩邊是同一個算法、同一份資料,畫出來的線就是找谷的線。
+  /// 對整段算(而不是每個 5 秒視窗各算一次):視窗左緣有前後文,只剩緩衝最左與最右兩端
+  /// 有 IIR 暫態,兩端都用 [_lineHold] 避開。3000 筆 × 4 趟,與 [_trimTail] 同一個量級。
+  ({List<double> trim, List<double> line}) _lineOf(List<int> buf) {
+    final d = List<double>.generate(buf.length, (i) => buf[i].toDouble());
+    final trim = Max30102Signal.slidingTrimmedMean(d, Max30102Config.trimWindow);
+    final line = Max30102Signal.bandpass(
+      trim,
+      Max30102Config.samplingRateHz,
+      lowHz: Max30102Config.beatBandLowHz,
+      highHz: Max30102Config.beatBandHighHz,
+    );
+    return (trim: trim, line: line);
+  }
+
+  /// 線要離最新資料多遠才算「定下來」= 截尾半窗(4)+ [Max30102Config.troughGuardSamples](150)。
+  /// 找谷只收這之前的谷、newIrWave 也壓這麼多筆才交 —— **兩邊用同一個數字**,
+  /// 收谷那一刻看到的線,就是畫出來的那條線(誤差 ≤ 1.4%,見 troughGuardSamples)。
+  static const int _lineHold =
+      Max30102Config.trimWindow ~/ 2 + Max30102Config.troughGuardSamples;
+
+  /// 取出「右邊資料已經夠多、線已經定下來」的處理後波形 → [K2FeedResult.newIrWave]。
   ///
-  /// 每批都對**整段緩衝**重算再切出這一段:緩衝裡有沉澱期那 200 筆,所以量測一開始
-  /// 左邊也是完整的;右邊留了 hold 筆,所以切出來的每一筆都與「事後對整段算」相同。
-  /// 3000 筆一輪的成本與 [_trimTail] 同一個量級。
+  /// 只交出第 `total − hold` 筆以前的,hold = [_lineHold](154 筆,約 1.5 秒)。
+  /// 每批都對**整段緩衝**重算再切出這一段([_lineOf]):緩衝裡有沉澱期那 200 筆,
+  /// 量測一開始左邊也有前後文。
   ///
   /// [buf] 已依方向選好那一槽;[outFirstAbs] = 這次 newIr 的起點(第一次輸出從這裡開始)。
   ({int firstAbs, List<double> detr, List<double> trim}) _takeWave(
     List<int> buf,
     int outFirstAbs,
   ) {
-    const fs = Max30102Config.samplingRateHz;
-    final win = Max30102Signal.baselineWindow(fs, config.bandLowHz);
-    final lp = Max30102Signal.lowpassWindow(fs, config.bandHighHz);
-    // ⚠️ 要壓住的是三個半窗**相加**,不是取最大的那個:第 a 筆的低通要平均
-    //    detr[a−6 .. a+6];detr[a+6] 的 baseline 要平均 trim[a−94 .. a+106];
-    //    trim[a+106] 又要用到原始值 a+110。少壓任何一段,最右邊那幾個值就是截斷的
-    //    (只壓 baseline 半窗 100 時,server 測試抓到誤差 3.8,脈搏振幅約 2000)。
-    final hold = Max30102Config.trimWindow ~/ 2 + win ~/ 2 + lp ~/ 2;
+    // v0.0.0.7 是 4 + 100 + 6 = 110(三個置中移動平均的半窗相加,等滿就與事後整段算完全相同);
+    // 帶通是 IIR、沒有「等滿」這回事,改等到誤差夠小(見 Max30102Config.troughGuardSamples)。
+    const hold = _lineHold;
     final bufStart = _totalSamples - buf.length;
 
     var from = _waveNextAbs < 0 ? outFirstAbs : _waveNextAbs;
@@ -639,24 +656,18 @@ class Max30102K2 {
     if (to <= from) {
       // ⚠️ 還不能給也要**先記住起點**。不記的話下一批的 from 又變成「那一批的開頭」,
       //    而那一批永遠是最新的 → to 永遠落後 hold 筆追不上 → 這次量測一筆都不會輸出。
-      //    第一批 ≤ hold(110)筆就會觸發:指標 1 / 2 每批只有 10 筆一定中;
-      //    指標 0 若方向在沉澱後第 2 輪就鎖定,第一批剛好 10 + 100 = 110 筆,也會中。
+      //    第一批 ≤ hold 筆就會觸發:指標 1 / 2 每批只有 10 筆一定中;
+      //    指標 0 若方向很快就鎖定、第一批不夠 hold 筆,也會中。
       _waveNextAbs = from;
       return (firstAbs: from, detr: const [], trim: const []);
     }
 
-    final d = List<double>.generate(buf.length, (i) => buf[i].toDouble());
-    final trim = Max30102Signal.slidingTrimmedMean(d, Max30102Config.trimWindow);
-    final detr = Max30102Signal.detrendSmooth(
-      trim,
-      baselineWindow: win,
-      lowpassWindow: lp,
-    );
+    final w = _lineOf(buf);
     _waveNextAbs = to;
     return (
       firstAbs: from,
-      detr: detr.sublist(from - bufStart, to - bufStart),
-      trim: trim.sublist(from - bufStart, to - bufStart),
+      detr: w.line.sublist(from - bufStart, to - bufStart),
+      trim: w.trim.sublist(from - bufStart, to - bufStart),
     );
   }
 
@@ -757,7 +768,8 @@ class Max30102K2 {
   List<double> get rrLatest => _beats.rrClean();
 
   /// 目前累積的乾淨拍數(判斷資料夠不夠算 HRV;暖機需 ≥9)。
-  int get beatCount => _beats.rrHistory.length + 1;
+  /// v0.0.0.8:序列裡也留著漏拍 / 偽拍(見 Max30102BeatSeries 檔頭),所以數乾淨的那些。
+  int get beatCount => _beats.rrCleanPts().length + 1;
 
   /// **累計收到的樣本數** —— [K2Compute.troughAbs] 絕對位置的基準。
   /// 軟體自存的波形陣列若長 L,則陣列索引 = `abs - (totalSamples - L)`。
@@ -801,12 +813,16 @@ class Max30102K2 {
     final ir = swapped ? bufRed : bufIr;
     final red = swapped ? bufIr : bufRed;
 
+    // 找谷的線:對整段緩衝算一次([_lineOf],與 newIrWave 同一支),切出這個視窗的那段。
+    final fullLine = _lineOf(swapped ? _red : _ir).line;
+
     final r = Max30102Algorithm.compute(
       red: red,
       ir: ir,
+      irLine: fullLine.sublist(fullLine.length - take),
       fs: Max30102Config.samplingRateHz,
-      bandLowHz: config.bandLowHz,
-      bandHighHz: config.bandHighHz,
+      beatBandLowHz: Max30102Config.beatBandLowHz,
+      beatBandHighHz: Max30102Config.beatBandHighHz,
       fingerThreshold: config.fingerThreshold,
       hrMin: config.hrMin.toDouble(),
       hrMax: config.hrMax.toDouble(),
@@ -822,35 +838,37 @@ class Max30102K2 {
     _voteOrient(r.spo2Ratio);
 
     // 谷(視窗內索引)→ 絕對位置 → 餵進唯一 NN 序列。
+    //   · 只收離最新資料 ≥ [_lineHold] 筆的谷(右緣,見下)。
     //   · 丟掉最右一顆(B 右緣過濾):視窗邊緣的谷突出度未穩,延遲一拍再收。
     //   · 丟掉左緣 context 區(見下)。
     //   · 去重:視窗滑動時同一顆谷可能位移 1~2 樣本 → 容差內視為同一顆。
     final base = _totalSamples - take;
     final troughs = r.irTroughs;
 
+    // ── 右緣:線還沒定下來的地方不收谷(v0.0.0.8)───────────────────────
+    // 帶通是 IIR,最新那段的值每多一筆資料就變一次(右緣 150 筆內誤差 > 1.4%)。
+    // 核心每顆谷只收一次、收了不再修正 —— 收早了,錯的位置就永遠錯下去。
+    // 等到離最新資料 _lineHold 筆,線已經定下來,而且**正是 newIrWave 交出去的那一段**。
+    final stableBefore = _totalSamples - _lineHold;
+
     // ── 左緣 context 區 ───────────────────────────────────────────────
-    // baseline 是**置中**移動平均(寬 hpWin):算第 i 筆時要取 i±hpWin/2。
-    // 陣列開頭那 hpWin/2 筆取不到左半邊,只能單邊平均 → baseline 是偏的,
-    // 去趨勢後會凸出一塊,在那裡找到的谷不是真的脈搏。
-    // 那段資料仍**留在緩衝裡**當後面樣本的 baseline context —— 不是丟棄,是只當基準用。
+    // 線是對整段緩衝算的,緩衝最左那段同樣有 IIR 暫態(濾波器從第一筆的穩態起跑),
+    // 在那裡找到的谷位置不準。那段資料仍**留在緩衝裡**當後面的前後文 —— 不是丟棄,是不在那裡收谷。
     //
-    // ⚠ 只在「緩衝還沒長到完整視窗」時套用。理由是時序:
-    //   · 起步階段 base 固定不動(沒東西被裁),左緣永遠是最舊那批,
+    // ⚠ 只在「視窗左緣 = 緩衝左緣」時套用。理由是時序:
+    //   · 起步階段緩衝的左緣固定不動(沒東西被裁),左緣永遠是最舊那批,
     //     不會再滑進可信區 → 必須永久排除。
     //   · 緩衝滿了之後視窗開始前滑,谷是先從**右緣**進來、在中段被餵過,
     //     之後才移到左緣。這時再擋沒有意義,而且 computeEvery 較大時
-    //     (一輪滑掉 > hpWin/2)可能讓某顆谷「還沒進可信區就滑過頭」→ 整拍漏掉。
+    //     可能讓某顆谷「還沒進可信區就滑過頭」→ 整拍漏掉。
     //   · 起步排除掉的那些谷,等視窗滑動後窗內索引會降到 outputFrom 以下,
     //     但它們的 abs 早於 _lastFedAbs → 被去重擋住,不會事後補餵。
     //
     // 判斷條件用 `take == _ir.length`(視窗吃掉整個緩衝 ⇔ 視窗左緣 = 緩衝左緣),
     // 不用「take < computeWindow」—— 後者是靠參數大小關係碰巧成立的,
     // 一旦 computeWindow 比緩衝上限大就永遠不會關閉。這個條件自我描述、與參數無關。
-    final hpWin = (Max30102Config.samplingRateHz / config.bandLowHz)
-        .round()
-        .clamp(1, take)
-        .toInt();
-    final outputFrom = take == _ir.length ? hpWin ~/ 2 : 0;
+    // (v0.0.0.7 的線是 2 秒置中移動平均,那時排除的是 baseline 半窗 100 筆。)
+    final outputFrom = take == _ir.length ? Max30102Config.troughGuardSamples : 0;
 
     final fed = <int>[];
     for (int i = 0; i + 1 < troughs.length; i++) {
@@ -858,6 +876,7 @@ class Max30102K2 {
       final t = troughs[i];
       if (t < outputFrom) continue; // 左緣 context 區,不產出
       final abs = base + t;
+      if (abs >= stableBefore) break; // 右緣:線還沒定下來,下一輪再收(谷依序排列)
       if (_lastFedAbs >= 0 && abs <= _lastFedAbs + _dedupTol) continue;
       fed.add(abs);
       _lastFedAbs = abs;

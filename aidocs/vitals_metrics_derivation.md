@@ -25,9 +25,13 @@
 
 | | |
 |---|---|
-| 對應 commit | `6371c42`（2026-09-09） |
-| server 版本 | `0.0.0.6`（`bin/server_version.dart`） |
-| 撰寫日期 | 2026-09-29 |
+| server 版本 | `0.0.0.8`（`bin/server_version.dart`） |
+| 更新日期 | 2026-11-02（§2.2~2.3、§6.0、§6.4~6.5、§7.1、§9.7、§10、兩張速查表） |
+| 撰寫日期 | 2026-09-29（當時對應 `0.0.0.6`、commit `6371c42`） |
+
+舊版全文：[old/vitals_metrics_derivation_v0.0.0.6.md](old/vitals_metrics_derivation_v0.0.0.6.md)。
+0.0.0.8 改的東西集中說明在 [trough_line.md](trough_line.md)（找谷的線）與 [confidence.md](confidence.md)（分類與可信度）；
+本文只更新受影響的章節，其餘章節（§0~1、§3~5、§7.2 以後的公式）沒有變。
 
 ⚠️ **本文只標檔名與函式名，不標行號。** 行號一改就腐化 —— `max30102_algorithms.md` 整份的路徑全部失效就是前例。
 
@@ -43,15 +47,15 @@
 | 1.1 | 手指偵測 | `fingerPresent` | `mean(IR) ≥ 50000` | bool | 0.1 | 自訂 |
 | 1.3 | 通道方向 | `channelOrient` | `R < 0.9` 正常 / `R > 1.3` 相反 | 列舉 | 4.2 | 自訂 |
 | 2.1 | 截尾滑動平均 | — | `(Σ − min − max) / (cnt − 2)` | counts | 0.1 | 自訂 |
-| 2.3 | 去趨勢 | — | `trim − MA(trim, 200)` | counts | 2.1 | 自訂 |
+| 2.3 | 找谷的線（= 畫圖的線） | `wave` | `bandpass(trim, 0.7~3.5 Hz)`，2 階 Butterworth、正反各一次 | counts | 2.1 | RBJ / filtfilt |
 | 3.1 | 谷偵測 | — | `prominence ≥ 0.5 × p70(prominence)` | 索引 | 2.3 | scipy |
 | 4.1 | 逐拍 AC / DC | — | `AC = pv − B點`、`DC = pv` | counts | 3.1 | Maxim |
 | 4.2 | R | `spo2Ratio` | `median( (AC/DC)red ÷ (AC/DC)ir )` | 無單位 | 4.1 | Maxim |
 | 4.3 | SpO2 | `spo2` | `−45.06R² + 30.354R + 94.845` | % | 4.2 | SparkFun |
 | 5.1 | SQI | `sqi` | `cv < 0.35 ∧ spike < 5.0 ∧ kept ≥ 2` | 1 / 0 | 3.2 | 自訂 |
 | 6.1 | RR | `hrv.rr` | `Δabs × 1000 / fs` | ms | 3.1 | — |
-| 6.5 | 心率 | `bpm` | `60000 / median(最近 6 筆 RR)` | bpm | 6.1 | 自訂 |
-| 7.1 | clean → NN | — | `\|rr − med\| ≤ max(2.5 × 1.4826 × MAD, 0.5 × med)` | ms | 6.1 | robust |
+| 6.5 | 心率 | `bpm` | `60000 / median(最近 6 筆乾淨 RR)` | bpm | 7.1 | 自訂 |
+| 7.1 | 分類 → NN | — | 對前後各 4 筆的局部中位數：`±20%` 乾淨／`≈2~4 倍` 漏拍／其餘偽拍 | ms | 6.1 | 自訂 |
 | 7.2 | 平均心率 | `mean_hr` | `60000 / meanRr` | bpm | 7.1 | — |
 | 7.3 | SDNN | `sdnn` | `√( Σ(NN − mean)² / (N−1) )` | ms | 7.1 | TF1996 |
 | 7.4 | RMSSD | `rmssd` | `√( Σ ΔNN² / pairs )`（只累加時間相鄰對） | ms | 7.1 | TF1996 |
@@ -76,8 +80,7 @@
 | 9.4 | 交感（z） | `sns_z` | `[ z(meanHr) + z(√SI) − z(SD2) ] / 3` | z | 7.2/9.3/7.6 | Kubios 風格 |
 | 9.5 | 活動量 | `activity` | `clamp( (meanHr − 60) / 80 ) × 100` | 0~100 | 7.2 | aquivio |
 | 9.6 | 訊噪比 | `snr_db` | `10·log₁₀(sig / noise)` | dB | **0.1** | aquivio |
-| 9.7 | 可信度（拍數） | `confidence_by_beats` | `≥20 → good`、`≥13 → rough` | 字串 | 7.1 | 自訂 |
-| 9.7 | 可信度（SNR） | `confidence` `confidence_video` | `≥6 dB → good`、`≥1 dB → rough` | 字串 | 9.6 | aquivio |
+| 9.7 | 可信度 | `confidence` `confidence_video` `confidence_by_beats`（同值） | 乾淨拍 < 9 或乾淨比例 < 65% → very rough；< 80% 或 SQI 沒過 → rough；其餘 good | 字串 | 5.1, 7.1 | 自訂 |
 
 ---
 
@@ -111,8 +114,7 @@
 | 1.1 | `fingerPresent` | 光學 | 1 批 | ✓ | ✓ | ✓ | **是** |
 | 1.2 | `settled` | 工程 | 200 筆 | ✓ | ✓ | ✓ | **是** |
 | 1.3 | `channelOrient` | 光學 | 2 票 | ✓ | ✓ | ✓ | **是**（未定不給血氧） |
-| 9.7 | `confidence_by_beats` | 時域 | 9 拍 | ✓（會誠實回報 `very rough`） | ✓ | ✓ | — |
-| 9.7 | `confidence` | 頻域 | 5 秒波形 | **⚠ 只看 SNR，10 秒照樣回 `good`** | ✓ | ✓ | — |
+| 9.7 | `confidence`（三欄同值） | 時域 | 9 個乾淨拍 | ✓（拍數不夠會回報 `very rough`） | ✓ | ✓ | — |
 
 百分比是實測值（同一份 30 秒快照切前 10 秒對照整段，工具見 §附錄 B）。
 
@@ -133,8 +135,8 @@ counts    ADC 原始計數（18-bit，0 ~ 262143），無物理單位
 
 **RR 與 NN 的用詞紀律：**
 
-- **RR** = 谷與谷之間的原始間距，還沒過 `clean()`
-- **NN** = 過了 `clean()` 的 RR（normal-to-normal）
+- **RR** = 谷與谷之間的原始間距，還沒過分類（`clean()` → `classify()`）
+- **NN** = 分類為「乾淨」的 RR（normal-to-normal）
 
 **兩套尺度的稱呼：**
 
@@ -211,7 +213,7 @@ fingerPresent(批) = mean(這批 IR) >= fingerThreshold   // 預設 50000
 
 | 階段 | 做什麼 | 為什麼 |
 |---|---|---|
-| 空轉期 | 偵測到手指後**完全不收** 1.5 秒 | `fingerThreshold` 是手指「壓到一半」就跨過的，IR 還會從 5 萬爬到 9 萬。那段斜坡幅度是脈搏的數十倍，進了緩衝會①去趨勢炸出巨大假暫態②找谷門檻被墊高③生出的假 RR 污染 ±40% 閘門的中位數，**真拍反被判成太短剔除**，序列鎖死在 2 倍週期 |
+| 空轉期 | 偵測到手指後**完全不收** 1.5 秒 | `fingerThreshold` 是手指「壓到一半」就跨過的，IR 還會從 5 萬爬到 9 萬。那段斜坡幅度是脈搏的數十倍，進了緩衝會①去趨勢炸出巨大假暫態②找谷門檻被墊高③生出的假 RR 污染基準的中位數（0.0.0.7 的 ±40% 閘門），**真拍反被判成太短剔除**，序列鎖死在 2 倍週期 |
 | 沉澱期 | 累積滿 200 筆前不輸出、不計算 | 去趨勢是「原始值 − baseline」，baseline 需要這麼寬的資料才成形。綁在 baseline 寬度上而不是寫死 200 |
 | 沉澱期滿 | 把累積的 200 筆**一次全吐** | 所以波形的絕對索引會在這裡出現一次斷層（`firstAbs` 從 0 跳到 140），這不是 bug |
 
@@ -264,7 +266,7 @@ win = trimWindow = 9（固定）
 - **出處**：自訂（概念同 trimmed mean）
 - **實作**：`k2_signal.dart` → `slidingTrimmedMean`
 
-### 2.2 置中移動平均（baseline）
+### 2.2 置中移動平均（baseline）—— 0.0.0.8 起不在找谷的路徑上
 
 前綴和 O(N)，同樣置中：
 
@@ -273,27 +275,30 @@ half = window ÷ 2
 out[i] = (prefix[hi+1] − prefix[lo]) / (hi − lo + 1)，lo = max(0,i−half), hi = min(n−1,i+half)
 ```
 
-### 2.3 去趨勢 → 平滑 → 取負
+0.0.0.8 起只剩兩個用途：沉澱期長度（`settleSamples = fs / bandLowHz = 200`）與 App 波形圖的 DC 虛線。
+0.0.0.7 以前它是找谷的高通（`trim − MA(trim, 200)`），已退場，見[歷史文件 §2](vitals_metrics_history.md)。
+
+### 2.3 找谷的線（= 畫圖的線）→ 取負　〔0.0.0.8〕
 
 | 步 | 運算 | 為什麼 |
 |---|---|---|
 | ① | `trim = slidingTrimmedMean(raw, 9)` | 殺尖刺型假谷 |
-| ② | `baseline = MA(trim, hpWin)` | 呼吸漂移 |
-| ③ | `detrend = trim − baseline` | **高通**（減掉長視窗平均） |
-| ④ | `smoothed = MA(detrend, lpWin)` | **低通**，輕度平滑 |
-| ⑤ | `neg = −smoothed` | PPG 的**谷**才是供血點；取負之後谷變成峰，才能用 §3.1 的找峰 |
-
-視窗寬度由心率換算 —— **Hz 只是 bpm 的另一種單位**：
+| ② | `line = bandpass(trim, fs, 0.7 Hz, 3.5 Hz)` | 2 階 Butterworth 高通 0.7 + 低通 3.5，**各自正向一次、反向一次**（零相位） |
+| ③ | `neg = −line` | PPG 的**谷**才是供血點；取負之後谷變成峰，才能用 §3.1 的找峰 |
 
 ```
-bandLowHz  = max(hrMin, 1) / 60 = 30/60  = 0.5 Hz
-bandHighHz = max(hrMax, 1) / 60 = 240/60 = 4.0 Hz
-hpWin = clamp(round(fs / bandLowHz), 1, n)        = 200 筆
-lpWin = clamp(round(fs / (2 × bandHighHz)), 1, n) = 13 筆
+beatBandLowHz  = 0.7 Hz（42 bpm）    beatBandHighHz = 3.5 Hz（210 bpm）    固定，不開放調
+biquad(RBJ,Q = 1/√2):高通 b = [0.969378, −1.938757, 0.969378]、a = [−1.937819, 0.939695]
+                       低通 b = [0.010432, 0.020865, 0.010432]、a = [−1.690996, 0.732726]
+y[n] = b0·x[n] + b1·x[n−1] + b2·x[n−2] − a1·y[n−1] − a2·y[n−2]
 ```
 
-- **陷阱**：這**不是頻域濾波器**，是時域移動平均的視窗寬度換算。全鏈沒有任何 FFT（唯一的 FFT 在 §9.6）。
-- **陷阱**：`hrMin` 被設成 0 會讓這裡除以零，所以取 `max(hrMin, 1)`。
+- **對整段緩衝算一次**（`k2_core._lineOf`），找谷切出最近 5 秒、`newIrWave`（= server 的 `wave`、App 波形圖）交出同一條 —— 畫出來的線就是找谷的線。
+- **右緣要等**：IIR 的值受右邊所有資料影響，離最新資料 150 筆時誤差約 1.4%。找谷只收離最新資料 ≥ 154 筆（截尾半窗 4 + 150）的谷，`newIrWave` 也壓 154 筆才交（§6.0）。
+- 為什麼換掉移動平均（0.5 Hz 完全擋不住、0.7 Hz 放大 20%，殘留斜坡把谷推走 Δ ≈ −s/c）、一顆谷走完四趟的實際數字、會誤判的情況：見 [trough_line.md](trough_line.md)。
+- 起始狀態從第一筆的穩態起跑（低通 = 第一筆、高通 = 0），不然開頭那一階 DC 會讓濾波器響鈴好幾秒。
+- **出處**：Butterworth 1930；係數 RBJ Audio EQ Cookbook；零相位 = `filtfilt`
+- **實作**：`k2_signal.dart` → `troughLine`、`bandpass`；`k2_core.dart` → `_lineOf`
 
 ### 2.4 整窗 DC / AC
 
@@ -439,15 +444,18 @@ sqiOk = cv < 0.35 且 spike < 5.0 且 kept.length >= 2
 
 **輸入 ←** 谷的絕對位置　**輸出 →** `rr[]`（ms）、`bpm`
 
-### 6.0 進序列之前：三道過濾
+### 6.0 進序列之前：四道過濾
 
-谷從演算視窗送進序列之前，`k2_core` 會先做三件事：
+谷從演算視窗送進序列之前，`k2_core` 會先做四件事：
 
 | 做法 | 規則 | 為什麼 |
 |---|---|---|
+| **右緣：線定下來才收**（0.0.0.8） | 只收 `abs < totalSamples − 154` 的谷；更新的下一輪再收 | 帶通是 IIR，最新那段的值每多一筆資料就變（右緣 150 筆內誤差 > 1.4%）。每顆谷只收一次、收了不修正，收早了就是錯的位置。154 = 截尾半窗 4 + `troughGuardSamples` 150，與 `newIrWave` 壓的筆數相同 |
 | 丟掉最右一顆谷 | 每輪 `troughs` 的最後一顆不送 | 視窗邊緣的顯著度還沒穩，延遲一拍再收 |
-| 擋掉左緣 context 區 | 起步階段只收 `t >= hpWin/2 = 100` 的谷 | baseline 是**置中**移動平均，陣列開頭那 100 筆取不到左半邊，baseline 是偏的，在那裡找到的谷不是真的脈搏。那段資料仍留在緩衝裡**當後面樣本的 baseline context**，不是丟棄 |
+| 擋掉左緣 context 區 | 起步階段只收 `t >= 150` 的谷（0.0.0.7 是 `hpWin/2 = 100`） | 線是對整段緩衝算的，緩衝最左那段同樣有 IIR 暫態。那段資料仍留在緩衝裡**當後面樣本的前後文**，不是丟棄 |
 | 去重 | `abs <= _lastFedAbs + 12` 就跳過 | 視窗滑動時同一顆谷可能位移 1~2 樣本（12 筆 = 120 ms） |
+
+代價：最新的拍約 1.5 秒後才進 HRV（0.0.0.7 只靠「丟最右一顆」，約晚 1 拍）。
 
 「起步階段」的判斷條件是 `take == _ir.length`（視窗吃掉整個緩衝 ⇔ 視窗左緣 = 緩衝左緣）。緩衝滿了之後谷是先從**右緣**進來、在中段被餵過才移到左緣，這時再擋沒有意義。
 
@@ -475,27 +483,26 @@ rr > 2000 → 剔除，基準照常推進（resync）
 
 **短側不推進基準**是刻意的：過短多半是偽谷／多抓，若推進基準會把下一段真間期切成假短 NN、灌爆 RMSSD。長側多半是真的漏拍，不推進會連環量爆、整段被砍。
 
-### 6.4 誤拍過濾（±40%）
+### 6.4 誤拍過濾（±40%）—— 已退場（0.0.0.8）
 
-```
-med = median(最近 9 筆 RR)        // 含 search-back 補回的拍；不足 3 拍 → 全收
-接受條件：|rr − med| / med <= 0.40
-不接受 → 剔除「誤拍>40%」；且 rr < med 時基準不推進
-```
+0.0.0.7 以前：`|rr − median(最近 9 筆)| / med > 0.40` 就不收。0.0.0.8 拿掉，生理閘門範圍內的 RR **全部收進序列**，
+由 §7.1 的逐筆分類決定進不進 HRV —— 序列裡留著每一個偵測到的間距、首尾相接，才數得出「乾淨的佔幾成」（可信度用）。
 
-- 2026-07 由 30% 放寬到 40%：以「近 9 拍當前節律」為主要基準，只擋明顯離群，中等真變異留下。漏拍改由 search-back 回補，clean 的全域離群降級為對照開關。
+拿掉的理由：① 起步 3 拍內全收，早期的壞拍直接進 RMSSD；② 起步若連漏幾拍，中位數變 2 倍，之後的真拍全被判「太短」不推進基準 → 序列鎖死在半速（10/30 錄音：心率 110 讀成 56）。細節見[歷史文件 §6](vitals_metrics_history.md)。
 
 ### 6.5 心率（現行）
 
 ```
-take   = min(rr.length, 6)
-med    = median(最後 take 筆 RR)
+clean  = 分類為乾淨的 RR(§7.1)
+take   = min(clean.length, 6)
+med    = median(最後 take 筆乾淨 RR)
 bpm    = 60000 / med
-不足 2 拍 → null（由呼叫端凍結）
+不足 2 筆乾淨 RR → null（由呼叫端凍結）
 ```
 
 - **為什麼用「拍數」而不是「時間窗」**：時間窗版會在 SQI 差的空窗期整段滑過去 → 掉 null。拍數版只要序列有 2 拍就一定算得出。
-- **陷阱**：`bpm` 吃的是 `_rr`（**未過 `clean()`** 的原始序列），而 `mean_hr`（§7.2）吃的是 clean 後的 NN。兩者不是同一個東西 —— `bpm` 是「最近約 5 秒」，`mean_hr` 是「整個視窗的平均」。欄位層面的說明見 [VITALS_FIELDS.zh-TW.md §1](../docs/VITALS_FIELDS.zh-TW.md)。
+- 0.0.0.8 起只取**乾淨的** RR：序列裡現在留著漏拍／偽拍（§6.4），不排除的話一個 2 倍的漏拍就會進中位數。
+- `bpm` 是「最近 6 筆乾淨 RR」，`mean_hr`（§7.2）是「整段乾淨 RR 的平均」—— 輸入同一批，範圍不同。欄位層面的說明見 [VITALS_FIELDS.zh-TW.md §1](../docs/VITALS_FIELDS.zh-TW.md)。
 - **實作**：`k2_beatseries.dart` → `hrRecent(6)`
 - 前兩代心率算法已退場／降級，見[歷史文件 §6](vitals_metrics_history.md#6-心率)。
 
@@ -520,26 +527,28 @@ bpm    = 60000 / med
 
 這是最常查的一節。
 
-### 7.1 clean：MAD 穩健離群濾除（RR → NN）
+### 7.1 逐筆分類（RR → NN）　〔0.0.0.8〕
 
 ```
-拍數 < 4 → 全收
-med    = median(rr)
-MAD    = median( |rr − med| )
-MAD <= 0 → 全收（資料幾乎全等，避免除不出門檻而全砍）
-thresh = max( madK × madScale × MAD , minRelThresh × med )
-       = max( 2.5 × 1.4826 × MAD , 0.5 × med )
-保留 |rr − med| <= thresh
+對每一筆 rr[i]:
+  med = median( rr[i−4 .. i+4] )            // 前後各 4 筆,含自己共 9 筆;兩端拿得到幾筆就用幾筆
+                                            // 偶數筆取中間兩筆的平均
+  |rr − med| ≤ 0.20 × med                 → 乾淨(clean)
+  k = round(rr / med),2 ≤ k ≤ 4 且 |rr/med − k| ≤ 0.20  → 漏拍(missed)
+  其餘                                     → 偽拍(artifact)
+只有「乾淨」的進 RMSSD / SDNN / 心率
 ```
 
-**1.4826 是什麼**：常態分佈下 MAD 與標準差的一致化常數（σ ≈ 1.4826 × MAD）。少了它，「2.5 × MAD」其實只等於約 1.69σ —— 連完全正常的資料都會被砍掉約 9%，而且**心跳越穩 → MAD 越小 → 門檻越緊 → 砍越兇**，自打嘴巴。
-
-**下限 `0.5 × med` 不可省**：RR 有 10 ms 量化，安靜時 MAD 只有 1~2 格，純 MAD 門檻會塌到 ±25 ms，把正常的心率漂移（收 30 秒時 RR 從 780 爬到 900）整段砍掉。0.5 的意思是「保留 [0.5×, 1.5×] 中位數以內的拍，超出才視為漏拍（約 2 倍）／切拍（約 0.5 倍）」。
-
-- **副作用（下游關鍵）**：clean 會**壓縮**清單，被抽掉的地方左右兩筆的谷位置就對不上 → §7.4 的 RMSSD 自動略過那種跨洞相減。
-- **暖機門檻**：乾淨拍 `pts.length + 1 < minBeatsForHrv (9)` → **整個 HRV 回 null**，連帶 §9 的 `pns_z`/`sns_z`/`ans_time_domain` 與 `confidence_by_beats` 全部 null。
-- **出處**：robust statistics 慣例
-- **實作**：`k2_hrv_calculator.dart` → `clean`、`stats`
+- **局部中位數取所有鄰居**（含漏拍、偽拍）：中位數本身抗離群，9 筆裡要一半以上是壞的才會被帶偏；只取乾淨的反而要先有「乾淨」的定義，起步那幾拍就沒有基準可用。
+- **從第一拍就生效**：不像舊的 ±40% 閘門要先有 3 拍基準。
+- **局部基準跟得上心率漂移**，所以帶寬可以收到 ±20%（舊的全窗中位數只能放到 ±50%，否則正常的心率爬升會被整段砍掉）。
+- 最新那幾筆的「後面 4 筆」還沒出現 → 新拍進來時可能改判。
+- **副作用（下游關鍵）**：不乾淨的被抽掉後，左右兩筆的谷位置對不上 → §7.4 的 RMSSD 自動略過跨洞相減。
+- **暖機門檻**：乾淨拍 `pts.length + 1 < minBeatsForHrv (9)` → **整個 HRV 回 null**，連帶 §9 的 `pns_z`/`sns_z`/`ans_time_domain` 全部 null；可信度回 `very rough`。
+- **已知限制**：谷被推偏的一長一短，兩筆都只偏離 20% 以內時仍算乾淨（見 [confidence.md](confidence.md) §4）。
+- 0.0.0.7 的 clean()（全窗中位數 ± max(2.5 × 1.4826 × MAD, 0.5 × med)）已退場，見[歷史文件 §7](vitals_metrics_history.md)。
+- **出處**：自訂（整合方原型 `scripts/max30102-beats.cjs`）
+- **實作**：`k2_hrv_calculator.dart` → `classify`、`clean`、`stats`
 
 ### 7.2 meanRr / mean_hr
 
@@ -1013,47 +1022,33 @@ sd2         100.0     30.0    ms
 
 ## 9.7 CONFIDENCE（可信度）
 
-> ⚠️ 兩個值都會送出，判斷依據完全不同。這不是生理指標，是工程指標：「這次的數字該信幾分」。
+> 這不是生理指標，是工程指標：「這次的數字該信幾分」。完整說明（站台怎麼用、關卡、已知限制、沿革）見 [confidence.md](confidence.md)。
 
-### 9.7.a 拍數版　`confidence_by_beats`
+### 9.7.a 現行（0.0.0.8）　`confidence` ＝ `confidence_video` ＝ `confidence_by_beats`
 
-- **一句話**：看拍數 + SQI + 沉澱期
+- **一句話**：看**乾淨 RR 佔幾成**，三個欄位送同一個值
 - **公式**：
   ```
-  settling = true            → null
-  beats < 9（minBeatsForHrv）→ null
-  beats >= 20 且 sqiOk       → 'good'
-  beats >= 13                → 'rough'
-  其餘                        → 'very rough'
+  乾淨拍數 < 9（含手指離開、沉澱中）  → 'very rough'
+  乾淨比例 < 0.65                     → 'very rough'
+  乾淨比例 < 0.80 或 這一輪 SQI 沒過    → 'rough'
+  其餘                                → 'good'
+  乾淨比例 = 乾淨 RR 數 ÷ (乾淨 RR 數 + Σ max(1, round(空洞長度 ÷ 乾淨 RR 中位數)))
   ```
-- **輸入**：§7.1 beats、§5.1 sqiOk、§1.2 settling
-- **出處**：自訂
-- **陷阱**：門檻**必須在自己的視窗上限內可達**。舊值 `good >= 25` 沒驗證這件事：28 秒視窗可達拍數是 `28 × bpm / 60`，25 拍需要心率 ≥ 54 bpm，低於這個數的人（運動員、深慢呼吸時）**永遠拿不到 good**。現值 20 / 13 對應心率 43 / 28 bpm
-- **實作**：`k2_vitals_metrics.dart` → `confidence`
+- **輸入**：§7.1 的乾淨 RR（帶起訖谷位置，空洞 = 相鄰兩筆起訖谷接不上）、§5.1 sqiOk
+- **不會是 null**
+- **出處**：自訂（80% / 65% 由整合方用 10/30 錄音訂；規格要求「70% 以下不可以是 good」）
+- **實作**：`k2_vitals_metrics.dart` → `cleanShare`、`VitalsMetrics.confidenceByPulse`
 
-### 9.7.b SNR 版　`confidence` ＝ `confidence_video`
+### 9.7.b 已退場的判法
 
-- **一句話**：**只看 SNR，與拍數完全無關**
-- **公式**：`snr_db >= 6.0 → 'good'`、`>= 1.0 → 'rough'`、其餘 `'very rough'`（null → null）
-- **輸入**：§9.6 `snr_db`
-- **出處**：逐字照抄 aquivio-vitals 的 `hrv_confidence()`。他們選 6 dB 的理由寫在 `core.py` 註解裡：低於約 6 dB 時 RMSSD 的雜訊底線會超過典型靜息 HRV（實測 1.5 dB 時真值 19 ms 會膨脹到約 60 ms）
-- **陷阱**：**短視窗會誤報。** 它不看拍數，所以 10 秒的量測只要波形乾淨就照樣回 `good`
-- **為什麼 `confidence` 送的是這一版**：`confidence` 是對方 `VitalsResult` 宣告的欄位，名字不能動，而整條軟體鏈（station → Strapi → LLM prompt）的門檻都是照 rPPG 那台機器的尺度校準的。`confidence_video` 是同一個值的別名，名字講明了出處（「video」指最早期用來測試的攝影機機台）。詳見 [SERVER_GUIDE.zh-TW.md 的 `confidence_video` 一節](../docs/SERVER_GUIDE.zh-TW.md)
-- **實作**：`k2_vitals_metrics.dart` → `confidenceFromSnr`
-
-### 9.7.c 並排
-
-| | `confidence_by_beats` | `confidence` / `confidence_video` |
+| 判法 | 版本 | 為什麼退場 |
 |---|---|---|
-| 依據 | 拍數 + SQI + 沉澱期 | 只有 SNR |
-| 門檻 | `>= 20 good`、`>= 13 rough` | `>= 6 dB good`、`>= 1 dB rough` |
-| 10 秒量測 | `very rough`（正確） | **`good`（誤導）** |
-| 出處 | 自訂 | aquivio `hrv_confidence()` |
-| 送給誰 | 我們自己 | 整合方 |
+| SNR 三級（照 aquivio-vitals `hrv_confidence()`，`≥ 6 dB good`、`≥ 1 dB rough`） | 0.0.0.3~0.0.0.6 | 不看拍數，10 秒量測只要波形乾淨就回 `good`；SNR 版仍在 App 上當對照顯示（不送出） |
+| 拍數版 `confidence_by_beats`（`≥ 20 good`、`≥ 13 rough`） | ~0.0.0.6 | 0.0.0.7 起三欄改送同一個值 |
+| 異常 ≤ 1 次 且 拍數 ≥ 9 + 空洞數（good / very rough） | 0.0.0.7 | 一長一短不留空洞、照樣 good；空洞只數個數、不看長度 |
 
-### 9.7.d 該看哪一個
-
-判斷「這筆能不能用」看 `confidence_by_beats`。`confidence` 存在的目的是讓整合方不必為了換感測器而改判斷邏輯 —— **但「大致相當」不是「等價」**，他們的門檻是對 rPPG 校準的，我們是接觸式 PPG，沒有人驗證過同一個人在兩台機器上會落在同一級。
+舊版說明：[old/confidence_v0.0.0.7.md](old/confidence_v0.0.0.7.md)、[old/vitals_metrics_derivation_v0.0.0.6.md](old/vitals_metrics_derivation_v0.0.0.6.md) §9.7。
 
 ---
 
@@ -1074,7 +1069,7 @@ sd2         100.0     30.0    ms
 | `lf_hf` | §8.5 | 無單位 | 拍數 < 8 | 物理 |
 | `sqi` | §5.1 | 1 / 0 | 不會 null | bool |
 | `snr_db` | §9.6 | dB | 波形 < 5 秒 | 物理 |
-| `confidence` | §9.7.b | 字串 | `snr_db` 為 null | 等級 |
+| `confidence` | §9.7.a | 字串 | 不會 null | 等級 |
 | `pns` | §9.1.b | 0~100 | RMSSD ≤ 0 | 整合方 |
 | `ans` | §9.2.b | 0~100 | `lf_hf` ≤ 0 | 整合方 |
 | `stress` | §9.3.b | 0~100 | `pns` 或 `ans` 為 null | 整合方 |
@@ -1089,7 +1084,7 @@ sd2         100.0     30.0    ms
 | `lf_ms2` | §8.4 | ms² | 拍數 < 8 | 物理 |
 | `hf_ms2` | §8.4 | ms² | 拍數 < 8 | 物理 |
 | `vlf_ms2` | §8.4 | ms² | 拍數 < 8 | 物理 |
-| `confidence_video` | §9.7.b | 字串 | 同 `confidence`（同值別名） | 等級 |
+| `confidence_video` | §9.7.a | 字串 | 不會 null（與 `confidence` 同值） | 等級 |
 | `lf_reliable` | §8.6 | bool | 無（頻譜為 null → `false`） | bool |
 | `hf_reliable` | §8.6 | bool | 無（頻譜為 null → `false`） | bool |
 | `lf_cycles` | §8.6 | 圈 | 拍數 < 8 | 物理 |
@@ -1104,7 +1099,7 @@ sd2         100.0     30.0    ms
 | `sns_z` | §9.4 | z | 拍數 < 9 | z |
 | `ans_time_domain` | §9.2.a | z 差 | 拍數 < 9 | z |
 | `stress_baevsky` | §9.3.a | 約 7~12 | RR 數 < 5 | Baevsky |
-| `confidence_by_beats` | §9.7.a | 字串 | 沉澱期或拍數 < 9 | 等級 |
+| `confidence_by_beats` | §9.7.a | 字串 | 不會 null（與 `confidence` 同值） | 等級 |
 
 ### 10.4 命名後綴的意義
 
@@ -1199,15 +1194,16 @@ dart run tools/lf_window_compare.dart <快照.json> --slide
 | SparkFun | SparkFun / Maxim 應用註記的二次擬合 | §4.3 | 廠商註記 |
 | CAVEDU | [CAVEDU GitBook](https://cavedu.gitbook.io/cavedu/sheng-wu-yi-xue-cai-liao-bao/max30102-xinl-mai-bo-xue-yang-gan-ce-qi) | §4.4 EMA；已退場的整窗 RMS 與線性式 | 教學 |
 | scipy | `scipy.signal.find_peaks(prominence=)` 概念 | §3.1 | 第三方庫（概念） |
-| robust | robust statistics 的 MAD 慣例（σ ≈ 1.4826 × MAD） | §7.1 | 統計慣例 |
+| Butterworth / RBJ | Butterworth 1930；Bristow-Johnson《Audio EQ Cookbook》biquad 係數；MATLAB / SciPy `filtfilt` 零相位 | §2.3 | 文獻 / 工程慣例 |
+| robust | robust statistics 的 MAD 慣例（σ ≈ 1.4826 × MAD） | 0.0.0.7 的 clean()（已退場） | 統計慣例 |
 | TF1996 | Task Force 1996 HRV 標準 | §7.3、§7.4、§7.5、§8.4、§8.6 | 文獻 |
 | Poincaré | Poincaré 圖標準關係式 | §7.6 | 文獻 |
 | EliteHRV | Elite HRV 風格的分數刻度 | §7.7 | 消費性慣例 |
 | Lomb/Scargle | Lomb 1976 / Scargle 1982 | §8.2 | 文獻 |
 | Kubios | Kubios 的 PNS/SNS index 形式與 √SI 慣例 | §9.1.a、§9.3.a、§9.4 | 商業軟體慣例 |
 | Baevsky | Baevsky 壓力指數 | §9.3.a | 文獻 |
-| aquivio | aquivio-vitals `core.py::derived_scores()`、`hrv_confidence()`、`hrv.py freq_domain()`、他們的 `docs/VITALS.md` | §8.4 換算、§9.1.b、§9.2.b、§9.3.b、§9.5、§9.6、§9.7.b | 整合方原始碼 |
-| 自訂 | 截尾滑動平均、SQI、方向判定、±40% 閘門、search-back、可用性門檻 | 散見 | 自訂強化 |
+| aquivio | aquivio-vitals `core.py::derived_scores()`、`hrv_confidence()`、`hrv.py freq_domain()`、他們的 `docs/VITALS.md` | §8.4 換算、§9.1.b、§9.2.b、§9.3.b、§9.5、§9.6、§9.7.b（SNR 版，已退場） | 整合方原始碼 |
+| 自訂 | 截尾滑動平均、SQI、方向判定、逐筆分類與乾淨比例（0.0.0.8，整合方原型 `max30102-beats.cjs`）、search-back、可用性門檻 | 散見 | 自訂強化 |
 
 ## 附錄 D：文件分工
 
@@ -1217,7 +1213,9 @@ dart run tools/lf_window_compare.dart <快照.json> --slide
 | [VITALS_FIELDS.zh-TW.md](../docs/VITALS_FIELDS.zh-TW.md) | **每個欄位對整合方意味什麼**（含交涉紀錄與實測附錄） |
 | **本文** | **每個數字怎麼算出來的** |
 | [vitals_metrics_history.md](vitals_metrics_history.md) | **曾經是什麼、為什麼換掉** |
-| [k2_architecture.html](k2_architecture.html) | 交接核心的整體架構 |
+| [trough_line.md](trough_line.md) | **找谷的線（0.0.0.8 帶通）的完整推導** |
+| [confidence.md](confidence.md) | **可信度的現行規則** |
+| [old/k2_architecture_交接初版_2026-08-26.html](old/k2_architecture_交接初版_2026-08-26.html) | 交接核心的整體架構（**交接初版，已過時**） |
 | [serial_protocol.md](serial_protocol.md) | 封包與命令 |
 
 ## 附錄 E：待決事項

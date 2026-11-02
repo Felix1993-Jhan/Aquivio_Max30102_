@@ -468,18 +468,36 @@ List<K2FormulaRow> k2FormulaRows(VitalsMetrics m, {required int beats}) {
   //     notes: const [(key: 'k2_fx_note_conf', params: <String, dynamic>{})],
   //   ),
   // );
+  // 舊的判斷(已停用,v0.0.0.7,保留供回溯)—— 數異常次數:
+  // rows.add(
+  //   K2FormulaRow(
+  //     api: 'confidence',
+  //     inputs: const ['sqi', 'RR'],
+  //     formula:
+  //         'anomalies = gaps + (sqi = 0) ≤ ${VitalsMetrics.maxAnomalies} '
+  //         '∧ beats ≥ $minBeats + gaps → good · else → very rough',
+  //     sub:
+  //         'gaps = ${m.rrGaps} · sqi = ${m.sqi} → anomalies = ${m.anomalies} · '
+  //         'beats = ${m.beats} (≥ ${m.minBeatsNeeded})',
+  //     value: conf,
+  //     result: conf,
+  //     notes: const [(key: 'k2_fx_note_conf', params: <String, dynamic>{})],
+  //   ),
+  // );
   final conf = m.confidenceByPulse;
   const minBeats = Max30102HrvCalculator.minBeatsForHrv;
+  final good = (VitalsMetrics.confidenceGoodCleanShare * 100).round();
+  final rough = (VitalsMetrics.confidenceRoughCleanShare * 100).round();
   rows.add(
     K2FormulaRow(
       api: 'confidence',
       inputs: const ['sqi', 'RR'],
       formula:
-          'anomalies = gaps + (sqi = 0) ≤ ${VitalsMetrics.maxAnomalies} '
-          '∧ beats ≥ $minBeats + gaps → good · else → very rough',
+          'beats < $minBeats ∨ clean < $rough% → very rough · '
+          'clean < $good% ∨ sqi = 0 → rough · else → good',
       sub:
-          'gaps = ${m.rrGaps} · sqi = ${m.sqi} → anomalies = ${m.anomalies} · '
-          'beats = ${m.beats} (≥ ${m.minBeatsNeeded})',
+          'beats = ${m.beats} · clean = ${(m.cleanShare * 100).toStringAsFixed(0)}% · '
+          'sqi = ${m.sqi}',
       value: conf,
       result: conf,
       notes: const [(key: 'k2_fx_note_conf', params: <String, dynamic>{})],

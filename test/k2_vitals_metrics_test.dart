@@ -311,7 +311,7 @@ void main() {
       expect(Max30102VitalsMetrics.confidenceFromSnr(null), isNull);
     });
 
-    group('v0.0.0.7:confidence = 異常 ≤ 1 次 且 拍數 ≥ 9 + 空洞數', () {
+    group('v0.0.0.8:confidence = 乾淨 RR 比例(≥ 80% good / ≥ 65% rough)+ 拍數 ≥ 9 + SQI', () {
       /// 首尾相接的 [n] 筆 RR(每筆 800ms = 80 樣本)。
       List<HrvRrPoint> run(int n, {int from = 0}) => [
             for (int i = 0; i < n; i++)
@@ -325,7 +325,7 @@ void main() {
             settling: false,
           ).toStrapiJson()['confidence'] as String;
 
-      test('連續 9 拍以上、SQI 過關 → good', () {
+      test('連續 9 拍以上、全部乾淨、SQI 過關 → good', () {
         // 8 筆 RR = 9 個谷 = 9 拍,剛好在門檻上
         expect(conf(run(8)), 'good');
         expect(conf(run(14)), 'good');
@@ -337,51 +337,48 @@ void main() {
             reason: '沒資料也是 very rough,不是 null');
       });
 
-      test('SQI 沒過算 1 次異常:單獨發生 → 仍 good;再加一個空洞 → very rough', () {
-        expect(conf(run(14), sqiOk: false), 'good', reason: '異常 1 次,在容許內');
-        final a = run(7);
-        final b = run(7, from: a.last.endAbs + 164);
-        expect(conf([...a, ...b], sqiOk: false), 'very rough', reason: '異常 2 次');
+      test('SQI 沒過 → 最多 rough(比例看整個視窗,SQI 看「現在」)', () {
+        expect(conf(run(14), sqiOk: false), 'rough');
       });
 
-      test('沒手指:拍數 0 → very rough(拍數是先決條件,不算在異常裡)', () {
+      test('沒手指:拍數 0 → very rough', () {
         expect(conf(const [], sqiOk: false), 'very rough');
       });
 
-      test('1 個空洞 → 容許(掉的拍已剔除、不進 HRV);2 個 → very rough', () {
-        // 前 7 筆接著,中間掉一拍(空 1640ms),後 7 筆接著 —— 照 10/8 14:26 那份的形狀
+      test('乾淨比例:空洞依長度換算成間距數(乾淨 RR 的中位數為單位)', () {
+        // 中間掉一拍(空 1640ms ≈ 2 個 800ms 間距)
         final a = run(7);
         final b = run(7, from: a.last.endAbs + 164);
-        expect(Max30102VitalsMetrics.rrGaps([...a, ...b]), 1);
+        expect(Max30102VitalsMetrics.cleanShare([...a, ...b]),
+            closeTo(14 / 16, 1e-9));
+        // 空洞再短也至少算 1 個間距
+        final c = run(7, from: a.last.endAbs + 10);
+        expect(Max30102VitalsMetrics.cleanShare([...a, ...c]),
+            closeTo(14 / 15, 1e-9));
+        expect(Max30102VitalsMetrics.cleanShare(run(20)), 1.0);
+        expect(Max30102VitalsMetrics.cleanShare(const []), 0.0);
+      });
+
+      test('三級門檻:≥ 80% good、65~80% rough、< 65% very rough', () {
+        // 14 乾淨 + 1 個 2 間距的空洞 = 87.5% → good
+        final a = run(7);
+        final b = run(7, from: a.last.endAbs + 160);
         expect(conf([...a, ...b]), 'good');
-
-        final c = run(7, from: b.last.endAbs + 164);
-        expect(Max30102VitalsMetrics.rrGaps([...a, ...b, ...c]), 2);
-        expect(conf([...a, ...b, ...c]), 'very rough');
+        // 14 乾淨 + 4 間距 = 77.8% → rough
+        final c = run(7, from: a.last.endAbs + 320);
+        expect(conf([...a, ...c]), 'rough');
+        // 14 乾淨 + 8 間距 = 63.6% → very rough
+        final d = run(7, from: a.last.endAbs + 640);
+        expect(conf([...a, ...d]), 'very rough');
+        expect(VitalsMetrics.confidenceGoodCleanShare, 0.80);
+        expect(VitalsMetrics.confidenceRoughCleanShare, 0.65);
       });
 
-      test('有空洞時要多一拍:1 個空洞需要 ≥ 10 拍', () {
-        // 4 + 4 筆 RR = 9 拍(RR + 1),但有 1 個空洞 → 要 10 拍
-        final a = run(4);
-        final b = run(4, from: a.last.endAbs + 80);
-        expect(conf([...a, ...b]), 'very rough');
-        // 再多一拍 → 10 拍,過
-        final c = run(5, from: a.last.endAbs + 80);
-        expect(conf([...a, ...c]), 'good');
-      });
-
-      test('異常次數與最少拍數的定義', () {
+      test('RR 重疊是上游的錯 → 丟例外,不默默算出比例', () {
         final a = run(7);
-        final b = run(7, from: a.last.endAbs + 164);
-        final m = Max30102VitalsMetrics.compute(
-          pts: [...a, ...b],
-          hv: null,
-          sqiOk: false,
-          settling: false,
-        );
-        expect(m.anomalies, 2, reason: '1 個空洞 + SQI 沒過');
-        expect(m.minBeatsNeeded, 10, reason: '9 + 1 個空洞');
-        expect(VitalsMetrics.maxAnomalies, 1);
+        final b = run(7, from: a.last.endAbs - 10);
+        expect(() => Max30102VitalsMetrics.cleanShare([...a, ...b]),
+            throwsStateError);
       });
 
       test('空洞的判定是「下一拍起谷 ≠ 上一拍終谷」,首尾相接不算', () {
@@ -393,10 +390,10 @@ void main() {
         expect(Max30102VitalsMetrics.rrGaps([...a, ...b, ...c]), 2);
       });
 
-      test('三個可信度欄位送同一個值,只會是 good / very rough', () {
+      test('三個可信度欄位送同一個值', () {
         for (final (pts, sqiOk) in [
           (run(14), true), // good
-          (run(14), false), // 異常 1 次 → good
+          (run(14), false), // SQI 沒過 → rough
           (run(7), true), // 拍數不夠 → very rough
           (const <HrvRrPoint>[], false), // 沒手指 → very rough
         ]) {
@@ -406,7 +403,7 @@ void main() {
             sqiOk: sqiOk,
             settling: false,
           ).toStrapiJson();
-          expect(j['confidence'], isIn(['good', 'very rough']));
+          expect(j['confidence'], isIn(['good', 'rough', 'very rough']));
           expect(j['confidence_video'], j['confidence']);
           expect(j['confidence_by_beats'], j['confidence']);
         }

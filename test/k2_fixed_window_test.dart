@@ -239,12 +239,15 @@ void main() {
       ];
       expect(gaps.length, v.metrics.rrGaps, reason: '畫出幾塊 = confidence 數到幾個');
       expect(gaps, isNotEmpty, reason: '3 秒沒脈搏一定會掉拍');
-      // 可信度照規則走:異常(空洞 + SQI)≤ 1 且拍數夠才 good
+      // 可信度照規則走(v0.0.0.8):拍數夠 + 乾淨比例 ≥ 80% + SQI 過才 good,
+      // 比例 < 65% 或拍數不夠 → very rough,其餘 rough
       final m = v.metrics;
-      expect(m.anomalies, m.rrGaps + (m.sqiOk ? 0 : 1));
+      expect(m.cleanShare, lessThan(1.0), reason: '有空洞 → 不可能 100% 乾淨');
       expect(
         m.confidenceByPulse,
-        m.anomalies <= 1 && m.beats >= m.minBeatsNeeded ? 'good' : 'very rough',
+        m.beats < 9 || m.cleanShare < 0.65
+            ? 'very rough'
+            : (m.cleanShare < 0.80 || !m.sqiOk ? 'rough' : 'good'),
       );
       // 空洞兩端都正好落在谷標點上(前一拍終谷、後一拍起谷)
       for (final g in gaps) {
@@ -254,33 +257,41 @@ void main() {
       }
     });
 
-    test('⑨ 圖上的 IR = 核心 newIrWave,且窗後接 110 筆前後文 → 最後一秒也完整', () {
-      const tail = 110;
+    test('⑨ 圖上的 IR = 核心 newIrWave,且窗後接 154 筆前後文 → 最後一段也是定下來的線', () {
+      // 截尾半窗 4 + 線定下來要等的 150(v0.0.0.8;v0.0.0.7 是 110)
+      const tail =
+          Max30102Config.trimWindow ~/ 2 + Max30102Config.troughGuardSamples;
       final rig = _Rig()..finger(20);
       final v = rig.fw.view(10, tail: tail)!;
       expect(v.sealed, isTrue);
-      expect(v.tailLen, tail, reason: '窗收滿而且後面資料夠 → 接滿 110 筆');
+      expect(v.tailLen, tail, reason: '窗收滿而且後面資料夠 → 接滿 154 筆');
       final preLen = v.chartIr.length - v.ir.length - v.tailLen;
 
       // 後文只是顯示:計算用的切片、拍、數值都不含它
       expect(v.ir.length, 10 * kFs);
       expect(v.pts.every((p) => p.endAbs <= v.base + 10 * kFs), isTrue);
 
-      // 窗內每一筆都有核心給的值,而且等於「事後對整段原始值算」的結果
+      // 窗內每一筆都有核心給的值,而且與「事後對整段原始值算」幾乎相同。
+      // 帶通是 IIR,只能「誤差夠小」(壓 150 筆約 1.4%,這裡容許振幅的 2%);
+      // 事後算也從空轉期之後開始 —— 核心的緩衝就是從那裡收的。
+      final dead = rig.core.config.fingerDeadSamples;
       final all = <double>[];
       for (int i = 0; i < rig.idx; i += kBatch) {
         all.addAll([for (final x in fingerBatch(i).ir) x.toDouble()]);
       }
       final truth = Max30102Signal.troughLine(
-        all,
+        all.sublist(dead),
         trimWindow: Max30102Config.trimWindow,
-        baselineWindow: Max30102Signal.baselineWindow(kFs, 0.5),
-        lowpassWindow: Max30102Signal.lowpassWindow(kFs, 4.0),
+        fs: kFs,
+        lowHz: Max30102Config.beatBandLowHz,
+        highHz: Max30102Config.beatBandHighHz,
       );
+      final amp = truth.fold<double>(0, (m, x) => x.abs() > m ? x.abs() : m);
       for (int k = 0; k < 10 * kFs; k++) {
         final got = v.chartWave[preLen + k];
         expect(got, isNotNull, reason: '窗內第 $k 筆還沒有核心的值');
-        expect(got!, closeTo(truth[v.base + k], 1e-6), reason: '第 $k 筆');
+        expect(got!, closeTo(truth[v.base + k - dead], 0.02 * amp),
+            reason: '第 $k 筆');
       }
 
       // 後文區塊:接在窗後、蓋到圖的最右邊

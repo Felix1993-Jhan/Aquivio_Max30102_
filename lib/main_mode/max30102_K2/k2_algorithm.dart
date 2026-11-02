@@ -10,7 +10,7 @@
 //
 // 流程：
 //   1. 手指偵測：IR 平均 < 門檻 → 直接判無手指、回 invalid
-//   2. _computeMaxim:去趨勢 → prominence 找谷 → 逐拍 R 中位 → SpO2 + SQI
+//   2. _computeMaxim:帶通(去趨勢 + 平滑)→ prominence 找谷 → 逐拍 R 中位 → SpO2 + SQI
 //
 // 純函式、無狀態，方便單元測試。O(N)、N≈500，主執行緒每秒跑一次無感。
 //
@@ -84,12 +84,18 @@ class Max30102Algorithm {
   ///
   /// [red] / [ir]：演算法視窗的原始值（oldest → newest，長度通常 = 視窗筆數）
   /// [fs]：取樣率（Hz），預設 100
+  /// [beatBandLowHz] / [beatBandHighHz]：找谷用的帶通(見 Max30102Config.beatBandLowHz)
+  /// [irLine]:**已經算好的找谷線**(與 [ir] 逐筆對齊,= Max30102Signal.troughLine)。
+  ///   核心對整段緩衝算一次再切片傳進來 —— 畫圖的 newIrWave 用的是同一次計算,
+  ///   線才保證是同一條;也省得每個視窗各算一次、兩端各有一段暫態。
+  ///   null → 照舊在這個視窗上自己算(離線分析、單元測試用)。
   static HrSpo2Result compute({
     required List<int> red,
     required List<int> ir,
+    List<double>? irLine,
     int fs = 100,
-    double bandLowHz = 0.5,
-    double bandHighHz = 4.0,
+    double beatBandLowHz = 0.7,
+    double beatBandHighHz = 3.5,
     int fingerThreshold = 50000,
     double hrMin = 30,
     double hrMax = 240,
@@ -134,9 +140,10 @@ class Max30102Algorithm {
     final mx = _computeMaxim(
       irTrim,
       redTrim,
+      irLine != null && irLine.length >= n ? irLine : null,
       fs,
-      bandLowHz,
-      bandHighHz,
+      beatBandLowHz,
+      beatBandHighHz,
       hrMin,
       hrMax,
       spo2Min,
@@ -175,9 +182,10 @@ class Max30102Algorithm {
   _computeMaxim(
     List<double> irRaw,
     List<double> redRaw,
+    List<double>? givenLine,
     int fs,
-    double bandLow,
-    double bandHigh,
+    double beatBandLow,
+    double beatBandHigh,
     double hrMin,
     double hrMax,
     double spo2Min,
@@ -186,16 +194,18 @@ class Max30102Algorithm {
     double promRatio,
     bool spo2Linear,
   ) {
-    // 1) 去趨勢 IR（減長視窗移動平均 = 高通，擋呼吸漂移），輕度平滑
-    final hpWin = (fs / bandLow).round().clamp(1, n);
-    final lpWin = (fs / (2 * bandHigh)).round().clamp(1, n);
-    // 與畫圖用的線(Max30102Signal.troughLine)是同一支 ——
-    // irRaw 在這裡已經截尾過(見 compute()),所以從「減 baseline」接著做。
-    final smoothed = Max30102Signal.detrendSmooth(
-      irRaw,
-      baselineWindow: hpWin,
-      lowpassWindow: lpWin,
-    );
+    // 1) 去趨勢 + 平滑 IR:零相位 Butterworth 帶通(高通擋呼吸 / 按壓漂移,低通去雜訊)。
+    //    = Max30102Signal.troughLine(畫圖的線也是它)。核心有傳就用核心對整段算好的那條;
+    //    沒傳才在這個視窗上自己算(irRaw 在這裡已經截尾過,見 compute())。
+    //    v0.0.0.7 以前是「減 2 秒移動平均 → 13 點平滑」,
+    //    漂移大時殘留的斜坡會把谷推偏 140~250ms(見 Max30102Config.beatBandLowHz)。
+    final smoothed = givenLine ??
+        Max30102Signal.bandpass(
+          irRaw,
+          fs,
+          lowHz: beatBandLow,
+          highHz: beatBandHigh,
+        );
 
     // 2) 找谷：對 -smoothed 找峰（谷=供血）。門檻用「百分位數」抗突波
     final neg = List<double>.generate(n, (i) => -smoothed[i]);

@@ -11,23 +11,54 @@
 // 純顯示用,不影響現有 HR/SpO2 計算路徑。
 // ============================================================================
 
+import 'package:flutter/foundation.dart'; // listEquals(點選的谷有沒有變)
+import 'package:flutter/gestures.dart'; // 滾輪縮放(PointerScrollEvent / 搶在頁面捲動之前)
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Ctrl + 滾輪 = 振幅縮放
 
 import '../../../shared/services/localization_service.dart';
+import '../k2_config.dart';
 import '../k2_signal.dart';
+// 0.0.0.7 對照:畫它找谷用的移動平均線(見 max30102_K2_v007/README)
+import '../../max30102_K2_v007/k2_signal.dart' as v7;
 
 // ⚠️ K2 版:原本綁 Max30102Controller(ring buffer + troughFates)。
 //    K2 核心「只算不存、也不吐谷位置」(顯示是 UI 的事),故改成:
 //      · 波形 → 吃 UI 層(adapter)儲存的普通 List
 //      · 谷標點 → 由呼叫端傳入(UI 用同一套 signal 自行偵測)
 //    命運三色(紅/橘/紫)在 K2 沒有對應資料 → 傳空,不繪製。
-class K2WaveChart extends StatelessWidget {
+class K2WaveChart extends StatefulWidget {
   /// 波形歷史(oldest→newest),由 UI 層儲存。
   final List<int> ir;
   final List<int> red;
 
   /// 谷位置:對應 [ir]/[red] 的索引(UI 自行偵測後傳入)。
   final List<int> troughs;
+
+  /// 對照用的第二組谷(0.0.0.7 對照核心),索引規則同 [troughs]。
+  /// 畫成金色:波形上一個空心圈 + 底部時間線上方的金色直條。
+  final List<int> troughsAlt;
+
+  /// 真正的 RR(起谷 → 終谷,索引規則同 [troughs]),底部時間線的數字標在這些上面。
+  /// null → 退回「相鄰兩顆谷的距離」(快照檢視器只有谷、沒有 RR 時用)——
+  /// 那樣跨過空洞也會標一個數字,但它不是 RR,所以有 RR 時一律傳這個。
+  final List<({int from, int to})>? rrSpans;
+
+  /// 0.0.0.7 對照的 RR,規則同 [rrSpans],金字標在時間線上方。
+  final List<({int from, int to})>? rrSpansAlt;
+
+  /// 疊一條**原始 IR**(白線,只轉正、不濾波)。獨立刻度:DC 約 8 萬、
+  /// 漂移常比脈搏大,沒辦法與去趨勢後的線共用 ±振幅。
+  final bool showRawIr;
+
+  /// 疊一條 **0.0.0.7 找谷用的線**(金線,截尾 → 減 2 秒移動平均 → 13 點平均),
+  /// 與 IR 線(現行 0.0.0.8 的帶通線)共用刻度,形狀可以直接比。
+  final bool showAltLine;
+
+  /// [ir] 第 0 筆的**絕對樣本位置**。只用來記住「點選了哪顆谷」——
+  /// 滾動模式下陣列一直往前裁,索引會變,絕對位置不會,直線才跟得住那顆谷。
+  /// 快照檢視器之類資料不動的地方不用給。
+  final int absOffset;
 
   /// 已經處理好的 IR 線(找谷用的那條),與 [ir] 逐筆對齊;null 的位置圖自己算。
   ///
@@ -72,6 +103,12 @@ class K2WaveChart extends StatelessWidget {
     required this.ir,
     required this.red,
     this.troughs = const [],
+    this.troughsAlt = const [],
+    this.rrSpans,
+    this.rrSpansAlt,
+    this.showRawIr = false,
+    this.showAltLine = false,
+    this.absOffset = 0,
     this.irWave,
     required this.version,
     this.markSeconds = const [],
@@ -89,38 +126,176 @@ class K2WaveChart extends StatelessWidget {
   });
 
   @override
+  State<K2WaveChart> createState() => _K2WaveChartState();
+}
+
+/// 圖內的放大縮小 —— **只是看**,資料與計算都不動。
+///
+///   滾輪          時間軸 1~10 倍,以游標為中心(游標底下那一點縮放前後不動)
+///   Ctrl + 滾輪   振幅 0.5~8 倍(超出框外的線切掉)
+///   左右拖曳      放大後左右移動
+///   雙擊          全部還原
+///   點時間線直條  從那顆谷畫一條貫穿整張圖的直線,標出它落在每條線的哪個點;
+///                 線上方點 = 對照 0.0.0.7(金)、線下方點 = 現行(IR 色);再點一次取消,
+///                 點時間線上的空白處全部取消。可以同時選好幾顆。
+///
+/// 縮放狀態存在這裡,所以頁面每秒 / 每 0.1 秒重建圖時不會被重設;
+/// 頁面換了 key(切定長 / 滾動等)才會回到 1 倍。
+/// 滾動模式下資料一直往左滑,放大的是「畫面上的某個位置」,波形會從那裡滑過去 ——
+/// 要定住看就切定長模式、按停止量測,或在快照檢視器裡看。
+class _K2WaveChartState extends State<K2WaveChart> {
+  double _zoomX = 1;
+  double _zoomY = 1;
+
+  /// 畫面左緣 = 整段寬度的第幾成(0 ~ 1 − 1/_zoomX)。
+  double _viewStart = 0;
+
+  static const double _maxZoomX = 10;
+  static const double _minZoomY = 0.5;
+  static const double _maxZoomY = 8;
+  static const double _step = 1.25; // 滾輪一格
+
+  /// 點選的谷:絕對樣本位置 + 是不是對照(0.0.0.7)那一組(見 [K2WaveChart.absOffset])。
+  final Set<({int abs, bool alt})> _picked = {};
+
+  void _clampView() => _viewStart = _viewStart.clamp(0.0, 1 - 1 / _zoomX);
+
+  @override
+  void didUpdateWidget(covariant K2WaveChart old) {
+    super.didUpdateWidget(old);
+    // 絕對位置倒退 = 核心歸零(下一次量測)→ 記住的谷全部失效
+    if (widget.absOffset < old.absOffset) _picked.clear();
+  }
+
+  /// 點在時間線附近 → 找最近的直條(左右 6px 內)切換它;附近沒有直條 → 全部取消。
+  /// 線的上方找對照 0.0.0.7(金,往上凸),下方找現行(往下凸)—— 兩版同位置時才分得開。
+  /// 位置換算與 painter 完全相同(xOfVisible / 時間線高度)。
+  void _onTap(Offset p, Size size) {
+    final c = widget;
+    final w = size.width;
+    final tlY = size.height - _Waveform2Painter.timelineFromBottom;
+    if ((p.dy - tlY).abs() > 14) return; // 不是點在時間線上
+    final count = c.ir.length < c.red.length ? c.ir.length : c.red.length;
+    final visible = count < c.displaySamples ? count : c.displaySamples;
+    if (visible < 2) return;
+    final firstWindowIdx = c.displaySamples - visible;
+    final firstIdx = c.ir.length - visible;
+    double xOf(int idx) =>
+        (w * (firstWindowIdx + idx - firstIdx) / (c.displaySamples - 1) -
+            _viewStart * w) *
+        _zoomX;
+    final alt = p.dy < tlY;
+    int? best;
+    double bestD = 6;
+    for (final t in alt ? c.troughsAlt : c.troughs) {
+      final d = (xOf(t) - p.dx).abs();
+      if (d <= bestD) {
+        bestD = d;
+        best = t;
+      }
+    }
+    setState(() {
+      if (best == null) {
+        _picked.clear();
+      } else {
+        final key = (abs: best + c.absOffset, alt: alt);
+        if (!_picked.remove(key)) _picked.add(key);
+      }
+    });
+  }
+
+  void _onScroll(PointerScrollEvent e, double width) {
+    if (width <= 0) return;
+    final f = e.scrollDelta.dy < 0 ? _step : 1 / _step;
+    setState(() {
+      if (HardwareKeyboard.instance.isControlPressed) {
+        _zoomY = (_zoomY * f).clamp(_minZoomY, _maxZoomY);
+      } else {
+        final px = e.localPosition.dx;
+        final at = _viewStart + px / (width * _zoomX); // 游標在整段裡的位置(0~1)
+        _zoomX = (_zoomX * f).clamp(1.0, _maxZoomX);
+        _viewStart = at - px / (width * _zoomX);
+        _clampView();
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: CustomPaint(
-        painter: _Waveform2Painter(
-          ir: ir,
-          red: red,
-          irWave: irWave,
-          // 索引直接當「絕對位置」用:totalSamples = 長度 → painter 內的換算成立
-          totalSamples: ir.length,
-          displaySamples: displaySamples,
-          windowSeconds: windowSeconds,
-          baselineWindow: baselineWindow,
-          lowpassWindow: lowpassWindow,
-          trimWindow: trimWindow,
-          promRatio: promRatio,
-          bands: bands,
-          events: events,
-          showIr: showIr,
-          showRed: showRed,
-          hrvTroughAbs: troughs, // 🟡 谷標點
-          searchBackAbs: const [], // K2 無補漏拍白點
-          cleanRejectAbs: const [], // K2 核心不吐命運 → 不繪
-          beatRejectAbs: const [],
-          ectopicAbs: const [],
-          fixedAmp: fixedAmp,
-          version: version, // 外部傳入的單調遞增計數(不可用 ir.length)
-          markSeconds: markSeconds,
-          // painter 沒有 BuildContext,語言當參數傳進去;它同時是 shouldRepaint
-          // 的判斷依據 —— 切語言時 version 不會動,不帶它進去文字就不會更新。
-          lang: LocalizationService().currentLanguage,
+    final c = widget;
+    return LayoutBuilder(
+      builder: (context, box) => Listener(
+        // 先向 resolver 登記 → 這一次滾輪只給圖,外層頁面不會跟著捲動
+        onPointerSignal: (e) {
+          if (e is PointerScrollEvent) {
+            GestureBinding.instance.pointerSignalResolver.register(
+              e,
+              (ev) => _onScroll(ev as PointerScrollEvent, box.maxWidth),
+            );
+          }
+        },
+        child: GestureDetector(
+          // 有雙擊時,單擊要等雙擊判定逾時(約 0.3 秒)才會觸發 —— 正常現象
+          onTapUp: (d) =>
+              _onTap(d.localPosition, Size(box.maxWidth, box.maxHeight)),
+          onDoubleTap: () => setState(() {
+            _zoomX = 1;
+            _zoomY = 1;
+            _viewStart = 0;
+          }),
+          onHorizontalDragUpdate: _zoomX <= 1
+              ? null
+              : (d) => setState(() {
+                    _viewStart -= d.delta.dx / (box.maxWidth * _zoomX);
+                    _clampView();
+                  }),
+          child: RepaintBoundary(
+            child: CustomPaint(
+              painter: _Waveform2Painter(
+                ir: c.ir,
+                red: c.red,
+                irWave: c.irWave,
+                // 索引直接當「絕對位置」用:totalSamples = 長度 → painter 內的換算成立
+                totalSamples: c.ir.length,
+                displaySamples: c.displaySamples,
+                windowSeconds: c.windowSeconds,
+                baselineWindow: c.baselineWindow,
+                lowpassWindow: c.lowpassWindow,
+                trimWindow: c.trimWindow,
+                promRatio: c.promRatio,
+                bands: c.bands,
+                events: c.events,
+                showIr: c.showIr,
+                showRed: c.showRed,
+                hrvTroughAbs: c.troughs, // 🟡 谷標點
+                altTroughAbs: c.troughsAlt, // 金:0.0.0.7 對照的谷
+                rrSpans: c.rrSpans,
+                rrSpansAlt: c.rrSpansAlt,
+                showRawIr: c.showRawIr,
+                showAltLine: c.showAltLine,
+                searchBackAbs: const [], // K2 無補漏拍白點
+                cleanRejectAbs: const [], // K2 核心不吐命運 → 不繪
+                beatRejectAbs: const [],
+                ectopicAbs: const [],
+                fixedAmp: c.fixedAmp,
+                version: c.version, // 外部傳入的單調遞增計數(不可用 ir.length)
+                markSeconds: c.markSeconds,
+                zoomX: _zoomX,
+                zoomY: _zoomY,
+                viewStart: _viewStart,
+                // 記的是絕對位置,換回這一次的陣列索引再交給 painter
+                picked: [
+                  for (final p in _picked)
+                    (index: p.abs - c.absOffset, alt: p.alt),
+                ],
+                // painter 沒有 BuildContext,語言當參數傳進去;它同時是 shouldRepaint
+                // 的判斷依據 —— 切語言時 version 不會動,不帶它進去文字就不會更新。
+                lang: LocalizationService().currentLanguage,
+              ),
+              child: const SizedBox.expand(),
+            ),
+          ),
         ),
-        child: const SizedBox.expand(),
       ),
     );
   }
@@ -141,7 +316,21 @@ class _Waveform2Painter extends CustomPainter {
   final bool showIr;
   final bool showRed;
   final List<int> hrvTroughAbs; // 🟡 進 HRV(clean 保留拍端點)
+  final List<int> altTroughAbs; // 金:0.0.0.7 對照核心的谷
+  final List<({int from, int to})>? rrSpans; // IR 色字:現行核心(0.0.0.8)的 RR
+  final List<({int from, int to})>? rrSpansAlt; // 金字:0.0.0.7 對照的 RR
+  final bool showRawIr; // 白線:原始 IR(獨立刻度)
+  final bool showAltLine; // 金線:0.0.0.7 的移動平均線(與 IR 同刻度)
+  // 圖內縮放(見 _K2WaveChartState):時間倍數 / 振幅倍數 / 畫面左緣在整段的第幾成
+  final double zoomX;
+  final double zoomY;
+  final double viewStart;
+  // 點選的谷(陣列索引 + 是不是 0.0.0.7 對照):畫一條貫穿整張圖的直線
+  final List<({int index, bool alt})> picked;
   final List<int> searchBackAbs;
+
+  /// 底部時間線距圖底的高度。點擊判定(_K2WaveChartState._onTap)與畫圖共用這一個數字。
+  static const double timelineFromBottom = 30;
   final List<int> cleanRejectAbs; // 🔴 clean(顯示MAD) 剔除拍的終谷(未算進HRV)
   final List<int> beatRejectAbs; // 🟠 BeatSeries(生理閘門/誤拍) 剔除的谷
   final List<int> ectopicAbs; // 🟣 H1 疑似異位拍(短拍終谷=早搏谷);純標記不影響HRV
@@ -171,6 +360,15 @@ class _Waveform2Painter extends CustomPainter {
     required this.showIr,
     required this.showRed,
     required this.hrvTroughAbs,
+    this.altTroughAbs = const [],
+    this.rrSpans,
+    this.rrSpansAlt,
+    this.showRawIr = false,
+    this.showAltLine = false,
+    this.zoomX = 1,
+    this.zoomY = 1,
+    this.viewStart = 0,
+    this.picked = const [],
     required this.searchBackAbs,
     required this.cleanRejectAbs,
     required this.beatRejectAbs,
@@ -187,6 +385,7 @@ class _Waveform2Painter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
+    canvas.clipRect(Offset.zero & size); // 放大後超出框的線、字一律切掉
     canvas.drawRect(Offset.zero & size, Paint()..color = _bg);
 
     final channels = <_ChData>[];
@@ -194,8 +393,11 @@ class _Waveform2Painter extends CustomPainter {
     final count = ir.length < red.length ? ir.length : red.length;
     final visible = count < displaySamples ? count : displaySamples;
     final firstWindowIdx = displaySamples - visible;
+    // 時間軸縮放:未縮放時的 x(0~w)→ 畫面上的 x。**所有水平位置都要經過它**
+    // (波形、谷、時間線、區塊、事件線、秒格線、# 軸),圖上的東西才會一起縮放。
+    double zx(double x) => (x - viewStart * w) * zoomX;
     double xOfVisible(int i) =>
-        w * (firstWindowIdx + i) / (displaySamples - 1);
+        zx(w * (firstWindowIdx + i) / (displaySamples - 1));
 
     if (visible >= 2) {
       if (showIr) {
@@ -234,11 +436,22 @@ class _Waveform2Painter extends CustomPainter {
         if (c.amp > amp) amp = c.amp;
       }
     }
-    double yOf(double d) => mid - (d / amp) * halfPlot;
+    // 振幅縮放:半振幅縮小 zoomY 倍 = 線放大 zoomY 倍(超出框的部分由 clipRect 切掉)
+    final ampView = amp / zoomY;
+    double yOf(double d) => mid - (d / ampView) * halfPlot;
     // 固定範圍時在左上標「固定 ±值」,讓使用者知道目前縱軸尺度
     if (fixedAmp != null && fixedAmp! > 0) {
       _text(canvas, trParams('k2_chart_fixed_amp', {'v': fixedAmp!.round()}),
           const Offset(4, 2), Colors.lightBlue.shade200, 9);
+    }
+    // 縮放中:上方正中標倍數與還原方式
+    if (zoomX != 1 || zoomY != 1) {
+      final z = trParams('k2_chart_zoom', {
+        'x': zoomX.toStringAsFixed(1),
+        'y': zoomY.toStringAsFixed(1),
+      });
+      _text(canvas, z, Offset(w / 2 - _textW(z, 9) / 2, 2),
+          Colors.amberAccent.shade100, 9);
     }
 
     // 時間格線（每秒一條）
@@ -246,7 +459,7 @@ class _Waveform2Painter extends CustomPainter {
       ..color = Colors.white.withValues(alpha: 0.07)
       ..strokeWidth = 1;
     for (int s = 0; s <= windowSeconds; s++) {
-      final x = w * s / windowSeconds;
+      final x = zx(w * s / windowSeconds);
       canvas.drawLine(Offset(x, 0), Offset(x, mainBottom), grid);
     }
     // ── 時間區塊底色 ──────────────────────────────────────────────
@@ -285,7 +498,6 @@ class _Waveform2Painter extends CustomPainter {
     // 畫每個通道：去趨勢線 + DC(彎曲虛線) + 峰/谷
     final fsApprox = (displaySamples / windowSeconds);
     final minDist = (60 * fsApprox / 240).round().clamp(1, visible);
-    final smWin = (fsApprox / 8).round().clamp(3, visible);
 
     // 「計算用的波谷」(= hrvTroughAbs，HR 與 HRV 同一批)換成視窗內索引。
     // 線上波谷標點、藍色間距、底部金點全部共用這份 → 不再各自重抓波谷。
@@ -313,15 +525,23 @@ class _Waveform2Painter extends CustomPainter {
         if (absPos - firstAbs >= 0 && absPos - firstAbs < visible)
           absPos - firstAbs
     };
+    final altVis = <int>[
+      for (final absPos in altTroughAbs)
+        if (absPos - firstAbs >= 0 && absPos - firstAbs < visible)
+          absPos - firstAbs
+    ];
 
     // 峰/谷包絡用:主通道(IR 優先)的平滑線 + 跨通道最大 |平滑值| → 「建議固定 ±」
     List<double>? primarySm;
     double smMaxAbs = 0;
 
     for (final c in channels) {
-      // 偵測用的平滑線(截尾去趨勢 → 13點移動平均)。
-      // 直接畫「這條」——它才是找峰找谷實際在看的線,峰谷也標在它上面。
-      final sm = Max30102Signal.movingAverage(c.detr, smWin);
+      // 直接畫找谷用的那條線(c.detr = 截尾 → 減 baseline → 13 點低通,
+      // 與核心 / server 的 wave 同一支 troughLine),峰谷也標在它上面。
+      // ⚠️ 不可以再疊一次移動平均:10/29 把 13 點低通併進 troughLine 之後,
+      //    這裡原本的那次平滑沒拿掉,畫出來的線被平滑了兩次、谷比實際鈍 ——
+      //    看不出核心實際是在哪裡拿到谷的。
+      final sm = c.detr;
       if (primarySm == null || c.name == 'IR') primarySm = sm;
       for (final v in sm) {
         final a = v.abs();
@@ -336,7 +556,7 @@ class _Waveform2Painter extends CustomPainter {
       final path = Path();
       for (int i = 0; i < visible; i++) {
         final x = xOfVisible(i);
-        final y = yOf(sm[i]).clamp(0.0, mainBottom);
+        final y = yOf(sm[i]); // 不夾:振幅放大後超出框的部分交給 clipRect 切掉
         if (i == 0) {
           path.moveTo(x, y);
         } else {
@@ -391,13 +611,148 @@ class _Waveform2Painter extends CustomPainter {
       }
     }
 
-    // 谷↔谷 間距標籤。K2 的谷已是核心採用的那批 → 相鄰間距**就是**該筆 RR,
-    // 與右側 RR 趨勢圖的數字完全一致(單位 ms,不再重複標出來)。
+    // ── 對照用的兩條線(開關,預設關)─────────────────────────────────────
+    const cmpColor = Color(0xFFFFD740); // 對照(0.0.0.7)一律金色(線、谷圈、時間線)
+    final rawFrom = ir.length - visible;
+    // 白線:原始 IR,只轉正、不濾波。獨立刻度 —— 撐滿上下 88%,左上標峰峰值。
+    double Function(int i)? rawYOf; // 點選直線要在白線上標交會點,換算留著
+    if (showRawIr && visible >= 2) {
+      double lo = double.infinity, hi = -double.infinity;
+      for (int i = 0; i < visible; i++) {
+        final v = ir[rawFrom + i].toDouble();
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+      final span = hi - lo < 1 ? 1.0 : hi - lo;
+      // 未縮放時撐滿上下 88%;振幅縮放以中線為中心一起放大
+      rawYOf = (i) =>
+          mid - (ir[rawFrom + i] - (lo + hi) / 2) / (span / 2) * halfPlot * zoomY;
+      final path = Path();
+      for (int i = 0; i < visible; i++) {
+        final y = rawYOf(i);
+        if (i == 0) {
+          path.moveTo(xOfVisible(i), y);
+        } else {
+          path.lineTo(xOfVisible(i), y);
+        }
+      }
+      canvas.drawPath(
+          path,
+          Paint()
+            ..color = Colors.white.withValues(alpha: 0.85)
+            ..strokeWidth = 1.1
+            ..style = PaintingStyle.stroke);
+      _text(canvas, trParams('k2_chart_raw_ir', {'v': span.round()}),
+          const Offset(4, 28), Colors.white, 9);
+    }
+    // 金線:0.0.0.7 找谷用的線 = 截尾 → 減 2 秒移動平均 → 13 點平均(與 IR 線同刻度)。
+    // 用 0.0.0.7 對照核心自己的那支函式,算法與它當時一模一樣。
+    List<double>? altLine;
+    if (showAltLine && visible >= 2) {
+      final rawD =
+          List<double>.generate(visible, (i) => ir[rawFrom + i].toDouble());
+      final line = v7.Max30102Signal.troughLine(
+        rawD,
+        trimWindow: trimWindow,
+        baselineWindow: baselineWindow,
+        lowpassWindow: lowpassWindow,
+      );
+      altLine = line;
+      final path = Path();
+      for (int i = 0; i < visible; i++) {
+        final y = yOf(line[i]);
+        if (i == 0) {
+          path.moveTo(xOfVisible(i), y);
+        } else {
+          path.lineTo(xOfVisible(i), y);
+        }
+      }
+      canvas.drawPath(
+          path,
+          Paint()
+            ..color = cmpColor
+            ..strokeWidth = 1.4
+            ..style = PaintingStyle.stroke
+            ..strokeJoin = StrokeJoin.round);
+      _text(canvas, tr('k2_chart_v7_line'), const Offset(4, 40), cmpColor, 9);
+    }
+
+    // ── 底部時間線:白線,谷 = 穿過白線的直條,RR = 直條之間的數字 ─────────────
+    //    現行核心(IR 色):直條往下凸、數字在線下;0.0.0.7 對照(金):往上凸、數字在線上。
+    //    兩版同一顆谷 → 上下接成一條貫穿的直線;位置不同 → 錯開,一眼看出移了多少。
+    //    數字只標真正的 RR(rrSpans);沒給就退回相鄰谷距(那樣跨空洞也會標,但不是 RR)。
     final msPerSample = windowSeconds * 1000 / displaySamples;
-    final primary = channels.firstWhere((c) => c.name == 'IR',
-        orElse: () => channels.first);
-    _drawTroughIntervals(canvas, goldVis, primary.color,
-        mainBottom - 14, visible, xOfVisible, msPerSample);
+    // 線下的字約到 mainBottom − 17,不碰最底下的時間軸文字;點擊判定也用這個高度
+    final tlY = mainBottom - timelineFromBottom;
+    if (visible >= 2) {
+      canvas.drawLine(
+          Offset(xOfVisible(0), tlY),
+          Offset(xOfVisible(visible - 1), tlY),
+          Paint()
+            ..color = Colors.white.withValues(alpha: 0.55)
+            ..strokeWidth = 1);
+    }
+    List<({int from, int to})> spansVis(
+            List<({int from, int to})>? spans, List<int> vis) =>
+        spans == null
+            ? [for (int k = 1; k < vis.length; k++) (from: vis[k - 1], to: vis[k])]
+            : [
+                for (final s in spans)
+                  if (s.from - firstAbs >= 0 && s.to - firstAbs < visible)
+                    (from: s.from - firstAbs, to: s.to - firstAbs),
+              ];
+    void timeline(List<int> vis, List<({int from, int to})> spans, Color col,
+        {required bool up}) {
+      final tick = Paint()
+        ..color = col
+        ..strokeWidth = 1.5;
+      for (final i in vis) {
+        final x = xOfVisible(i);
+        // 穿過白線:主要往外凸 9px,另一側只露 3px
+        canvas.drawLine(Offset(x, up ? tlY + 3 : tlY - 3),
+            Offset(x, up ? tlY - 9 : tlY + 9), tick);
+      }
+      for (final s in spans) {
+        final x1 = xOfVisible(s.from), x2 = xOfVisible(s.to);
+        if (x2 - x1 <= 20) continue;
+        final ms = ((s.to - s.from) * msPerSample).round().toString();
+        _text(canvas, ms, Offset((x1 + x2) / 2 - _textW(ms, 8) / 2,
+            up ? tlY - 12 : tlY + 2), col, 8);
+      }
+    }
+
+    // 現行核心用 IR 線的顏色(與波形上的 IR 線、谷標點同色),0.0.0.7 對照用金色 —— 兩版徹底分開
+    timeline(goldVis, spansVis(rrSpans, goldVis), _irColor, up: false);
+    timeline(altVis, spansVis(rrSpansAlt, altVis), cmpColor, up: true);
+
+    // ── 點選的谷:貫穿整張圖的直線 + 與每條線的交會點 ─────────────────────────
+    //    看「這顆谷落在線的哪個位置」:正好在最低點、還是偏在坡上。
+    //    直線顏色 = 那顆谷的版本(現行 IR 色 / 0.0.0.7 對照金);交會點用各條線自己的顏色。
+    for (final p in picked) {
+      final i = p.index - firstAbs;
+      if (i < 0 || i >= visible) continue;
+      final x = xOfVisible(i);
+      final col = p.alt ? cmpColor : _irColor;
+      canvas.drawLine(
+          Offset(x, 0),
+          Offset(x, mainBottom),
+          Paint()
+            ..color = col.withValues(alpha: 0.9)
+            ..strokeWidth = 1);
+      void cross(double y, Color c) {
+        canvas.drawCircle(Offset(x, y), 4.2, Paint()..color = _bg);
+        canvas.drawCircle(Offset(x, y), 3.2, Paint()..color = c);
+      }
+
+      for (final ch in channels) {
+        cross(yOf(ch.detr[i]), ch.color);
+      }
+      if (altLine != null) cross(yOf(altLine[i]), cmpColor);
+      if (rawYOf != null) cross(rawYOf(i), Colors.white);
+      // 標號與底部 # 軸同一套(陣列索引),兩邊對得起來
+      final label = '#${p.index}';
+      _text(canvas, label, Offset(x + 3, p.alt ? 52 : 64), col, 9);
+    }
 
     // 最高峰/最低谷包絡：先畫(在底部金點之前) → 橘色「谷」極值標記不會蓋住金點。
     final ps = primarySm;
@@ -407,25 +762,29 @@ class _Waveform2Painter extends CustomPainter {
           sumY: (fixedAmp != null && fixedAmp! > 0) ? 14.0 : 2.0);
     }
 
-    // ── 真正算進 HRV 的波谷(來自 _peakAbsNew，已含 B 右緣過濾)：
-    //    底部固定一排金點 + 短豎線。對齊驗證用——
-    //    某個波谷正下方沒有金點 = 它沒被算進 HRV(例如最右剛被 B 丟掉那拍)。
+    // ── 0.0.0.7 對照核心的谷:波形上的金色空心圈(底部的金色直條見上方時間線) ─────
+    //    金線開著 → 圈在金線上(那才是 0.0.0.7 找谷的線);關著 → 圈在 IR 線上,
+    //    那條不是 0.0.0.7 找谷用的線,所以圈不一定剛好在最低點。
+    final ringLine = altLine ?? ps;
+    if (altVis.isNotEmpty && ringLine != null) {
+      final ring = Paint()
+        ..color = cmpColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6;
+      for (final i in altVis) {
+        if (i < 0 || i >= visible) continue;
+        canvas.drawCircle(
+            Offset(xOfVisible(i), yOf(ringLine[i]).clamp(0.0, mainBottom)),
+            5.5,
+            ring);
+      }
+    }
+
+    // ── 真正算進 HRV 的波谷:改畫成上方時間線的金色直條(原本是底部一排金點)。
+    //    某個波谷正下方沒有金色直條 = 它沒被算進 HRV(例如最右剛被 B 丟掉那拍)。
+    //    以下只剩補漏拍(search-back)的白點 —— K2 不傳,平常不會畫。
     if (goldVis.isNotEmpty) {
       final markY = mainBottom - 4;
-      final gold = Paint()..color = const Color(0xFFFFD740);
-      final goldHalo = Paint()..color = _bg; // 深色暈:金點在任何色點(橘/紅)之上都清楚可辨
-      final tick = Paint()
-        ..color = const Color(0xFFFFD740).withValues(alpha: 0.5)
-        ..strokeWidth = 1;
-      // 底部金點：與線上波谷同一份 goldVis(時間軸 timeline)。
-      // 畫在最後、加深色暈 → 永不被橘(誤拍)/紅(clean)剔除點或橘色「谷」極值標記擋住,
-      // 才能確切判讀:有金點=算進 HRV、無金點=真的被剔掉(非被遮住)。
-      for (final i in goldVis) {
-        final x = xOfVisible(i);
-        canvas.drawLine(Offset(x, markY - 8), Offset(x, markY), tick);
-        canvas.drawCircle(Offset(x, markY), 4.0, goldHalo);
-        canvas.drawCircle(Offset(x, markY), 3.0, gold);
-      }
       // search-back 補回的谷：白點(更明顯，與偵測金點區分)
       final white = Paint()..color = Colors.white;
       final whiteTick = Paint()
@@ -479,7 +838,7 @@ class _Waveform2Painter extends CustomPainter {
     // x 由右緣(now)往左推:sec 秒前 → x = w × (1 − sec/windowSeconds)。
     for (final sec in markSeconds) {
       if (sec <= 0 || sec >= windowSeconds) continue; // 等於視窗寬 = 最左緣,不用畫
-      final x = w * (1 - sec / windowSeconds);
+      final x = zx(w * (1 - sec / windowSeconds));
       final mp = Paint()
         ..color = Colors.white.withValues(alpha: 0.30)
         ..strokeWidth = 1;
@@ -490,14 +849,18 @@ class _Waveform2Painter extends CustomPainter {
           Colors.white.withValues(alpha: 0.45), 9);
     }
 
-    // 左下時間標記
-    _text(canvas, '-${windowSeconds}s', Offset(2, mainBottom - 12),
-        Colors.grey.shade600, 9);
-    _text(canvas, 'now', Offset(w - 22, mainBottom - 12),
-        Colors.grey.shade600, 9);
+    // 左下時間標記 —— 只在沒放大時畫:放大後畫面兩端已經不是 −N 秒與 now
+    if (zoomX == 1) {
+      _text(canvas, '-${windowSeconds}s', Offset(2, mainBottom - 12),
+          Colors.grey.shade600, 9);
+      _text(canvas, 'now', Offset(w - 22, mainBottom - 12),
+          Colors.grey.shade600, 9);
+    }
     // 絕對樣本索引「#」軸:對應「HRV 篩除記錄」的 #位置(每 index = 1/fs 秒,fs=100→10ms)。
     // 沿每隔幾秒的格線標一次,避開最左/最右(留給 -Ns / now)。
-    final idxStep = (windowSeconds / 5).ceil().clamp(1, windowSeconds);
+    // 間隔跟著時間軸縮放變密:畫面上永遠大約 5 個(放大後才找得到某顆谷的 #位置)。
+    final idxStep =
+        (windowSeconds / zoomX / 5).ceil().clamp(1, windowSeconds);
     for (int s = idxStep; s < windowSeconds; s += idxStep) {
       final di = (s / windowSeconds * (displaySamples - 1)).round();
       final vi = di - firstWindowIdx; // 視窗內索引
@@ -505,7 +868,7 @@ class _Waveform2Painter extends CustomPainter {
       final label = '#${firstAbs + vi}';
       final tw = _textW(label, 8);
       _text(canvas, label,
-          Offset((w * s / windowSeconds) - tw / 2, mainBottom - 12),
+          Offset(zx(w * s / windowSeconds) - tw / 2, mainBottom - 12),
           Colors.grey.shade500, 8);
     }
   }
@@ -522,15 +885,18 @@ class _Waveform2Painter extends CustomPainter {
     for (int i = 0; i < visible; i++) {
       raw[i] = src[from + i];
     }
-    // 截尾 → 減 baseline → 低通:與核心找谷、newIrWave 同一套(Max30102Signal.troughLine),
-    // 畫出來的線就是找谷用的那條線。base 另外留著給下面的 DC 虛線用。
+    // 截尾 → 0.7~3.5 Hz 帶通:與核心找谷、newIrWave 同一支(Max30102Signal.bandpass),
+    // 畫出來的線就是找谷用的那條線。base(2 秒移動平均)只留給下面的 DC 虛線用。
+    // 有 [given](核心的 newIrWave)的位置一律用它 —— 那是核心找谷當下看到的值;
+    // 這裡自己算的只補「核心還沒交出來」的位置(開頭段、最新約 1.5 秒)。
     final rawD = List<double>.generate(visible, (i) => raw[i].toDouble());
     final trimmed = Max30102Signal.slidingTrimmedMean(rawD, trimWindow);
     final base = Max30102Signal.movingAverage(trimmed, baselineWindow);
-    final line = Max30102Signal.detrendSmooth(
+    final line = Max30102Signal.bandpass(
       trimmed,
-      baselineWindow: baselineWindow,
-      lowpassWindow: lowpassWindow,
+      Max30102Config.samplingRateHz,
+      lowHz: Max30102Config.beatBandLowHz,
+      highHz: Max30102Config.beatBandHighHz,
     );
     final detr = List<double>.generate(visible, (i) {
       final g = (given != null && from + i < given.length) ? given[from + i] : null;
@@ -655,29 +1021,7 @@ class _Waveform2Painter extends CustomPainter {
     _text(canvas, sum, Offset(4, sumY), _envColor, 9);
   }
 
-  /// 谷↔谷 時間標記：相鄰波谷間畫平行線 + 間距數值（類似時間軸）。
-  /// troughs=視窗索引(遞增)。K2 版只印數字不印單位(都是 ms,不必每格重複)。
-  void _drawTroughIntervals(Canvas canvas, List<int> troughs, Color color,
-      double yLine, int visible, double Function(int) xOfVisible,
-      double msPerSample) {
-    if (troughs.length < 2) return;
-    final line = Paint()
-      ..color = color.withValues(alpha: 0.7)
-      ..strokeWidth = 1;
-    for (int i = 1; i < troughs.length; i++) {
-      final k1 = troughs[i - 1], k2 = troughs[i];
-      if (k1 < 0 || k2 >= visible) continue;
-      final x1 = xOfVisible(k1), x2 = xOfVisible(k2);
-      canvas.drawLine(Offset(x1, yLine), Offset(x2, yLine), line);
-      canvas.drawLine(Offset(x1, yLine - 3), Offset(x1, yLine + 3), line);
-      canvas.drawLine(Offset(x2, yLine - 3), Offset(x2, yLine + 3), line);
-      if (x2 - x1 > 20) {
-        final ms = ((k2 - k1) * msPerSample).round().toString();
-        _text(canvas, ms, Offset((x1 + x2) / 2 - _textW(ms, 8) / 2, yLine - 11),
-            color, 8);
-      }
-    }
-  }
+  // (谷↔谷 間距原本由 _drawTroughIntervals 畫成 IR 色的線,已改成 paint() 裡的白色時間線)
 
   // (K2 版已移除 _drawAcStrip:AC 回血/供血折上帶不再顯示)
 
@@ -725,6 +1069,15 @@ class _Waveform2Painter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _Waveform2Painter old) =>
       old.version != version ||
+      old.altTroughAbs.length != altTroughAbs.length ||
+      old.rrSpans?.length != rrSpans?.length ||
+      old.rrSpansAlt?.length != rrSpansAlt?.length ||
+      old.showRawIr != showRawIr ||
+      old.showAltLine != showAltLine ||
+      old.zoomX != zoomX ||
+      old.zoomY != zoomY ||
+      old.viewStart != viewStart ||
+      !listEquals(old.picked, picked) ||
       old.displaySamples != displaySamples ||
       old.windowSeconds != windowSeconds ||
       old.baselineWindow != baselineWindow ||

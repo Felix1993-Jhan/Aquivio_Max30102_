@@ -25,6 +25,9 @@ import '../k2_core.dart';
 import '../k2_hrv_calculator.dart';
 import '../k2_protocol.dart';
 import '../k2_vitals_metrics.dart';
+// 0.0.0.7 對照核心(類別名與現行核心相同 → 一律用 v7 前綴),見該資料夾的 README
+import '../../max30102_K2_v007/k2_config.dart' as v7;
+import '../../max30102_K2_v007/k2_core.dart' as v7;
 import 'k2_breathhold.dart';
 import 'k2_fixed_window.dart';
 import 'k2_lf_experiment.dart';
@@ -199,6 +202,25 @@ class K2SerialAdapter extends ChangeNotifier {
   /// 它自己是 ChangeNotifier,畫面用 ListenableBuilder 單獨聽(見 k2_fixed_window)。
   final K2FixedWindow fixedWindow = K2FixedWindow();
 
+  // ── 0.0.0.7 對照核心(只在 App 比較,不送出)────────────────────────
+  //
+  // 每一包原始資料同時餵一份給它,畫面上與現行核心並排。設定與現行核心相同
+  // (免洗、指標預設),所以兩邊吐樣本的時間點一模一樣 —— 波形座標(waveBase、
+  // 定長窗的 base / 開頭段)可以共用,谷標點直接疊在同一張圖上。
+  final v7.Max30102K2 coreV7 =
+      v7.Max30102K2(config: v7.Max30102Config(resetOnFingerOff: true));
+
+  /// 0.0.0.7 最近一次計算結果(旗標與數值的分法同 [latest] / [held])。
+  v7.K2Compute? latestV7;
+  v7.K2Compute? heldV7;
+
+  /// 數值用(手指離開時跟著現行核心一起保留,兩邊才是同一段)。
+  v7.K2Compute? get displayComputeV7 => holding ? heldV7 : latestV7;
+
+  /// 0.0.0.7 的定長窗。餵的是轉成現行型別的結果(見 [_asCurrent]),
+  /// 開頭段與現行的一起還原,所以 chartTroughs 的索引與現行那張圖對得上。
+  final K2FixedWindow fixedWindowV7 = K2FixedWindow();
+
   // ── 原始樣本滾動緩衝 —— 只為了還原「被核心丟掉的開頭」──────────────
   //
   // 核心在空轉期(1.5s)直接丟棄樣本、沉澱期(2.0s)只留在自己的緩衝裡當 baseline
@@ -329,9 +351,11 @@ class K2SerialAdapter extends ChangeNotifier {
   /// 免洗版沒有長期池,這一支就是「全部歸零」的唯一入口。
   void reset() {
     core.reset();
+    coreV7.reset();
     _clearLocal();
     // 「清除」的語意就是全部歸零,定長窗不能留著上一段。
     fixedWindow.hardClear();
+    fixedWindowV7.hardClear();
     _preDone = false;
     _log(tr('k2_log_cleared_core'));
     notifyListeners();
@@ -371,6 +395,11 @@ class K2SerialAdapter extends ChangeNotifier {
       swapped ? sliceRed : sliceIr,
       swapped ? sliceIr : sliceRed,
     );
+    // 0.0.0.7 的定長窗也放同一段:開頭段長度一樣,圖上的索引才對得上
+    fixedWindowV7.setPreRoll(
+      swapped ? sliceRed : sliceIr,
+      swapped ? sliceIr : sliceRed,
+    );
     _preDone = true;
   }
 
@@ -382,6 +411,8 @@ class K2SerialAdapter extends ChangeNotifier {
     waveBase = 0;
     latest = null;
     held = null; // 保留值也一起清,不然清空後畫面還掛著上一次的數字
+    latestV7 = null;
+    heldV7 = null;
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -493,6 +524,28 @@ class K2SerialAdapter extends ChangeNotifier {
       waveFirstAbs: r.waveFirstAbs,
       newIrWave: r.newIrWave,
     );
+    // 0.0.0.7 對照:同一包原封丟進去,結果只拿來顯示
+    final r7 = coreV7.feedData(packet);
+    fixedWindowV7.feed(
+      firstAbs: r7.firstAbs,
+      newIr: r7.newIr,
+      newRed: r7.newRed,
+      computed: _asCurrent(r7.computed),
+      didReset: r7.didReset,
+      cap: _waveCap,
+      deadSamples: core.config.fingerDeadSamples,
+      settleSamples: core.config.settleSamples,
+      waveFirstAbs: r7.waveFirstAbs,
+      newIrWave: r7.newIrWave,
+    );
+    if (r7.computed != null) {
+      final c7 = r7.computed!;
+      latestV7 = c7;
+      if (c7.fingerPresent && !c7.settling && c7.rrPoints.isNotEmpty) {
+        heldV7 = c7;
+      }
+    }
+
     if (!_preDone && r.newIr.isNotEmpty) _recoverPreRoll(r);
 
     // 核心自行歸零過 → 我們存的座標全失效,一起丟掉重來。
@@ -610,6 +663,64 @@ class K2SerialAdapter extends ChangeNotifier {
     }
     return out;
   }
+
+  /// 波形底部時間線要標數字的 RR → waveIr 索引(起谷, 終谷)。
+  /// 與 [displayTroughs] 同一批(核心採用的拍),只是成對給:數字只標真正的 RR,
+  /// 空洞兩端的谷之間不會冒出一個「不是 RR 的距離」。
+  List<({int from, int to})> displaySpans() => _spansOf(latest?.rrPoints);
+
+  /// 0.0.0.7 的 RR(見 [displaySpans])。
+  List<({int from, int to})> displaySpansV7() => _spansOf(latestV7?.rrPoints);
+
+  List<({int from, int to})> _spansOf(List<HrvRrPoint>? pts) {
+    if (pts == null || pts.isEmpty || waveIr.isEmpty) return const [];
+    return [
+      for (final p in pts)
+        if (p.startAbs - waveBase >= 0 && p.endAbs - waveBase < waveIr.length)
+          (from: p.startAbs - waveBase, to: p.endAbs - waveBase),
+    ];
+  }
+
+  // ── 0.0.0.7 對照:取法與上面現行版的同名函式一模一樣,只換資料來源 ──────
+
+  /// 0.0.0.7 的「最近 [seconds] 秒」乾淨拍(見 [pointsRecentSeconds])。
+  List<HrvRrPoint> pointsRecentSecondsV7(int seconds) {
+    final pts = displayComputeV7?.rrPoints ?? const <HrvRrPoint>[];
+    if (pts.isEmpty) return const [];
+    final ref = holding ? pts.last.endAbs : coreV7.totalSamples;
+    final cutoff = ref - seconds * Max30102Config.samplingRateHz;
+    return [for (final p in pts) if (p.startAbs >= cutoff) p];
+  }
+
+  /// 0.0.0.7 的谷 → waveIr 索引(見 [displayTroughs])。兩個核心吐樣本的時間點相同,
+  /// 所以 waveBase 共用。
+  List<int> displayTroughsV7() {
+    final abs = latestV7?.troughAbs;
+    if (abs == null || abs.isEmpty || waveIr.isEmpty) return const [];
+    return [
+      for (final a in abs)
+        if (a - waveBase >= 0 && a - waveBase < waveIr.length) a - waveBase,
+    ];
+  }
+
+  /// 0.0.0.7 的 K2Compute → 現行型別,給共用的 [K2FixedWindow] 吃。
+  /// 兩邊欄位一樣(0.0.0.8 是從 0.0.0.7 改的),HRV / RR 是 record 型別、本來就通用,
+  /// 只有方向的 enum 要照名字對回來。
+  static K2Compute? _asCurrent(v7.K2Compute? c) => c == null
+      ? null
+      : K2Compute(
+          fingerPresent: c.fingerPresent,
+          sqiOk: c.sqiOk,
+          settling: c.settling,
+          orient: K2ChannelOrient.values.byName(c.orient.name),
+          bpm: c.bpm,
+          spo2: c.spo2,
+          hrv: c.hrv,
+          rr: c.rr,
+          rrPoints: c.rrPoints,
+          spikeMax: c.spikeMax,
+          troughAbs: c.troughAbs,
+        );
 
   // ══════════════════════════════════════════════════════════════
   // 快照(UI 層存檔;核心不參與)
@@ -802,6 +913,7 @@ class K2SerialAdapter extends ChangeNotifier {
     lfExperiment.dispose();
     breathHold.dispose();
     fixedWindow.dispose();
+    fixedWindowV7.dispose();
     super.dispose();
   }
 }

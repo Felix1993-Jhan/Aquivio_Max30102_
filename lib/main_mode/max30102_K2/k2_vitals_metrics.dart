@@ -657,8 +657,8 @@ class Max30102VitalsMetrics {
   /// RR 序列裡的**空洞數** —— 相鄰兩拍接不起來(下一拍起谷 ≠ 上一拍終谷)的次數。
   ///
   /// 核心收拍時,下一拍的起谷就是直接拿上一拍的終谷,所以連續的拍一定**完全相等**,
-  /// 不需要容差。會留下空洞的:③ 生理閘門過長、④ 40% 長側、① SQI 差那輪、
-  /// ⑤ clean() 剔除、訊號中斷;**不會**的:過短的假谷(基準不推進,直接跨過量)、
+  /// 不需要容差。會留下空洞的:③ 生理閘門過長、① SQI 差那輪、
+  /// ⑤ clean() 剔除(v0.0.0.8 起 = classify() 判成漏拍 / 偽拍的拍)、訊號中斷;**不會**的:過短的假谷(基準不推進,直接跨過量)、
   /// 補漏拍補成功的拍(首尾相接)。所以空洞 = 「有一拍掉了,而且沒補回來」。
   ///
   /// 只看得到夾在兩個被接受的拍之間的中斷;第一拍之前、最後一拍之後看不到。
@@ -668,6 +668,43 @@ class Max30102VitalsMetrics {
       if (pts[i + 1].startAbs != pts[i].endAbs) n++;
     }
     return n;
+  }
+
+  /// **乾淨 RR 佔這段的比例**(0~1;沒有 RR 時為 0)—— `confidence` 用(v0.0.0.8)。
+  ///
+  ///     乾淨比例 = 乾淨 RR 數 ÷ (乾淨 RR 數 + 空洞裡的間距數)
+  ///     空洞裡的間距數 = max(1, round(空洞長度 ÷ 乾淨 RR 的中位數))
+  ///
+  /// [pts] 是核心交出來的乾淨 RR(`K2Compute.rrPoints`):漏拍、偽拍、SQI 差那輪、
+  /// 生理閘門擋掉的拍都已經剔除,在序列上各自留下一個空洞(見 [rrGaps])。
+  /// 空洞有多長就代表那段時間本來該有幾個間距,所以用乾淨 RR 的中位數去換算 ——
+  /// 只看空洞**個數**的話,一個 5 秒的 SQI 差空洞與一個漏拍會被算成一樣。
+  ///
+  /// 與「逐筆數分類結果」的差別:一個漏拍(≈ 2 倍)這裡算 2 個間距,原型算 1 個;
+  /// 被推偏的一長一短(加起來 ≈ 2 倍)兩邊都算 2 個。差別只在漏拍,而且是偏嚴的那一側。
+  /// 第一筆乾淨 RR 之前、最後一筆之後的不乾淨拍看不到(同 [rrGaps])。
+  static double cleanShare(List<HrvRrPoint> pts) {
+    if (pts.isEmpty) return 0;
+    const fs = Max30102Config.samplingRateHz;
+    final sorted = [for (final p in pts) p.rr]..sort();
+    final med = sorted[sorted.length ~/ 2];
+    // 乾淨 RR 已過生理閘門,不可能 ≤ 0;真的出現就是上游壞了,不要默默算出一個比例。
+    if (med <= 0) {
+      throw StateError('cleanShare: 乾淨 RR 的中位數必須為正(得到 $med)');
+    }
+    int lost = 0;
+    for (int i = 0; i + 1 < pts.length; i++) {
+      final gapSamples = pts[i + 1].startAbs - pts[i].endAbs;
+      if (gapSamples == 0) continue; // 首尾相接 = 沒有空洞
+      if (gapSamples < 0) {
+        throw StateError(
+          'cleanShare: RR 重疊(第 ${i + 1} 筆起谷 ${pts[i + 1].startAbs} < 前一筆終谷 ${pts[i].endAbs})',
+        );
+      }
+      final gapMs = gapSamples * 1000.0 / fs;
+      lost += math.max(1, (gapMs / med).round());
+    }
+    return pts.length / (pts.length + lost);
   }
 
   /// 由「一段 RR + 當下狀態」算出對方介面要的全部欄位。
@@ -688,6 +725,7 @@ class Max30102VitalsMetrics {
     return VitalsMetrics(
       beats: pts.isEmpty ? 0 : rr.length + 1,
       rrGaps: rrGaps(pts),
+      cleanShare: cleanShare(pts),
       hrv: hv,
       spectrum: spec,
       stress: si,
@@ -742,9 +780,13 @@ class VitalsMetrics {
   /// 這段 RR 的空洞數,見 [Max30102VitalsMetrics.rrGaps]。`confidence` 用。
   final int rrGaps;
 
+  /// 乾淨 RR 佔這段的比例(0~1),見 [Max30102VitalsMetrics.cleanShare]。`confidence` 用。
+  final double cleanShare;
+
   const VitalsMetrics({
     required this.beats,
     required this.rrGaps,
+    required this.cleanShare,
     required this.hrv,
     required this.spectrum,
     required this.stress,
@@ -828,41 +870,56 @@ class VitalsMetrics {
   //     ? 'good'
   //     : 'very rough';
 
-  /// 可信度容許的異常次數。超過才判 very rough。
+  // 舊的判斷(**已停用**,v0.0.0.7,保留供回溯)—— 數異常次數。實測(10/30 錄音)
+  // 「谷被推偏」的一長一短(570 / 1010)全部過關、不留空洞,RMSSD 215~265ms 照樣 good;
+  // 反過來,空洞數不管空洞多長,一個漏拍與 5 秒的 SQI 差空洞算一樣。
+  // String get confidenceByPulse =>
+  //     anomalies <= maxAnomalies && beats >= minBeatsNeeded
+  //     ? 'good'
+  //     : 'very rough';
+  //
+  // 下面三個(maxAnomalies / anomalies / minBeatsNeeded)是那條規則的零件,
+  // **已不參與判斷**,只因桌面 App 的畫面(ui/)還在顯示而保留。
+
+  /// (v0.0.0.7 規則的零件,已不參與判斷)可信度容許的異常次數。
   static const int maxAnomalies = 1;
 
-  /// 異常次數 = RR 空洞數 + (SQI 沒過 ? 1 : 0)。
-  ///
-  /// 異常的拍已經被剔除、不進 HRV(RMSSD 也不會跨空洞相減),這裡只是**數**
-  /// 這次量測出了幾次狀況,用來決定整次量測可不可信。
+  /// (v0.0.0.7 規則的零件,已不參與判斷)異常次數 = RR 空洞數 + (SQI 沒過 ? 1 : 0)。
   int get anomalies => rrGaps + (sqiOk ? 0 : 1);
 
-  /// 可信度要求的最少拍數 = 9 + 空洞數。
-  ///
-  /// 9 拍(8 個 RR、7 對相鄰)是核心出 HRV 的門檻。每多一個空洞就少一對相鄰,
-  /// 所以多要一拍,讓能拿來算 RMSSD 的相鄰對數量與「沒有空洞的 9 拍」一樣。
+  /// (v0.0.0.7 規則的零件,已不參與判斷)最少拍數 = 9 + 空洞數。
   int get minBeatsNeeded => Max30102HrvCalculator.minBeatsForHrv + rrGaps;
 
-  /// → `confidence`(v0.0.0.7)。
+  /// `good` 需要的乾淨比例([cleanShare])下限。
+  static const double confidenceGoodCleanShare = 0.80;
+
+  /// `rough` 需要的乾淨比例下限;低於這個就是 `very rough`。
+  static const double confidenceRoughCleanShare = 0.65;
+
+  /// → `confidence`(v0.0.0.8)。看**乾淨 RR 佔幾成**([cleanShare]):
   ///
-  ///     異常 ≤ 1 次  且  拍數 ≥ 9 + 空洞數 → good
-  ///     其他(含手指離開)                → very rough
+  ///     乾淨拍數 < 9(含手指離開、沉澱中)       → very rough
+  ///     乾淨比例 < 65%                           → very rough
+  ///     乾淨比例 < 80%,或這一輪 SQI 沒過        → rough
+  ///     其他                                     → good
   ///
-  /// 只有這兩級,不會出現 rough 與 null。站台的攝影機流程拿這個欄位當把關
-  /// (`very rough` / `null` 就不去要推薦);手指流程目前看的是 12 秒倒數。
+  /// 門檻怎麼來的(10/30 兩份錄音,原型 scripts/max30102-beats.cjs 逐筆分類):
+  ///   · 訊號好的段落乾淨 89~100%,RMSSD 與原型差 < 25%;
+  ///   · 漂移 / 晃動的段落乾淨 45~65%,那些段落的 RMSSD 互相差到 2 倍以上,不能用。
+  ///   65% 以下沒有一段可信 → very rough(站台拿 `very rough` / `null` 當把關,不去要推薦);
+  ///   65~80% 數字大致可用但已經剔掉不少 → rough;80% 以上 → good。
+  ///   規格要求「70% 以下不可以是 good」,80% 留了餘裕。
   ///
-  /// · 空洞 = 有一拍沒通過考驗、補漏拍也沒補回來(見 [Max30102VitalsMetrics.rrGaps])。
-  ///   只看拍數不夠:數的是**通過**的拍,木頭的雜訊剔掉幾拍後還剩 21 拍
-  ///   (木頭有 3 個空洞,照樣 very rough)。
-  /// · 已知漏洞:一長一短(谷被推偏,兩個 RR 加起來約兩拍)會通過所有關卡、
-  ///   被算進 HRV,也不會留下空洞 —— 這條規則抓不到,另外處理。
+  /// 這一輪 SQI 沒過最多給 rough:比例看的是整個視窗,SQI 看的是「現在」
+  /// (例如手指正在移開),兩個都要好才是 good。
   ///
-  /// 手指感測的脈搏本來就強,不需要再用頻譜判斷穩不穩;頻譜那套照樣留在
-  /// `confidence_video` 與 `snr_db`。
-  String get confidenceByPulse =>
-      anomalies <= maxAnomalies && beats >= minBeatsNeeded
-      ? 'good'
-      : 'very rough';
+  /// 永遠回三個字串之一,不會是 null(與 v0.0.0.7 相同,站台不用處理 null)。
+  String get confidenceByPulse {
+    if (beats < Max30102HrvCalculator.minBeatsForHrv) return 'very rough';
+    if (cleanShare < confidenceRoughCleanShare) return 'very rough';
+    if (cleanShare < confidenceGoodCleanShare || !sqiOk) return 'rough';
+    return 'good';
+  }
 
   /// → `confidence_video`。攝影機的判法(SNR 三級),見 [confidenceFromSnr]。
   String? get confidenceVideo =>
@@ -878,7 +935,7 @@ class VitalsMetrics {
   ///
   /// 每一個欄位都對齊 `aquivio-vitals` 的實作,所以數值與攝影機端可互換:
   ///   · `pns` / `ans` / `stress` / `activity` —— 逐字照他們的 derived_scores()
-  ///   · `confidence` —— SQI + 拍數 + RR 空洞(見 [confidenceByPulse]);SNR 版改放 `confidence_video`
+  ///   · `confidence` —— 乾淨 RR 比例 + 拍數 + SQI(v0.0.0.8,見 [confidenceByPulse]);SNR 版改放 `confidence_video`
   ///   · `lf` / `hf` —— **換算成他們的單位**(見 [HrvSpectrum.lfAquivio]);
   ///     我們原本的 ms² 值另外放在 `lf_ms2` / `hf_ms2`
   ///
@@ -897,7 +954,7 @@ class VitalsMetrics {
       'sqi': sqi,
       'snr_db': snrDb,
       // `confidence` 是對方 VitalsResult 宣告的欄位,名字不能動。
-      // v0.0.0.7 起改看脈搏(只有 good / very rough),見 [confidenceByPulse]。
+      // v0.0.0.7 起改看脈搏;v0.0.0.8 起看乾淨 RR 比例(good / rough / very rough),見 [confidenceByPulse]。
       // 舊值(**已停用**,保留供回溯)—— 頻譜 SNR 三級,現在只放在 `confidence_video`:
       // 'confidence': confidenceBySnr,
       // 'confidence': confidenceBySqi,
@@ -938,7 +995,7 @@ class VitalsMetrics {
       //    在兩台機器上會落在同一級。
       //
       // ⚠️ v0.0.0.7 起三個可信度欄位(confidence / confidence_video /
-      //    confidence_by_beats)**一律送同一個值**(good / very rough)。
+      //    confidence_by_beats)**一律送同一個值**(v0.0.0.7:good / very rough;v0.0.0.8 起多了 rough)。
       //    原本這兩個欄位會出現 `rough` 與 `null`,對方看到三個名字、三種答案,
       //    分不出該信哪個;實際被讀的只有 `confidence`。SNR 版與拍數版仍在 UI 上
       //    當對照顯示(confidenceVideo / confidence),只是不再送出。

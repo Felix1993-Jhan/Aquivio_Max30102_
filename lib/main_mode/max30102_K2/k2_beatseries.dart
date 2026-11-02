@@ -1,8 +1,15 @@
 // ============================================================================
 // Max30102BeatSeries — RR/NN 序列的「過濾器」（有狀態，唯一真相來源）
 // ============================================================================
-// 把「谷 → RR → 生理閘門 → 誤拍過濾(_rrAccept) → search-back 補漏 → 累積 NN 序列」
-// 收成一個盒子。HRV 從它取；(未來 B 階)HR 也改從它取。抽自 Max30102Controller。
+// 把「谷 → RR → 生理閘門 → search-back 補漏 → 累積 RR 序列」收成一個盒子。
+// HRV 與 HR 都從它取。抽自 Max30102Controller。
+//
+// v0.0.0.8:收拍時**不再**用「近 9 拍中位數 ±40%」擋拍(舊 _rrAccept)。
+// 漏拍 / 偽拍改在算 HRV 時由 Max30102HrvCalculator.classify() 逐筆分類剔除 ——
+// 序列裡留著每一個偵測到的間距,首尾相接,才數得出「乾淨的佔幾成」(confidence 用)。
+// 舊閘門的兩個問題:① 起步 3 拍內全收,早期的壞拍直接進 RMSSD;
+// ② 起步若連漏幾拍,中位數變 2 倍,之後的真拍全被判「太短」不推進基準 →
+// 序列鎖死在半速(實測 10/30 錄音第 2 段:心率 110 讀成 56)。
 //
 // 邊界（盒子不擁有這些，只透過「回讀 / 回傳」互動）:
 //   · irAt(回呼)：search-back 要回讀原始 IR 波形時才問一筆(-1=已捲出緩衝)。
@@ -102,15 +109,17 @@ class Max30102BeatSeries {
     apply: config.cleanEnabled,
   );
 
-  /// (B 階) 顯示用 HR：取「最近 lastN 拍」的中位 RR → 60000/中位。
+  /// (B 階) 顯示用 HR：取「最近 lastN 筆**乾淨** RR」的中位 → 60000/中位。
   ///   用「拍數」而非「時間窗」:不受 _totalSamples/餵拍順序/SQI差空窗 影響,只要序列
-  ///   有 ≥2 拍就一定算得出(時間窗版會在 SQI 差空窗時整段滑過去 → 掉 null)。
-  ///   中位數抗離群;顯示端另有 EMA 平滑。不足 2 拍回 null(交由呼叫端凍結)。
-  ///   與 HRV 同一條 NN 序列 → HR 與 HRV 從此單一真相、不再各算各的。
+  ///   有 ≥2 筆乾淨 RR 就一定算得出(時間窗版會在 SQI 差空窗時整段滑過去 → 掉 null)。
+  ///   中位數抗離群;顯示端另有 EMA 平滑。不足 2 筆回 null(交由呼叫端凍結)。
+  ///   與 HRV 同一份乾淨 RR(rrClean)→ HR 與 HRV 單一真相、不再各算各的。
+  ///   v0.0.0.8:序列裡現在留著漏拍 / 偽拍(見檔頭),所以這裡改取乾淨的。
   double? hrRecent(int lastN) {
-    if (_rr.length < 2) return null;
-    final take = _rr.length < lastN ? _rr.length : lastN;
-    final recent = _rr.sublist(_rr.length - take)..sort();
+    final clean = rrClean();
+    if (clean.length < 2) return null;
+    final take = clean.length < lastN ? clean.length : lastN;
+    final recent = clean.sublist(clean.length - take)..sort();
     final med = recent[recent.length ~/ 2];
     return med > 0 ? 60000.0 / med : null;
   }
@@ -172,10 +181,11 @@ class Max30102BeatSeries {
           }
         }
         // 生理閘門：RR 上下限由 config.hrMin/hrMax 換算(RR=60000/HR)，與 HR 同基準。
-        // + 誤拍過濾(只取 NN 間距，擋漏拍/多抓)。被擋下的拍回報進篩除記錄。
-        // 生理閘門 + 誤拍過濾。剔除時再分「短側(偽谷/多抓)」與「長側(疑似漏拍)」：
+        // 被擋下的拍回報進篩除記錄。剔除時再分「短側(偽谷/多抓)」與「長側」：
         //   過短 → advance=false，基準不動，讓下一顆真谷仍以 T0 起量得到真間期；
         //   過長 → advance 維持 true 照舊 resync(真拍谷沒被抓到時不移會連環量爆、全砍)。
+        // 閘門內的一律收進序列(含漏拍 / 偽拍)—— 由 classify() 決定進不進 HRV(見檔頭)。
+        // 這兩個界線是絕對值,不依賴序列自己的中位數,所以不會被早期壞拍帶著鎖死。
         final rrMinMs = 60000.0 / config.hrMax; // 最快心跳 → 最短 RR
         final rrMaxMs = 60000.0 / config.hrMin; // 最慢心跳 → 最長 RR
         if (rr < rrMinMs) {
@@ -184,10 +194,6 @@ class Max30102BeatSeries {
         } else if (rr > rrMaxMs) {
           rejects.add((absIndex: abs, rr: rr, reason: '生理閘門'));
           // 過長=疑似漏拍 → advance 維持 true，resync
-        } else if (!_rrAccept(rr)) {
-          rejects.add((absIndex: abs, rr: rr, reason: '誤拍>40%'));
-          final med = _recentRrMedian();
-          if (med > 0 && rr < med) advance = false; // 短側=偽谷 → 基準不推進
         } else {
           _push(rr, startAbs: _lastTroughAbs, endAbs: abs);
         }
@@ -253,25 +259,6 @@ class Max30102BeatSeries {
     final recent = clean.sublist(math.max(0, clean.length - 9));
     final s = List<double>.from(recent)..sort();
     return s[s.length ~/ 2];
-  }
-
-  /// 誤拍過濾：新 RR 與「最近 9 拍中位數」相差 > 40% → 視為漏拍(併拍)/多抓，不納入。
-  /// (2026-07 由 30% 放寬到 40%：以「近9拍當前節律」為主要基準,只擋明顯離群,
-  ///  中等真變異留下;漏拍改由 search-back 回補,clean 全域離群降級為對照開關。)
-  bool _rrAccept(double rr) {
-    final med = _recentRrMedian();
-    if (med <= 0) return true; // 起步 <3 拍或基準無效 → 全收(HRV 靠暖機把關)
-    return (rr - med).abs() / med <= 0.40;
-  }
-
-  /// 誤拍過濾用的「近 9 拍中位數」(0 = 拍數不足<3 或基準無效)。
-  /// 除了 _rrAccept，H2 也用它判斷「剔除是短側(偽谷/多抓)或長側(疑似漏拍)」。
-  double _recentRrMedian() {
-    if (_rr.length < 3) return 0; // 基準不足
-    final recent = _rr.sublist(math.max(0, _rr.length - 9));
-    final sorted = List<double>.from(recent)..sort();
-    final med = sorted[sorted.length ~/ 2];
-    return med > 0 ? med : 0;
   }
 
   /// search-back：在 [prevAbs, curAbs] 這段(疑似漏拍 gap) 用放寬門檻找回真實波谷。

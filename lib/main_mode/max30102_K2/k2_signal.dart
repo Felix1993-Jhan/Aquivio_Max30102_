@@ -109,12 +109,12 @@ class Max30102Signal {
     return out;
   }
 
-  // ---------------- 找谷用的線(畫圖與計算共用)----------------
+  // ---------------- 移動平均版的去趨勢(v0.0.0.7 的找谷 / 畫圖線)----------------
   //
   //   截尾平滑(9)→ 減 baseline(200)→ 低通平滑(13)
   //
-  // 核心找谷(k2_algorithm)、核心輸出的 newIrWave(= server 送出的 `wave`)、
-  // App 波形圖都走這裡 —— **畫出來的線就是拿來找谷的那條線**,算法只有這一份。
+  // v0.0.0.8 起找谷與畫圖都改走下面的 [troughLine](帶通)。這幾支留著:
+  // baseline 視窗寬仍是沉澱期長度與波形圖 DC 虛線的依據。
 
   /// baseline(高通)移動平均的視窗寬 = `fs / bandLowHz`(預設 100 / 0.5 = 200 筆 = 2 秒)。
   ///
@@ -142,23 +142,65 @@ class Max30102Signal {
   }) =>
       movingAverage(detrend(trimmed, baselineWindow), lowpassWindow);
 
-  /// 原始值 → 找谷用的線:截尾平滑 → 減 baseline → 低通平滑。
+  // ---------------- 找谷用的線 = 畫圖用的線(算法只有這一份)----------------
+  //
+  //   截尾平滑(9)→ 0.7~3.5 Hz 二階 Butterworth 帶通(正反各一次)
+  //
+  // 核心找谷(k2_core 對整段緩衝算一次,切片交給 k2_algorithm)、核心輸出的
+  // newIrWave(= server 送出的 `wave`)、App 波形圖都走這裡 ——
+  // **畫出來的線就是拿來找谷的那條線**。
+
+  /// 原始值 → 找谷 / 畫圖用的線:截尾平滑 → 帶通([bandpass])。
   ///
-  /// ⚠️ 三個都是**置中**濾波,第 i 筆要用到 i 之後的資料:截尾 `trimWindow ~/ 2`、
-  ///    baseline `baselineWindow ~/ 2`、低通 `lowpassWindow ~/ 2`,串起來要往後看
-  ///    三者相加(預設 4 + 100 + 6 = 110 筆)。陣列最後那段拿不到未來,算出來是截斷的;
-  ///    要正確的值,就得等後面的資料進來再算(核心的 `newIrWave` 就是這樣做的)。
+  /// ⚠️ 帶通是 IIR、正反各跑一次:每一點都受**兩端所有資料**影響,越靠近陣列兩端越不準
+  ///    (右緣 150 筆內誤差 > 1.4%,見 Max30102Config.troughGuardSamples)。
+  ///    要穩定的值就得等右邊資料夠多再取 —— 核心找谷與 newIrWave 都等 150 筆。
   static List<double> troughLine(
     List<double> raw, {
     required int trimWindow,
-    required int baselineWindow,
-    required int lowpassWindow,
+    required int fs,
+    required double lowHz,
+    required double highHz,
   }) =>
-      detrendSmooth(
+      bandpass(
         slidingTrimmedMean(raw, trimWindow),
-        baselineWindow: baselineWindow,
-        lowpassWindow: lowpassWindow,
+        fs,
+        lowHz: lowHz,
+        highHz: highHz,
       );
+
+  // ---------------- 帶通(v0.0.0.8)----------------
+  //
+  // 為什麼換掉「減 2 秒移動平均」:移動平均的頻率響應有零點與旁瓣,0.5 Hz(快呼吸、按壓)
+  // 完全擋不住、0.7 Hz 還放大 20%,殘留的斜坡會把谷推走(見 Max30102Config.beatBandLowHz)。
+
+  /// 零相位帶通:2 階 Butterworth 高通 [lowHz] + 2 階 Butterworth 低通 [highHz],
+  /// 各自正向跑一次、反向再跑一次(filtfilt)→ 相位抵消,谷的時間位置不偏移。
+  ///
+  /// 濾波器狀態從第一筆的穩態起跑(低通 = 第一筆的值、高通 = 0),
+  /// 不然開頭那一階 DC(~90000)會讓濾波器響鈴好幾秒。
+  ///
+  /// 參數不合理(頻率 ≤ 0、高過 Nyquist、上下限顛倒)直接丟例外 —— 算出來的線會是錯的,
+  /// 而找谷不會報錯,只會安靜地給錯的心率。
+  static List<double> bandpass(
+    List<double> x,
+    int fs, {
+    required double lowHz,
+    required double highHz,
+  }) {
+    if (fs <= 0 || lowHz <= 0 || highHz <= lowHz || highHz >= fs / 2) {
+      throw ArgumentError(
+        'bandpass: 需要 0 < lowHz < highHz < fs/2(fs=$fs, lowHz=$lowHz, highHz=$highHz)',
+      );
+    }
+    final hp = _filtfilt(x, _Biquad.butterworth(fs, lowHz, lowPass: false));
+    return _filtfilt(hp, _Biquad.butterworth(fs, highHz, lowPass: true));
+  }
+
+  static List<double> _filtfilt(List<double> x, _Biquad f) {
+    final fwd = f.run(x);
+    return f.run(fwd.reversed.toList()).reversed.toList();
+  }
 
   // ---------------- DC / AC ----------------
 
@@ -279,5 +321,47 @@ class Max30102Signal {
   /// R → SpO2(%)。linear=true 用 `110−25R`；false 用 `−45.06R²+30.354R+94.845`。
   static double spo2FromR(double r, bool linear) {
     return linear ? 110.0 - 25.0 * r : -45.06 * r * r + 30.354 * r + 94.845;
+  }
+}
+
+/// 2 階 IIR(biquad)—— [Max30102Signal.bandpass] 用。
+/// 係數照 RBJ Audio EQ Cookbook,Q = 1/√2(Butterworth,通帶最平)。
+class _Biquad {
+  final double b0, b1, b2, a1, a2;
+  final bool lowPass;
+
+  const _Biquad(this.b0, this.b1, this.b2, this.a1, this.a2, this.lowPass);
+
+  factory _Biquad.butterworth(int fs, double f0, {required bool lowPass}) {
+    final w0 = 2 * math.pi * f0 / fs;
+    final c = math.cos(w0);
+    final alpha = math.sin(w0) / (2 * math.sqrt1_2);
+    final a0 = 1 + alpha;
+    final k = lowPass ? (1 - c) / 2 : (1 + c) / 2;
+    return _Biquad(
+      k / a0,
+      (lowPass ? 2 * k : -2 * k) / a0,
+      k / a0,
+      -2 * c / a0,
+      (1 - alpha) / a0,
+      lowPass,
+    );
+  }
+
+  /// 正向跑一次。狀態從第一筆的穩態起跑:低通的輸出 = 輸入、高通的輸出 = 0。
+  List<double> run(List<double> x) {
+    final y = List<double>.filled(x.length, 0);
+    if (x.isEmpty) return y;
+    double x1 = x[0], x2 = x[0];
+    double y1 = lowPass ? x[0] : 0, y2 = y1;
+    for (int i = 0; i < x.length; i++) {
+      final v = b0 * x[i] + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+      x2 = x1;
+      x1 = x[i];
+      y2 = y1;
+      y1 = v;
+      y[i] = v;
+    }
+    return y;
   }
 }

@@ -685,9 +685,9 @@ class LocalizationService {
       'k2_fixed_sqi_rounds': 'SQI {ok}/{n} 輪',
       'k2_fixed_pre_missing': '開頭未還原',
       'k2_fixed_conf': '可信度 {conf}',
-      'k2_fixed_conf_anomalies': '  異常 {n} 次（容許 {max}）',
-      'k2_fixed_conf_sqi': '  · SQI 多數票沒過（{ok}/{n} 輪過關）',
-      'k2_fixed_conf_beats': '  · 拍數 {n}，需要 ≥ {min}（9 + 空洞數）',
+      'k2_fixed_conf_clean': '  乾淨比例 {pct}（good ≥ 80%、rough ≥ 65%）',
+      'k2_fixed_conf_sqi': '  · SQI 多數票沒過（{ok}/{n} 輪過關）→ 最多 rough',
+      'k2_fixed_conf_beats': '  · 乾淨拍數 {n}，需要 ≥ {min}',
       'k2_fixed_conf_gaps': '  · 掉拍 {n} 處（{list}）',
       'k2_fixed_waiting': '等待本次量測的資料',
       'k2_hrv_fixed': 'HRV 心率變異(本次前 {sec}s)',
@@ -719,6 +719,18 @@ class LocalizationService {
       'k2_orient_unchanged': '不變',
       'k2_orient_mode_auto': '自動偵測',
       'k2_orient_mode_fixed': '指標 {n}',
+      // 0.0.0.7 對照欄(改版前的算法,只在 App 比較,不送出)
+      'k2_v7_title': '0.0.0.7 對照',
+      'k2_v7_note': '同一份原始資料、換回改版前的核心;不送出。圖上金色(圈、往上的直條、數字)= 0.0.0.7',
+      'k2_toggle_raw_ir': '原始 IR(白)',
+      'k2_toggle_v7_line': '0.0.0.7 移動平均線(金)',
+      'k2_chart_raw_ir': '原始 IR(獨立刻度)p2p {v}',
+      'k2_chart_v7_line': '0.0.0.7 移動平均線',
+      'k2_chart_zoom': '時間 ×{x} · 振幅 ×{y} · 雙擊還原',
+      'k2_v7_anomalies': '異常次數 / 容許',
+      'k2_v7_beats': '拍數',
+      'k2_v7_rule': '可信度(0.0.0.7):異常(空洞 + SQI 沒過)≤ 1 次 且 拍數 ≥ 9 + 空洞數 → good;'
+          '其餘 very rough',
       // 憋氣血氧曲線(驗證波長用:血氧壓低才分得出兩片板子的差)
       'k2_bh_title': '憋氣血氧曲線',
       'k2_bh_start': '開始憋氣',
@@ -886,7 +898,7 @@ class LocalizationService {
       'k2_fx_note_snr':
           'P_signal = 基頻 f₀（= 心率 / 60）與 2f₀ 各 ±{hw} Hz 內的功率；P_noise = {lo} ~ {hi} Hz 內其餘的功率。兩個功率在核心內部，未導出',
       'k2_fx_note_conf':
-          'gaps = RR 空洞數（有一拍沒通過、補漏拍也沒補回）。異常容許 1 次：漏掉的拍本來就已剔除、不進 HRV。沒手指時 sqi = 0、拍數 0。頻譜那套（snr_db 三級）改放在 confidence_video',
+          'clean = 乾淨 RR 佔這段的比例：每筆 RR 對前後各 4 筆的局部中位數，±20% 內算乾淨；漏拍、偽拍、SQI 差那輪、生理閘門擋掉的拍，在序列上各留一個空洞，空洞多長就換算成幾個間距。beats = 乾淨拍數。沒手指時 sqi = 0、拍數 0。三個可信度欄位送同一個值（v0.0.0.8）',
       'k2_fx_na_beats': '拍數不足 {min}（目前 {n}）',
       'k2_fx_na_spec': 'RR 間隔不足 8 個，算不出頻譜',
       'k2_fx_na_snr': '波形不足 5 秒，或還沒有心率',
@@ -1017,13 +1029,13 @@ class LocalizationService {
       'k2_help_snr_db_ref':
           'aquivio-vitals 原始註解：低於約 6 dB 時，RMSSD 的雜訊底線會超過典型的靜息 HRV。',
 
-      'k2_help_confidence_what': '讀數可信度：脈搏有沒有成立、量測中出狀況的次數有沒有超過容許。只有 good / very rough 兩級。',
+      'k2_help_confidence_what': '讀數可信度：這段 RR 有幾成是乾淨的。good / rough / very rough 三級（v0.0.0.8）。',
       'k2_help_confidence_how':
-          '兩個條件都成立才是 good（v0.0.0.7）：\n1. 異常 ≤ 1 次。異常 = RR 空洞數 + (SQI 沒過 ? 1 : 0)；空洞 = 相鄰兩拍接不起來（下一拍的起谷 ≠ 上一拍的終谷）\n2. 拍數 ≥ 9 + 空洞數（每多一個空洞就少一對相鄰，多要一拍補回來）\n其他（含手指離開）→ very rough。不會出現 rough 與 null。',
+          '看乾淨 RR 的比例（v0.0.0.8）：\n1. 乾淨拍數 < 9（含手指離開、沉澱中）→ very rough\n2. 乾淨比例 < 65% → very rough\n3. 乾淨比例 < 80%，或這一輪 SQI 沒過 → rough\n4. 其餘 → good\n乾淨 = 與前後各 4 筆的局部中位數相差 ±20% 內；乾淨比例 = 乾淨 RR 數 ÷（乾淨 RR 數 + 空洞裡應有的間距數）。不會是 null。',
       'k2_help_confidence_use':
           '站台拿它把關：very rough（或 null）就不去要推薦。另外印在提示詞的「Reading confidence: X」，但 fastify 的規則沒有用到它。',
       'k2_help_confidence_note':
-          '空洞代表有一拍沒通過考驗（生理閘門過長、與近 9 拍中位數差 > 40%、SQI 差、clean 剔除、訊號中斷），補漏拍也沒補回來。過短的假谷不會留下空洞。掉的拍本來就已剔除、不進 HRV（RMSSD 也不跨空洞相減），所以容許 1 次；超過才判 very rough。只看拍數不夠：照木頭時雜訊被剔掉幾拍後還剩 21 拍（有 3 個空洞，照樣 very rough）。已知漏洞：一長一短（谷被推偏，兩個 RR 加起來約兩拍）會被算進 HRV、也不留空洞，這條規則抓不到。原本照 aquivio-vitals 看 snr_db 的三級判斷改放在 confidence_video。',
+          '空洞代表那段的 RR 不乾淨或沒收到（漏拍、偽拍、SQI 差、生理閘門、訊號中斷）；空洞多長就換算成幾個間距，所以一個 5 秒的 SQI 差空洞與一個漏拍不會算成一樣。80% / 65% 的門檻依據：10/30 錄音訊號好的段落乾淨 89~100%，漂移晃動的段落 45~65%（那些段落的 RMSSD 互相差到兩倍以上）。已知限制：谷被推偏的一長一短，如果兩筆都只偏離局部中位數 20% 以內，仍會被當成乾淨。v0.0.0.7 的「異常 ≤ 1 次」規則已停用；頻譜那套（snr_db 三級）只在畫面上當對照。',
 
       'k2_drink_btn': '推薦飲品',
       'k2_drink_title': '這組數字會換到哪一杯？',
@@ -1664,9 +1676,10 @@ class LocalizationService {
       'k2_fixed_sqi_rounds': 'SQI {ok}/{n} rounds',
       'k2_fixed_pre_missing': 'head not recovered',
       'k2_fixed_conf': 'confidence {conf}',
-      'k2_fixed_conf_anomalies': '  {n} anomalies (allowed {max})',
-      'k2_fixed_conf_sqi': '  · SQI majority failed ({ok}/{n} rounds passed)',
-      'k2_fixed_conf_beats': '  · {n} beats, need ≥ {min} (9 + gaps)',
+      'k2_fixed_conf_clean': '  clean share {pct} (good ≥ 80%, rough ≥ 65%)',
+      'k2_fixed_conf_sqi':
+          '  · SQI majority failed ({ok}/{n} rounds passed) → rough at best',
+      'k2_fixed_conf_beats': '  · {n} clean beats, need ≥ {min}',
       'k2_fixed_conf_gaps': '  · {n} lost beat gap(s) ({list})',
       'k2_fixed_waiting': 'waiting for this measurement',
       'k2_hrv_fixed': 'HRV (first {sec}s)',
@@ -1701,6 +1714,19 @@ class LocalizationService {
       'k2_orient_unchanged': 'unchanged',
       'k2_orient_mode_auto': 'auto',
       'k2_orient_mode_fixed': 'mode {n}',
+      // 0.0.0.7 comparison column (the previous algorithm; App only, not sent)
+      'k2_v7_title': '0.0.0.7 comparison',
+      'k2_v7_note': 'Same raw data, the previous core; not sent. '
+          'Gold on the chart (rings, upward ticks, numbers) = 0.0.0.7',
+      'k2_toggle_raw_ir': 'raw IR (white)',
+      'k2_toggle_v7_line': '0.0.0.7 moving-average line (gold)',
+      'k2_chart_raw_ir': 'raw IR (own scale) p2p {v}',
+      'k2_chart_v7_line': '0.0.0.7 moving-average line',
+      'k2_chart_zoom': 'time ×{x} · amplitude ×{y} · double-click to reset',
+      'k2_v7_anomalies': 'anomalies / allowed',
+      'k2_v7_beats': 'beats',
+      'k2_v7_rule': 'confidence (0.0.0.7): anomalies (holes + SQI failed) ≤ 1 and '
+          'beats ≥ 9 + holes → good; otherwise very rough',
       // Breath-hold SpO2 curve (for validating wavelength: the two modules can
       // only be told apart once SpO2 is driven down)
       'k2_bh_title': 'Breath-hold SpO₂ curve',
@@ -1884,7 +1910,7 @@ class LocalizationService {
       'k2_fx_note_snr':
           'P_signal = power within ±{hw} Hz of f₀ (= HR / 60) and 2f₀; P_noise = the rest of {lo} – {hi} Hz. Both powers live inside the core and are not exported',
       'k2_fx_note_conf':
-          'gaps = holes in the RR series (a beat failed a check and was not recovered). One anomaly is allowed: the lost beat is already excluded from HRV. With no finger, sqi = 0 and beats = 0. The spectral one (snr_db, three tiers) now goes to confidence_video',
+          'clean = share of clean RRs in this stretch: each RR is compared with the local median of the 4 RRs on either side, within ±20% is clean; missed beats, artifacts, poor-SQI rounds and gate rejections each leave a hole, and a hole counts as as many intervals as its length implies. beats = clean beats. With no finger, sqi = 0 and beats = 0. All three confidence fields carry the same value (v0.0.0.8)',
       'k2_fx_na_beats': 'Fewer than {min} beats (currently {n})',
       'k2_fx_na_spec': 'Fewer than 8 RR intervals — no spectrum',
       'k2_fx_na_snr': 'Less than 5 s of waveform, or no heart rate yet',
@@ -2026,13 +2052,13 @@ class LocalizationService {
           'aquivio-vitals source comment: below about 6 dB the RMSSD noise floor exceeds typical resting HRV.',
 
       'k2_help_confidence_what':
-          'Reading confidence: whether a pulse is present and the number of anomalies stays within the allowance. Only two tiers, good / very rough.',
+          'Reading confidence: what share of this stretch of RRs is clean. Three tiers, good / rough / very rough (v0.0.0.8).',
       'k2_help_confidence_how':
-          'good only when both hold (v0.0.0.7):\n1. anomalies ≤ 1, where anomalies = RR holes + (SQI failed ? 1 : 0); a hole = adjacent beats do not join up (next start trough ≠ previous end trough)\n2. beats ≥ 9 + holes (each hole removes one adjacent pair, so one more beat is required)\nOtherwise (including finger off) → very rough. Never rough or null.',
+          'Based on the clean-RR share (v0.0.0.8):\n1. fewer than 9 clean beats (including finger off, settling) → very rough\n2. clean share < 65% → very rough\n3. clean share < 80%, or SQI failed this round → rough\n4. otherwise → good\nClean = within ±20% of the local median of the 4 RRs on either side; clean share = clean RRs ÷ (clean RRs + intervals implied by the holes). Never null.',
       'k2_help_confidence_use':
           'The station uses it as a gate: on very rough (or null) it does not request a recommendation. It is also printed in the prompt as "Reading confidence: X", but fastify\'s rules do not use it.',
       'k2_help_confidence_note':
-          'A hole means a beat failed a check (physiological gate too long, > 40% off the median of the last 9 beats, poor SQI, clean() removal, signal break) and missed-beat recovery did not restore it. Short false troughs leave no hole. The lost beat is already excluded from HRV (RMSSD never subtracts across a hole), so one anomaly is allowed; more than that is very rough. Beat count alone is not enough: on wood, 21 beats were still left after noise rejections (with 3 holes, still very rough). Known gap: a long-short pair (a trough pushed off, two RRs summing to about two beats) is counted into HRV and leaves no hole, so this rule cannot catch it. The previous three-tier judgment from aquivio-vitals (snr_db) now goes to confidence_video.',
+          'A hole means RRs there were not clean or not received (missed beat, artifact, poor SQI, physiological gate, signal break); a hole counts as as many intervals as its length implies, so a 5-second poor-SQI hole and a single missed beat are not counted the same. Where 80% / 65% come from: in the 10/30 recordings, good segments were 89–100% clean and drifting / moving ones 45–65% (their RMSSDs differed by more than 2×). Known limit: a long-short pair from a displaced trough is still counted as clean if both RRs stay within 20% of the local median. The v0.0.0.7 rule (anomalies ≤ 1) is retired; the spectral one (snr_db, three tiers) is shown on screen for reference only.',
 
       'k2_drink_btn': 'Drink pick',
       'k2_drink_title': 'What drink would these numbers produce?',

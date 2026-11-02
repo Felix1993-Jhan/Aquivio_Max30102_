@@ -2,12 +2,13 @@
 // Max30102HrvCalculator — HRV 純計算（無狀態，可單元測試）
 // ============================================================================
 // 只負責「給一份累積好的 RR → 算出 HRV」：
-//   clean()   全體中位數 ±30% 再濾一次（可選是否含補漏拍補回的拍）
-//   hrvFrom() SDNN / RMSSD / SD1 / SD2 / meanHr / 有效對數
-//   stats()   = hrvFrom(clean(...)) 的方便包裝
+//   classify() 逐筆分類 乾淨 / 漏拍 / 偽拍(對「前後各 4 筆」的局部中位數,v0.0.0.8)
+//   clean()    只留乾淨的那些（可選是否含補漏拍補回的拍）
+//   hrvFrom()  SDNN / RMSSD / SD1 / SD2 / meanHr / 有效對數
+//   stats()    = hrvFrom(clean(...)) 的方便包裝
 //
-// 「累積」(維護最近 300 拍 RR 歷史、補漏拍、收集時誤拍過濾) 是有狀態的事,
-// 留在 Max30102Controller;本檔只吃「已累積的樣本清單」,不碰任何狀態/環形緩衝。
+// 「累積」(維護最近 300 拍 RR 歷史、補漏拍、生理閘門) 是有狀態的事,
+// 留在 Max30102BeatSeries;本檔只吃「已累積的樣本清單」,不碰任何狀態/環形緩衝。
 //
 // RMSSD 關鍵:只累加「時間相鄰(前一筆終谷 == 這筆起谷)」的相鄰對,分母=連續對數,
 // 跨掉拍/跨離群的假相減不計入 → 避免 RMSSD、SD1 被灌水。
@@ -21,6 +22,19 @@ typedef HrvRrSample = ({double rr, int startAbs, int endAbs, bool recovered});
 
 /// 乾淨 RR（僅值 + 起/終谷，供判連續與繪圖）。
 typedef HrvRrPoint = ({double rr, int startAbs, int endAbs});
+
+/// 一筆 RR 的分類(見 [Max30102HrvCalculator.classify])。
+enum HrvRrKind {
+  /// 與局部中位數相差 ≤ 20% —— 進 HRV。
+  clean,
+
+  /// ≈ 局部中位數的 2~4 倍整數倍(±0.2 倍)—— 中間漏抓了谷。代表的是好幾拍,
+  /// 不是一個真的間距:**不進 HRV**。
+  missed,
+
+  /// 其餘(偏離 > 20% 又不是整數倍)—— 谷被雜訊推偏 / 多抓。**不進 HRV**。
+  artifact,
+}
 
 /// HRV 統計結果（單位：ms；meanHr=bpm；pairs/totalPairs=連續對數/全部相鄰對）。
 typedef HrvStats = ({
@@ -45,13 +59,23 @@ class Max30102HrvCalculator {
   // 暖機:乾淨拍 < 此數 → HRV 樣本太少不穩,UI 標「暖機中/僅供參考」。
   // 9 拍讓中位數基準紮實、離群也被 clean() 濾過;要 HRV 數字更穩可再拉高(如 20~30)。
   static const int minBeatsForHrv = 9;
-  // rank6:clean() 的穩健離群倍率 —— 剔除條件 |rr − 中位數| > thresh。
-  // 門檻隨資料自身離散度縮放(高 HRV 不誤剔)。
-  static const double madK = 2.5;
-  // MAD → 標準差的一致性換算(常態下 σ ≈ 1.4826 × MAD)。
-  // 少了它,「2.5×MAD」其實只等於 ≈1.69σ —— 連完全正常的資料都會被砍掉約 9%,
-  // 而且「心跳越穩 → MAD 越小 → 門檻越緊 → 砍越兇」,自打嘴巴。
-  static const double madScale = 1.4826;
+
+  // ── classify() 的參數(v0.0.0.8)───────────────────────────────────
+  // 舊版 clean() 是「全窗中位數 ± max(2.5×1.4826×MAD, 0.5×中位數)」:帶寬至少 ±50%,
+  // 實測(10/30 錄音)「谷被基線漂移推偏」造成的一長一短(570 / 1010,中位 840)
+  // 全部過關,RMSSD 被灌到 215~265ms(真值約 90),confidence 還是 good。
+  // 改成逐筆對「自己前後各 4 筆」的局部中位數判 —— 局部基準跟得上心率漂移,
+  // 所以帶寬可以收緊到 ±20%,而且從第一筆就生效(舊的 40% 誤拍閘門要先有 3 拍基準,
+  // 早搏滾雪球時還會把基準鎖死在 2 倍,見 Max30102BeatSeries.feed)。
+  /// 局部中位數取「前後各幾筆」(共 2×4+1 = 9 筆,含自己)。
+  static const int classifyHalfWindow = 4;
+
+  /// 乾淨的容差:|rr − 局部中位數| ≤ 此比例 × 局部中位數。
+  static const double cleanTol = 0.20;
+
+  /// 漏拍:rr ≈ k × 局部中位數,k ∈ [2, [missedMaxMultiple]],且 |rr/中位 − k| ≤ [missedTol]。
+  static const int missedMaxMultiple = 4;
+  static const double missedTol = 0.20;
   /// [HrvStats.hrvScore] 的上限。
   ///
   /// 原本是 100(分數的慣例),但實測會撞到:RMSSD 到 148ms 就滿分,
@@ -65,14 +89,6 @@ class Max30102HrvCalculator {
   ///    百分比之類的視覺,要自己處理溢出。
   static const double hrvScoreMax = 150;
 
-  // 門檻下限 = 中位數 × 此比例。clean 的定位改為「只擋真漏拍/切拍,不砍真拍的中等擺動」:
-  //   0.5 → 保留 [0.5×, 1.5×] 中位數以內的拍;超出才視為漏拍(≈2×)/切拍(≈0.5×)剔除。
-  //   為何不能用 0.15(舊值):安靜時 MAD 只有 40ms,2.5×1.4826×MAD≈148ms → 帶寬只 ±148,
-  //   會把「真谷、真間距、只是中等偏離(如 630~1030,離中位 150~210ms)」的正常拍當離群砍掉
-  //   (實測體動/訊號衰退期的真拍被誤剔)。真漏拍 820→1640(離 820=820ms)仍遠超 ±410,照擋。
-  //   高 HRV 者(MAD 大)由 max() 的 2.5σ 項自動放更寬,不受此下限壓。
-  static const double minRelThresh = 0.5;
-
   // ── H1：疑似異位拍(早搏)偵測參數 ──────────────────────────────────
   // A 階段「只標記、不從池移除」→ 不影響任何 HRV 數字。簽章:短→代償長→回歸,
   // 門檻用「近 window 拍逐拍差」的自適應值(median|ΔRR|+K·MAD),非固定百分比:
@@ -81,66 +97,83 @@ class Max30102HrvCalculator {
   static const int ectopicWindow = 10; // 自適應統計窗(近 N 拍);乾淨拍 < N → 不啟動
   static const double ectopicReturnTol = 0.20; // 回歸容差:前/後拍需回到 中位 ±20% 內
 
-  /// 用全體中位數 ±30% 再濾一次（排開頭尖刺）。
+  /// 逐筆分類(v0.0.0.8):每筆 RR 對「自己前後各 [classifyHalfWindow] 筆」
+  /// (清單兩端就用拿得到的那幾筆)的中位數判 —— 見 [HrvRrKind]。
+  ///
+  /// 局部中位數取**所有**鄰居(含漏拍、偽拍),不是只取乾淨的:中位數本身就抗離群,
+  /// 9 筆裡要有一半以上是壞的才會被帶偏;只取乾淨的反而要先有「乾淨」的定義,
+  /// 起步那幾拍就沒有基準可用(舊版 40% 閘門正是這樣鎖死在 2 倍的)。
+  ///
+  /// 回傳與 [pts] 等長、同順序。
+  static List<HrvRrKind> classify(List<HrvRrPoint> pts) {
+    final out = <HrvRrKind>[];
+    for (int i = 0; i < pts.length; i++) {
+      final lo = math.max(0, i - classifyHalfWindow);
+      final hi = math.min(pts.length, i + classifyHalfWindow + 1);
+      final med = _medianMid([for (int j = lo; j < hi; j++) pts[j].rr]);
+      final rr = pts[i].rr;
+      // RR 進池前已過生理閘門(必為正),中位數不可能 ≤ 0。真的出現就是上游壞了 ——
+      // 照舊默默放行會讓 HRV 安靜地算錯,所以直接丟例外。
+      if (rr <= 0 || med <= 0) {
+        throw StateError('classify: RR 必須為正(rr=$rr, 局部中位=$med, 第 $i 筆)');
+      }
+      if ((rr - med).abs() <= cleanTol * med) {
+        out.add(HrvRrKind.clean);
+        continue;
+      }
+      final k = (rr / med).round();
+      if (k >= 2 && k <= missedMaxMultiple && (rr / med - k).abs() <= missedTol) {
+        out.add(HrvRrKind.missed);
+      } else {
+        out.add(HrvRrKind.artifact);
+      }
+    }
+    return out;
+  }
+
+  /// 只留乾淨的 RR(見 [classify])。
   /// includeRecovered=false → 排除補漏拍補回的拍（給「補漏拍 開/關」對照）。
   /// 保留起/終谷（下游靠「前終谷==此起谷」判相鄰是否連續）。
-  /// 注意：這裡會「壓縮」清單(抽掉離群)，被抽掉處左右兩筆的谷位置就對不上 →
-  /// RMSSD 自動略過那種跨洞相減。
+  /// 注意：這裡會「壓縮」清單(抽掉漏拍/偽拍)，被抽掉處左右兩筆的谷位置就對不上 →
+  /// RMSSD 自動略過那種跨洞相減 —— 逐差只取「兩筆都乾淨、而且首尾相接」的那一對。
   static List<HrvRrPoint> clean(
     List<HrvRrSample> history, {
     required bool includeRecovered,
-    bool apply = true, // false → 不做 MAD 離群濾(clean 開關關閉時);RR 全收
+    bool apply = true, // false → 不分類(clean 開關關閉時);RR 全收
   }) {
-    final base = <HrvRrPoint>[
-      for (final e in history)
-        if (includeRecovered || !e.recovered)
-          (rr: e.rr, startAbs: e.startAbs, endAbs: e.endAbs),
-    ];
-    if (!apply) return base; // clean 關 → 全收(漏拍仍由 ⑤/search-back 把關,不影響)
-    if (base.length < 4) return base;
-    // rank6:MAD 穩健離群(取代固定 ±30%)。門檻隨資料自身離散度縮放 →
-    //   高 HRV 的寬尾巴不會被誤剔(±30% 會),仍砍得掉真離群。
-    //   剔除條件:|rr − 中位數| > thresh,
-    //   thresh = max(madK × 1.4826 × MAD, minRelThresh × 中位數)。
-    //   下限那項不可省:RR 有 10ms 量化,安靜時 MAD 只有 1~2 格,純 MAD 門檻會
-    //   塌到 ±25ms,把正常心率漂移(收 30s 時 RR 從 780 爬到 900)整段砍掉。
-    final rrs = [for (final e in base) e.rr];
-    final med = _median(rrs);
-    if (med <= 0) return base;
-    final mad = _median([for (final v in rrs) (v - med).abs()]);
-    if (mad <= 0) return base; // 資料幾乎全等 → 不剔(避免除不出門檻而全砍)
-    final thresh = math.max(madK * madScale * mad, minRelThresh * med);
+    final base = _base(history, includeRecovered);
+    if (!apply) return base;
+    final kinds = classify(base);
     return [
-      for (final e in base)
-        if ((e.rr - med).abs() <= thresh) e,
+      for (int i = 0; i < base.length; i++)
+        if (kinds[i] == HrvRrKind.clean) base[i],
     ];
   }
 
-  /// clean() 的「互補集合」= 顯示時被 MAD 剔掉的離群拍(透明化用)。
-  /// 與 clean() 同一組門檻;不足以計算門檻(拍數<4 / med/mad=0)時視為「沒剔任何拍」。
+  /// clean() 的「互補集合」= 被判成漏拍 / 偽拍、不進 HRV 的拍(透明化用)。
   static List<HrvRrPoint> cleanRejects(
     List<HrvRrSample> history, {
     required bool includeRecovered,
     bool apply = true, // false → clean 關閉 → 沒有任何拍被剔(紅點消失)
   }) {
     if (!apply) return const [];
-    final base = <HrvRrPoint>[
-      for (final e in history)
-        if (includeRecovered || !e.recovered)
-          (rr: e.rr, startAbs: e.startAbs, endAbs: e.endAbs),
-    ];
-    if (base.length < 4) return const [];
-    final rrs = [for (final e in base) e.rr];
-    final med = _median(rrs);
-    if (med <= 0) return const [];
-    final mad = _median([for (final v in rrs) (v - med).abs()]);
-    if (mad <= 0) return const [];
-    final thresh = math.max(madK * madScale * mad, minRelThresh * med);
+    final base = _base(history, includeRecovered);
+    final kinds = classify(base);
     return [
-      for (final e in base)
-        if ((e.rr - med).abs() > thresh) e,
+      for (int i = 0; i < base.length; i++)
+        if (kinds[i] != HrvRrKind.clean) base[i],
     ];
   }
+
+  static List<HrvRrPoint> _base(
+    List<HrvRrSample> history,
+    bool includeRecovered,
+  ) =>
+      <HrvRrPoint>[
+        for (final e in history)
+          if (includeRecovered || !e.recovered)
+            (rr: e.rr, startAbs: e.startAbs, endAbs: e.endAbs),
+      ];
 
   /// H1：偵測「疑似異位拍(早搏)」—— **純標記,不從池移除**(A 階段,不動任何 HRV 數字)。
   ///
@@ -209,6 +242,15 @@ class Max30102HrvCalculator {
     if (xs.isEmpty) return 0;
     final s = List<double>.from(xs)..sort();
     return s[s.length ~/ 2];
+  }
+
+  /// 中位數(偶數取中間兩筆的平均)。[classify] 專用:局部視窗常是偶數筆
+  /// (清單兩端),取上中會讓判定往長的那側偏。
+  static double _medianMid(List<double> xs) {
+    if (xs.isEmpty) return 0;
+    final s = List<double>.from(xs)..sort();
+    final m = s.length ~/ 2;
+    return s.length.isOdd ? s[m] : (s[m - 1] + s[m]) / 2;
   }
 
   /// 便利包裝：clean 後直接算 HRV。回傳 null 表示拍數不足。

@@ -464,35 +464,42 @@ void main() {
           reason: 'wave 已經減掉 baseline,應該在 0 上下震盪');
     });
 
-    test('★ 延遲輸出 → wave 與「拿 raw_wave 事後對整段算」完全一致', () {
-      // 這是整個設計的根據:baseline 與低通都是置中移動平均,最新那批拿不到
-      // 未來的半個視窗。不延遲的話 baseline 的誤差是脈搏的 65%,而且在每個
-      // frame 內線性成長 → 每秒一次的鋸齒。核心壓住 110 筆之後誤差歸零。
+    // 線定下來要等的筆數 = 截尾半窗 4 + 150(v0.0.0.8;v0.0.0.7 是 110)
+    const hold =
+        Max30102Config.trimWindow ~/ 2 + Max30102Config.troughGuardSamples;
+
+    test('★ 延遲輸出 → wave 與「拿 raw_wave 事後對整段算」幾乎一致', () {
+      // 這是整個設計的根據:帶通是 IIR、正反各跑一次,最新那段每多一筆資料就會變。
+      // 不延遲的話右緣誤差接近脈搏振幅(實測 98%),每秒一次的鋸齒;
+      // 核心壓住 154 筆之後誤差約 1.4%(相對振幅)。
       final e = feedSynthetic(seconds: 25, waveSeconds: 30);
       final det = (e.waveSinceJson(null).wave['irTrim'] as List).cast<num>();
       final raw = (e.waveSinceJson(null).rawWave['irTrim'] as List).cast<num>();
 
-      // raw_wave 是截尾後的值 → 自己做「減 baseline → 低通」,兩者必須吻合
-      final line = Max30102Signal.detrendSmooth(
+      // raw_wave 是截尾後的值 → 自己做帶通,兩者必須幾乎吻合
+      final line = Max30102Signal.bandpass(
         [for (final v in raw) v.toDouble()],
-        baselineWindow: 200,
-        lowpassWindow: 13,
+        100,
+        lowHz: Max30102Config.beatBandLowHz,
+        highHz: Max30102Config.beatBandHighHz,
       );
+      final amp = line.fold<double>(0, (m, x) => x.abs() > m ? x.abs() : m);
       var maxErr = 0.0;
       // 只驗中段 —— 兩端在 raw 這個子序列裡本來就缺前後文,
       // 核心是對整個緩衝(含沉澱期)算的,條件不同。
-      const edge = 100 + 6;
+      const edge = 200;
       for (int i = edge; i < raw.length - edge; i++) {
         final err = (det[i] - line[i]).abs();
         if (err > maxErr) maxErr = err;
       }
-      expect(maxErr, lessThan(1.0),
-          reason: '延遲夠了就該完全吻合(0.1 是四捨五入的量級)');
+      expect(maxErr, lessThan(0.02 * amp),
+          reason: '延遲夠了誤差應在振幅的 2% 內(實際 '
+              '${(100 * maxErr / amp).toStringAsFixed(2)}%)');
     });
 
-    test('★ wave 與「拿原始值事後對整段算」逐筆相同(截尾也沒有批尾截斷)', () {
+    test('★ wave 與「拿原始值事後對整段算」幾乎相同(截尾也沒有批尾截斷)', () {
       // v0.0.0.6 以前截尾用的是核心逐批給的 newIrTrim,每批尾端 4 筆的右側
-      // 是截斷的 —— baseline 再怎麼延遲也修不回來,站台畫出來每批一個小缺口。
+      // 是截斷的 —— 再怎麼延遲也修不回來,站台畫出來每批一個小缺口。
       // 現在 wave = 核心的 newIrWave,這裡拿 /waveform 的原始值重算來對。
       final e = feedSynthetic(seconds: 20, waveSeconds: 30);
       final raw = e.waveformJson();
@@ -501,9 +508,11 @@ void main() {
       final truth = Max30102Signal.troughLine(
         ir,
         trimWindow: Max30102Config.trimWindow,
-        baselineWindow: 200,
-        lowpassWindow: 13,
+        fs: 100,
+        lowHz: Max30102Config.beatBandLowHz,
+        highHz: Max30102Config.beatBandHighHz,
       );
+      final amp = truth.fold<double>(0, (m, x) => x.abs() > m ? x.abs() : m);
       final w = e.waveSinceJson(null).wave;
       final wFirst = w['firstAbs'] as int;
       final det = (w['irTrim'] as List).cast<num>();
@@ -511,22 +520,23 @@ void main() {
       var maxErr = 0.0;
       for (int k = 0; k < det.length; k++) {
         final i = wFirst + k - rawFirst; // 在原始陣列裡的位置
-        // 原始陣列從輸出起點開始,沒有沉澱期當前後文 → 只對兩邊都有 110 筆的
-        if (i < 110 || i >= ir.length - 110) continue;
+        // 原始陣列從輸出起點開始,沒有沉澱期當前後文 → 左邊跳過 IIR 暫態那段
+        if (i < 200 || i >= ir.length - hold) continue;
         compared++;
         final err = (det[k] - truth[i]).abs();
         if (err > maxErr) maxErr = err;
       }
       expect(compared, greaterThan(500));
-      expect(maxErr, lessThan(0.06), reason: '只剩四捨五入到一位小數的誤差');
+      expect(maxErr, lessThan(0.02 * amp),
+          reason: '誤差應在振幅的 2% 內(實際 ${(100 * maxErr / amp).toStringAsFixed(2)}%)');
     });
 
-    test('★ 最新的 100 筆會被壓著不送(等湊滿置中視窗)', () {
+    test('★ 最新的 154 筆會被壓著不送(等線定下來)', () {
       final e = feedSynthetic(seconds: 20, waveSeconds: 30);
       final w = e.waveSinceJson(null).wave;
       final emitted = (w['firstAbs'] as int) + (w['count'] as int);
-      expect(emitted, lessThanOrEqualTo(e.totalSamples - 100),
-          reason: '沒有完整前後文的樣本不可以送出去 —— 送了就凍住,修不回來');
+      expect(emitted, lessThanOrEqualTo(e.totalSamples - hold),
+          reason: '線還沒定下來的樣本不可以送出去 —— 送了就凍住,修不回來');
     });
 
     test('wave 只在 /stream,GET /vitals 不該有', () async {

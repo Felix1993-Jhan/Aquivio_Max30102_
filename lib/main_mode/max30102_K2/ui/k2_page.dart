@@ -26,6 +26,9 @@ import '../k2_protocol.dart';
 import '../k2_setting_limits.dart';
 import '../k2_signal.dart';
 import '../k2_vitals_metrics.dart';
+// 0.0.0.7 對照核心(類別名與現行核心相同 → 一律用 v7 前綴),見該資料夾的 README
+import '../../max30102_K2_v007/k2_hrv_calculator.dart' as v7;
+import '../../max30102_K2_v007/k2_vitals_metrics.dart' as v7;
 import 'k2_drink_preview.dart';
 import 'k2_fixed_window.dart';
 import 'k2_formula_panel.dart';
@@ -74,6 +77,12 @@ class _K2PageState extends State<K2Page> {
   /// 之後就可以收起來。滾動模式不需要這個:那段本來就會自己滑出畫面。
   bool _hideDead = false;
 
+  /// 波形圖上疊原始 IR(白線,獨立刻度)—— 看濾波前的訊號長什麼樣、漂移有多大。
+  bool _showRawIr = false;
+
+  /// 波形圖上疊 0.0.0.7 找谷用的移動平均線(金線,與 IR 線同刻度)—— 與現行的帶通線比形狀。
+  bool _showV7Line = false;
+
   /// 完整存檔:開 = 快照額外寫入開頭段與全部衍生數值。**預設關** ——
   /// 關閉時產出的檔案與以往逐位元相同,舊檢視器與既有的比對流程不受影響。
   bool _fullSnapshot = false;
@@ -85,18 +94,18 @@ class _K2PageState extends State<K2Page> {
   /// 定長窗的唯一取法。⚠️ 所有地方都要走這裡 —— `view()` 的 memo 只記一組參數,
   /// 兩處用不同的 tail 呼叫會互相把對方的 memo 擠掉,每次都重算。
   ///
-  /// tail = 核心 newIrWave 壓住的筆數(截尾 4 + baseline 100 + 低通 6 = 110):
-  /// 圖在窗後多接這一段,窗內最後一秒的線才有完整的右側前後文。
+  /// tail = 核心 newIrWave 壓住的筆數(截尾 4 + 150 = 154,見 Max30102Config.troughGuardSamples):
+  /// 圖在窗後多接這一段,窗內最後那段的線才是定下來的(也是核心找谷時看到的)。
   K2FixedView? _fixedView() =>
       _adapter.fixedWindow.view(_shortSec, tail: _waveTail);
 
-  int get _waveTail {
-    const fs = Max30102Config.samplingRateHz;
-    final cfg = _adapter.core.config;
-    return Max30102Config.trimWindow ~/ 2 +
-        Max30102Signal.baselineWindow(fs, cfg.bandLowHz) ~/ 2 +
-        Max30102Signal.lowpassWindow(fs, cfg.bandHighHz) ~/ 2;
-  }
+  /// 0.0.0.7 對照核心的定長窗,取法與 [_fixedView] 相同(同一個 tail,memo 互不干擾)。
+  K2FixedView? _fixedViewV7() =>
+      _adapter.fixedWindowV7.view(_shortSec, tail: _waveTail);
+
+  // v0.0.0.7 是 4 + 100 + 6 = 110(三個置中移動平均的半窗)。
+  int get _waveTail =>
+      Max30102Config.trimWindow ~/ 2 + Max30102Config.troughGuardSamples;
 
   /// 視窗長度輸入框。用 controller 而不是 `initialValue` + `key` ——
   /// 整頁每秒 rebuild 一次,那種寫法會在打字打到一半時掉焦點。
@@ -574,15 +583,11 @@ class _K2PageState extends State<K2Page> {
                 color: qualityKnown ? null : Colors.grey.shade400,
               ),
               stat(
-                '異常次數',
-                qualityKnown
-                    ? '${m.anomalies} / 容許 ${VitalsMetrics.maxAnomalies}'
-                    : '—',
-                color: !qualityKnown
-                    ? Colors.grey.shade400
-                    : (m.anomalies > VitalsMetrics.maxAnomalies
-                          ? Colors.red.shade700
-                          : (m.anomalies > 0 ? Colors.orange.shade800 : null)),
+                '乾淨比例',
+                qualityKnown ? _cleanSharePct(m) : '—',
+                color: qualityKnown
+                    ? _cleanShareColor(m.cleanShare)
+                    : Colors.grey.shade400,
               ),
               // SNR 版只當對照,不再送出(confidence_video 欄位改送與 confidence 同值)
               stat('可信度(SNR,不送出)', m.confidenceVideo ?? '—'),
@@ -1352,39 +1357,36 @@ class _K2PageState extends State<K2Page> {
         final conf = m.confidenceByPulse;
         lines.add((
           text: trParams('k2_fixed_conf', {'conf': conf}),
-          color: conf == 'good' ? Colors.green.shade700 : Colors.red.shade700,
+          color: _confColor(conf),
         ));
-        // 異常次數:容許範圍內 → 橘色(有發生、但還算可信);超過 → 紅色
-        final over = m.anomalies > VitalsMetrics.maxAnomalies;
-        final anomalyColor = m.anomalies == 0
-            ? Colors.grey.shade600
-            : (over ? Colors.red.shade700 : Colors.orange.shade800);
+        // 乾淨比例(v0.0.0.8 的可信度依據):≥ 80% 灰、65~80% 橘、< 65% 紅
+        final shareColor =
+            _cleanShareColor(m.cleanShare) ?? Colors.grey.shade600;
         lines.add((
-          text: trParams('k2_fixed_conf_anomalies', {
-            'n': m.anomalies,
-            'max': VitalsMetrics.maxAnomalies,
-          }),
-          color: anomalyColor,
+          text: trParams('k2_fixed_conf_clean', {'pct': _cleanSharePct(m)}),
+          color: shareColor,
         ));
+        // SQI 沒過:最多 rough(比例看整個窗,SQI 看「現在」)
         if (!m.sqiOk) {
           lines.add((
             text: trParams('k2_fixed_conf_sqi', {
               'ok': fx.sqiOkRounds,
               'n': fx.rounds,
             }),
-            color: anomalyColor,
+            color: Colors.orange.shade800,
           ));
         }
-        // 拍數是先決條件,不算異常:不夠就直接 very rough
-        if (m.beats < m.minBeatsNeeded) {
+        // 拍數是先決條件:乾淨拍不到 9 就直接 very rough
+        if (m.beats < Max30102HrvCalculator.minBeatsForHrv) {
           lines.add((
             text: trParams('k2_fixed_conf_beats', {
               'n': m.beats,
-              'min': m.minBeatsNeeded,
+              'min': Max30102HrvCalculator.minBeatsForHrv,
             }),
             color: Colors.red.shade700,
           ));
         }
+        final anomalyColor = shareColor; // 空洞列表沿用乾淨比例的顏色
         if (m.rrGaps > 0) {
           final secs = [
             for (int i = 0; i + 1 < fx.pts.length; i++)
@@ -1574,6 +1576,23 @@ class _K2PageState extends State<K2Page> {
           bpm: v?.bpm,
           ir: _adapter.waveIr,
         );
+    // ── 0.0.0.7 對照:同一段時間、同一套取法,只換核心 ────────────────────
+    //    HRV 與可信度一律用 0.0.0.7 自己的函式算(異常次數、兩級可信度都在那裡)。
+    final fx7 = _fixedMode ? _fixedViewV7() : null;
+    final pts7 = fx7?.pts ?? _adapter.pointsRecentSecondsV7(_shortSec);
+    final hv7 = pts7.isEmpty ? null : v7.Max30102HrvCalculator.hrvFrom(pts7);
+    final c7 = _adapter.latestV7;
+    final metrics7 = v7.Max30102VitalsMetrics.compute(
+      pts: pts7,
+      hv: hv7,
+      // 定長模式照定長窗的規則取 SQI(窗內輪次多數決),與現行那份一致
+      sqiOk: fx7 != null
+          ? fx7.rounds > 0 && fx7.sqiOkRounds * 2 >= fx7.rounds
+          : (c7?.sqiOk ?? false),
+      settling: fx7 != null ? false : (c7?.settling ?? false),
+      bpm: _adapter.displayComputeV7?.bpm,
+      ir: _adapter.waveIr,
+    );
     // ── 波形圖的輸入:定長 / 滾動兩條路在這裡收斂成同一組變數 ──────────
     //
     // 開頭那 3.5 秒(空轉 + 沉澱 + 方向判定)**兩種模式都要看得到** ——
@@ -1709,10 +1728,44 @@ class _K2PageState extends State<K2Page> {
                 _strapiPanel(metrics),
               ]),
               const SizedBox(width: 8),
+              // ── 0.0.0.7 對照欄:與左欄同一段時間,並排比數字 ──
+              _v7Panel(hv7, pts7.length, metrics7),
+              const SizedBox(width: 8),
               // ── 綠:右側(上波形 / 下 RR趨勢+Poincaré)──
               Expanded(
                 child: Column(
                   children: [
+                    // ── 波形圖上方的對照開關:原始 IR(白)/ 0.0.0.7 移動平均線(金)──
+                    Row(
+                      children: [
+                        for (final (label, on, set) in [
+                          (
+                            tr('k2_toggle_raw_ir'),
+                            _showRawIr,
+                            (bool b) => _showRawIr = b,
+                          ),
+                          (
+                            tr('k2_toggle_v7_line'),
+                            _showV7Line,
+                            (bool b) => _showV7Line = b,
+                          ),
+                        ])
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6, bottom: 4),
+                            child: FilterChip(
+                              label: Text(
+                                label,
+                                style: const TextStyle(fontSize: 10),
+                              ),
+                              selected: on,
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              onSelected: (b) => setState(() => set(b)),
+                            ),
+                          ),
+                      ],
+                    ),
                     // 波形圖吃剩餘空間 → 拖曳把手變高時，只有它長大。
                     // 照原版 max30102_waveform_chart2 的做法:用 sampleVersionNotifier
                     // 讓波形自己以樣本速率(~10Hz)重繪,不必整頁 rebuild;
@@ -1746,6 +1799,52 @@ class _K2PageState extends State<K2Page> {
                                 for (final t in _adapter.displayTroughs())
                                   t + preLen,
                               ];
+                          // 0.0.0.7 的谷:座標規則與上面完全相同(兩個核心吐樣本的時間點一樣)
+                          final srcTroughsAlt =
+                              fx7?.chartTroughs ??
+                              [
+                                for (final t in _adapter.displayTroughsV7())
+                                  t + preLen,
+                              ];
+                          // 底部時間線要標數字的 RR(起谷, 終谷)→ 圖上索引。
+                          // 定長照定長窗自己的換算(abs − base + 開頭段長度,同 chartTroughs);
+                          // 滾動照波形陣列,前面接了開頭段就整批平移。
+                          List<({int from, int to})> spans(
+                            K2FixedView? v,
+                            K2FixedWindow w,
+                            List<({int from, int to})> rolling,
+                          ) {
+                            if (v == null) {
+                              return [
+                                for (final s in rolling)
+                                  (from: s.from + preLen, to: s.to + preLen),
+                              ];
+                            }
+                            final off = w.preIr.length - w.base;
+                            return [
+                              for (final p in v.pts)
+                                (from: p.startAbs + off, to: p.endAbs + off),
+                            ];
+                          }
+
+                          List<({int from, int to})> cut(
+                            List<({int from, int to})> s,
+                          ) => dropHead > 0
+                              ? [
+                                  for (final x in s)
+                                    if (x.from >= dropHead)
+                                      (
+                                        from: x.from - dropHead,
+                                        to: x.to - dropHead,
+                                      ),
+                                ]
+                              : s;
+                          final srcSpans = spans(fx, fw, _adapter.displaySpans());
+                          final srcSpansAlt = spans(
+                            fx7,
+                            _adapter.fixedWindowV7,
+                            _adapter.displaySpansV7(),
+                          );
                           final srcBands = fx != null
                               ? fx.bands
                               : (headInRolling
@@ -1776,6 +1875,22 @@ class _K2PageState extends State<K2Page> {
                                       if (t >= dropHead) t - dropHead,
                                   ]
                                 : srcTroughs,
+                            troughsAlt: dropHead > 0
+                                ? [
+                                    for (final t in srcTroughsAlt)
+                                      if (t >= dropHead) t - dropHead,
+                                  ]
+                                : srcTroughsAlt,
+                            rrSpans: cut(srcSpans),
+                            rrSpansAlt: cut(srcSpansAlt),
+                            showRawIr: _showRawIr,
+                            showAltLine: _showV7Line,
+                            // 圖上第 0 筆的絕對位置(點選的谷靠它記住,滾動時直線才跟得住):
+                            // 定長 = 定長窗的換算(abs − base + 開頭段)反過來,再加上裁掉的空轉段;
+                            // 滾動 = 波形陣列的起點,前面接了開頭段就往前推 preLen。
+                            absOffset: fx != null
+                                ? fw.base - fw.preIr.length + dropHead
+                                : _adapter.waveBase - preLen,
                             bands: _paintBands(
                               dropHead > 0
                                   ? [
@@ -1964,6 +2079,77 @@ class _K2PageState extends State<K2Page> {
     ),
   );
 
+  // ── 可信度(v0.0.0.8 三級)的顯示共用 ─────────────────────────────────
+
+  /// good 綠 / rough 橘 / very rough 紅。
+  Color _confColor(String conf) => switch (conf) {
+        'good' => Colors.green.shade700,
+        'rough' => Colors.orange.shade800,
+        _ => Colors.red.shade700,
+      };
+
+  /// 乾淨比例的顏色,門檻與 confidence 同一組:≥ 80% 不上色、65~80% 橘、< 65% 紅。
+  Color? _cleanShareColor(double share) =>
+      share < VitalsMetrics.confidenceRoughCleanShare
+          ? Colors.red.shade700
+          : (share < VitalsMetrics.confidenceGoodCleanShare
+                ? Colors.orange.shade800
+                : null);
+
+  String _cleanSharePct(VitalsMetrics m) =>
+      '${(m.cleanShare * 100).toStringAsFixed(0)} %';
+
+  /// 0.0.0.7 對照欄 —— 與左欄同一段時間、同一批原始資料,只換核心(改版前的算法)。
+  ///
+  /// 只放比較時要看的:HRV(同 [_kvList])、可信度與它的依據(異常次數、拍數)。
+  /// 這些數字**不會送出去**,server 送的是現行核心(0.0.0.8)的。
+  Widget _v7Panel(HrvStats? hv, int rrCount, v7.VitalsMetrics m) {
+    // 圖上 0.0.0.7 對照一律金色;白底上用深一點的金,才看得清楚
+    const gold = Color(0xFFB8860B);
+    final conf = m.confidenceByPulse;
+    final confColor =
+        conf == 'good' ? Colors.green.shade700 : Colors.red.shade700;
+    return _sidePanel([
+      Text(
+        tr('k2_v7_title'),
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.bold,
+          color: gold,
+        ),
+      ),
+      Text(
+        tr('k2_v7_note'),
+        style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+      ),
+      const Divider(height: 14),
+      Text(
+        trParams(_fixedMode ? 'k2_hrv_fixed' : 'k2_hrv_short', {
+          'sec': _shortSec,
+        }),
+        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+      ),
+      const SizedBox(height: 4),
+      _kvList(hv, rrCount, showCounts: false),
+      const Divider(height: 18),
+      _kv('confidence', conf, color: confColor, api: 'confidence'),
+      _kv(
+        tr('k2_v7_anomalies'),
+        '${m.anomalies} / ${v7.VitalsMetrics.maxAnomalies}',
+        color: m.anomalies > v7.VitalsMetrics.maxAnomalies
+            ? Colors.red.shade700
+            : null,
+      ),
+      _kv(tr('k2_v7_beats'), '${m.beats} (≥ ${m.minBeatsNeeded})'),
+      _kv('SQI', m.sqiOk ? 'OK' : '✗'),
+      const SizedBox(height: 6),
+      Text(
+        tr('k2_v7_rule'),
+        style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+      ),
+    ]);
+  }
+
   /// 側欄的一列:左標籤、右數值。
   ///
   /// [api] 是這個值在整合方介面(aquivio-strapi / aquivio-station)裡的欄位名,
@@ -2149,14 +2335,17 @@ class _K2PageState extends State<K2Page> {
               style: TextStyle(fontSize: 9, color: Colors.orange.shade800),
             ),
           ),
-        _kv('可信度', m.confidenceByPulse, api: 'confidence'),
-        // 異常次數(空洞 + SQI 沒過)—— 不是送出去的欄位,是 confidence 的依據
         _kv(
-          '異常次數',
-          '${m.anomalies} / 容許 ${VitalsMetrics.maxAnomalies}',
-          color: m.anomalies > VitalsMetrics.maxAnomalies
-              ? Colors.red.shade700
-              : (m.anomalies > 0 ? Colors.orange.shade800 : null),
+          '可信度',
+          m.confidenceByPulse,
+          api: 'confidence',
+          color: _confColor(m.confidenceByPulse),
+        ),
+        // 乾淨比例 —— 不是送出去的欄位,是 confidence 的依據(v0.0.0.8)
+        _kv(
+          '乾淨比例',
+          _cleanSharePct(m),
+          color: _cleanShareColor(m.cleanShare),
         ),
         // SNR 版只當對照,不再送出(confidence_video 欄位改送與 confidence 同值)
         _kv('可信度(SNR,不送出)', m.confidenceVideo ?? '—'),

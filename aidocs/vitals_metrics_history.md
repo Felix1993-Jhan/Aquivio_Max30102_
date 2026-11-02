@@ -16,6 +16,25 @@
 
 ---
 
+## 2. 前處理
+
+### 2.1 找谷的線：減 2 秒移動平均 → 13 點平均（0.0.0.7 以前）　`已更換為帶通`（0.0.0.8）
+
+```
+舊：line = MA( trim − MA(trim, 200), 13 )       每個 5 秒視窗各算一次
+新：line = bandpass(trim, 0.7 ~ 3.5 Hz)          2 階 Butterworth、正反各一次,對整段緩衝算一次
+```
+
+- **為什麼換**：移動平均（方框窗 FIR）的頻率響應有零點與旁瓣 —— 0.5 Hz（快呼吸、按壓）完全擋不住、0.7 Hz 還放大 20%。殘留的斜坡把谷推走（位移 ≈ −斜坡 / 谷底曲率，11/02 快照實測與預測相符），造成一長一短的 RR，RMSSD 被灌高（同一份 12 秒資料 217.8 → 76.6）。完整分析見 [trough_line.md](trough_line.md)
+- **程式碼還在嗎**：`Max30102Signal.detrend` / `detrendSmooth` / `lowpassWindow` 還在但已不在找谷路徑上；`baselineWindow` 仍是沉澱期長度與波形圖 DC 虛線的依據。0.0.0.7 整份核心另存在 `lib/main_mode/max30102_K2_v007/`（App 對照用，確認後拿掉）
+
+### 2.2 `newIrWave`（= server 的 `wave`）壓 110 筆　`已改為 154`（0.0.0.8）
+
+- 舊：三個置中移動平均的半窗相加（截尾 4 + baseline 100 + 低通 6 = 110），等滿就與「事後整段算」**完全相同**
+- 新：帶通是 IIR，沒有「等滿」這回事 → 等到誤差夠小：截尾 4 + `troughGuardSamples` 150 = 154 筆（約 1.5 秒），誤差約 1.4%；找谷也只收 154 筆以前的谷，兩邊是同一條線
+
+---
+
 ## 4. 血氧
 
 ### 4.1 三種算法的對照設計（為什麼曾經有三個數字）
@@ -107,6 +126,21 @@ HR   = 60 × fs / median(kept)
 - **程式碼還在嗎**：**在，但只剩 `beatsOk`**（中位間距是否落在生理範圍），當 SpO2 的閘門與空結果判斷用。見主文件 §3.2
 - **出處**：「找谷 + 逐拍」精神來自 Maxim `algorithm.cpp`；中位數 + 離群剔除是自訂強化
 
+### 6.3 誤拍過濾 ±40%（近 9 拍中位數）　`已退場`（0.0.0.8）
+
+```
+舊:med = median(最近 9 筆 RR);|rr − med| / med > 0.40 → 不收(短側基準不推進)
+新:生理閘門範圍內的 RR 全部收進序列,由逐筆分類(主文件 §7.1)決定進不進 HRV
+```
+
+- **為什麼退場**：① 不足 3 拍時全收，起步那幾拍的壞拍直接進 RMSSD；② 起步若連漏幾拍，中位數變 2 倍，之後的真拍全被判「太短」不推進基準 → 序列鎖死在半速（10/30 錄音：心率 110 讀成 56）；③ 留在序列裡的 RR 才數得出「乾淨的佔幾成」（可信度用）
+- **程式碼還在嗎**：`_rrAccept` / `_recentRrMedian` 已刪除（`k2_beatseries.dart`）。0.0.0.7 對照核心 `max30102_K2_v007/` 裡還有
+- 30% → 40% 的放寬（2026-07）見本文件 §7.3
+
+### 6.4 心率取「最近 6 筆 RR」　`已改為只取乾淨的`（0.0.0.8）
+
+序列裡現在留著漏拍 / 偽拍（§6.3），不排除的話一個 2 倍的漏拍就會進中位數。`hrRecent(6)` 改取最近 6 筆**乾淨** RR。
+
 ---
 
 ## 7. HRV 時域
@@ -146,6 +180,17 @@ HR   = 60 × fs / median(kept)
 整段移除，理由一句話：**HRV 的數字與形狀不反映品質，品質看波形乾不乾淨。**
 
 - **程式碼還在嗎**：`bigJumpRel = 0.25` 這個常數還在，但**只剩繪圖用途** —— Poincaré 圖上把「大跳」的散點標紅，不再拿來判可信與否
+
+### 7.7 clean：MAD → 逐筆分類　`已更換`（0.0.0.8）
+
+```
+舊:保留 |rr − median(全窗)| <= max( 2.5 × 1.4826 × MAD , 0.5 × med )
+新:每筆對前後各 4 筆的局部中位數:±20% 乾淨 / ≈2~4 倍 漏拍 / 其餘 偽拍,只有乾淨的進 HRV
+```
+
+- **為什麼換**：全窗中位數跟不上心率漂移，只能把帶寬放到 ±50%（§7.2），「谷被推偏」的一長一短（例：570 / 1010，中位 840）全部過關，RMSSD 被灌到 215~265 ms（10/30 錄音，真值約 90）。局部中位數跟得上漂移，帶寬可以收到 ±20%，而且從第一拍就生效
+- **程式碼還在嗎**：`madK` / `madScale` / `minRelThresh` 已刪除（`k2_hrv_calculator.dart`），`clean()` 改成呼叫 `classify()`
+- **出處**：整合方原型 `scripts/max30102-beats.cjs`
 
 ---
 
@@ -208,6 +253,18 @@ pns_z  = z-score 版（三項 z 平均，我們自己的尺度）
 
 舊文件寫「⬜ 不提供 —— 需要你提供」，現在有 `activityScore`（主文件 §9.5）。
 
+### 9.5 `confidence`：SNR → 脈搏 → 乾淨比例　`已更換兩次`
+
+| 版本 | 判法 | 為什麼換掉 |
+|---|---|---|
+| 0.0.0.3~0.0.0.6 | SNR 三級（照 aquivio-vitals） | 不看拍數，10 秒量測只要波形乾淨就回 `good` |
+| 0.0.0.7 | 異常（RR 空洞 + SQI 沒過）≤ 1 次 且 拍數 ≥ 9 + 空洞數；只有 good / very rough | 一長一短不留空洞、照樣 good；空洞只數個數不看長度（一個漏拍與 5 秒 SQI 差算一樣） |
+| 0.0.0.8（現行） | 乾淨比例 ≥ 80% 且 SQI 過 → good；≥ 65% → rough；其餘 very rough | — |
+
+- 0.0.0.7 起三個可信度欄位（`confidence` / `confidence_video` / `confidence_by_beats`）送同一個值
+- **程式碼還在嗎**：`confidenceVideo`（SNR 版）還在，只在 App 上當對照顯示；`anomalies` / `maxAnomalies` / `minBeatsNeeded` 保留（標「已不參與判斷」），0.0.0.7 對照欄還在用
+- 舊版說明：[old/confidence_v0.0.0.7.md](old/confidence_v0.0.0.7.md)
+
 ---
 
 ## 附錄：舊文件的下落
@@ -217,3 +274,6 @@ pns_z  = z-score 版（三項 z 平均，我們自己的尺度）
 | `aidocs/max30102_algorithms.md` | 已拆分成主文件與本文件，原檔改成轉址頁。完整原文見 git 歷史 |
 | 該文件的 §7「未來可能強化」 | 仍成立的部分移到主文件的[附錄 E 待決事項](vitals_metrics_derivation.md#附錄-e待決事項)；已完成的（RMSSD 只算相鄰對、clean 改 MAD、SDNN 改 N−1）就是本文件 §7 記的那幾件 |
 | `lib/main_mode/services/max30102_algorithm.dart` 等三個路徑 | 舊文件指向的實作，**早已不存在**。現行實作全在 `lib/main_mode/max30102_K2/` |
+| `aidocs/confidence.md`（0.0.0.7 版） | 原樣搬到 [old/confidence_v0.0.0.7.md](old/confidence_v0.0.0.7.md)（2026-11-02）；現行版重寫 |
+| `aidocs/vitals_metrics_derivation.md`（0.0.0.6 版） | 原樣另存 [old/vitals_metrics_derivation_v0.0.0.6.md](old/vitals_metrics_derivation_v0.0.0.6.md)；主文件只更新受影響章節 |
+| `aidocs/k2_architecture.html`（交接初版） | 原樣搬到 [old/k2_architecture_交接初版_2026-08-26.html](old/k2_architecture_交接初版_2026-08-26.html)；server、通道方向、免洗、newIrWave、可信度、帶通都沒有反映在裡面 |

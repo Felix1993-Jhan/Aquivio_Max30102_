@@ -39,10 +39,11 @@ lib/
 │   ├── widgets/
 │   │   ├── ur_panel.dart                        # STM32 手動控制面板（除錯用）
 │   │   └── settings_page.dart                   # 設定（語言切換）
-│   └── max30102_K2/                             # ★ 交接核心（自足模組）
+│   ├── max30102_K2_v007/                        # 0.0.0.7 核心原樣副本（只給 UI 當對照，不交付；見該資料夾 README）
+│   └── max30102_K2/                             # ★ 交接核心（自足模組，現為 0.0.0.8）
 │       ├── k2_core.dart                         # 控制層：feedData() 進、原始數值出
 │       ├── k2_protocol.dart                     # 0x09 命令協定 + FIFO 解碼
-│       ├── k2_signal.dart                       # 前處理（濾波 / baseline）
+│       ├── k2_signal.dart                       # 前處理（截尾平均 + 0.7~3.5 Hz 帶通 = troughLine）
 │       ├── k2_algorithm.dart                    # 峰谷偵測 → HR / SpO2
 │       ├── k2_beatseries.dart                   # 逐拍序列與生理閘門
 │       ├── k2_hrv_calculator.dart               # HRV（RMSSD / SDNN / pNN50…）
@@ -58,6 +59,10 @@ lib/
 │           ├── k2_breathhold.dart               # 憋氣血氧曲線（狀態）
 │           ├── k2_breathhold_chart.dart         # 憋氣血氧曲線（繪圖）
 │           ├── k2_lf_experiment.dart            # LF 窗長對照實驗
+│           ├── k2_fixed_window.dart             # 定長量測（只算這次量測的前 N 秒）
+│           ├── k2_formula_panel.dart            # 公式帶入面板（送 LLM 的欄位：公式 → 代入 → 結果）
+│           ├── k2_field_help.dart               # 公式帶入面板的「?」說明視窗
+│           ├── k2_drink_preview.dart            # 推薦飲品預覽（離線推演，不連外）
 │           └── k2_snapshot.dart                 # 快照存取（dart:io 直接寫檔）
 └── shared/
     ├── language_state.dart                      # globalLanguageNotifier
@@ -71,7 +76,7 @@ lib/
         └── splash_screen.dart                   # 啟動畫面
 ```
 
-**共 33 個 .dart 檔**（其中 18 個屬於 `max30102_K2/`）。
+**共 48 個 .dart 檔**（其中 22 個屬於 `max30102_K2/`、10 個屬於 `max30102_K2_v007/`）。
 
 ---
 
@@ -149,6 +154,20 @@ UI 這一側原本有的「長期 RR 池（`allPoints`，上限 300 拍）」**�
 
 判別模組是不是裝反的（30 秒、零設備）：送 `40 71 31 09 01 0D 00 00 07` 關掉 `0x0D`（datasheet 說那是紅外），**紅光消失就是裝反的**。完整查證過程在 [SERVER_GUIDE.zh-TW.md](docs/SERVER_GUIDE.zh-TW.md) 最下方。
 
+**通道方向指標**（`Max30102Config.channelModeDefault`，目前 = **1**）：`0` 自動判定（上面那套）／`1` 強制對調／`2` 強制正常。`1`、`2` 不走判定，沉澱一結束就輸出、血氧直接放行 —— **前提是手上的模組確實是那個方向**，裝錯的話血氧整個算錯而且沒有警告。`final`，要換就改數字重新執行；測試要驗自動判定時傳 `channelModeAuto`。
+
+### 找谷的線 = 畫圖的線（0.0.0.8）
+
+`Max30102Signal.troughLine()` = 9 點截尾平均 → **0.7~3.5 Hz 二階 Butterworth 帶通（filtfilt 零相位）**。核心用 `_lineOf()` 對整段緩衝算一次，**找谷與 `newIrWave` 共用同一條**，不會有「圖上的谷與實際收的谷不在同一點」。詳見 [trough_line.md](aidocs/trough_line.md)。
+
+三個容易踩的點：
+
+1. **右緣要等 154 筆（約 1.5 秒）** —— filtfilt 的右緣要等後面的資料進來才定下來（距右緣 150 筆時誤差剩脈搏振幅的 1.4%）。`_lineHold = trimWindow ~/ 2 + troughGuardSamples(150)`，只收 `abs < total − 154` 的谷，`newIrWave` 也保留最後 154 筆不輸出。所以**最新的拍約 1.5 秒後才進 HRV**，站台 12 秒倒數結束時拿到的數值不含最後 1.5 秒。
+2. **起步時左緣也排除 150 筆**（`outputFrom = troughGuardSamples`），同理。
+3. **帶通是 IIR，不是逐點可重現** —— 同一段資料切法不同（緩衝起點不同），結果會差一點點。測試的「完全相同」斷言都改成容差 2%，不要改回 `equals`。
+
+舊的 MA 線（`detrend` / `detrendSmooth`）仍保留在 `k2_signal.dart`，只是核心不再用。App 上的 0.0.0.7 對照（金線、上方時間線、`_v7Panel`）來自 `max30102_K2_v007/`，確認新版後整個資料夾與 adapter 裡的 `coreV7` 一起移除。
+
 ### 參數安全（`k2_setting_limits.dart`）
 
 所有可調參數都有合法範圍。`enforce()` 會在核心建構時與每輪計算前自動夾回合法區間（例如 `hrMin=0` 會導致除以零崩潰，強制夾為 20）；`check()` 只回報不修改。**新增參數時務必同步補上限制**。
@@ -178,13 +197,15 @@ UI 這一側原本有的「長期 RR 池（`allPoints`，上限 300 拍）」**�
 
 ### WS `/stream` 的 `wave` 區塊（v0.0.0.5 起）
 
-`/stream` 推的是 `vitalsJson()` **再加一個 `wave` 區塊**（IR 的截尾平滑值，增量）。這是 `/vitals` 與 `/stream` 唯一不同步的地方，`vitalsJson()` 的文件註解有寫明原因。
+`/stream` 推的是 `vitalsJson()` **再加一個 `wave` 區塊**（增量）。這是 `/vitals` 與 `/stream` 唯一不同步的地方，`vitalsJson()` 的文件註解有寫明原因。
+
+`wave` 的內容是核心的 `K2FeedResult.newIrWave`（**0.0.0.8 起 = 找谷用的帶通線**，落後約 1.5 秒）與 `newIrWaveTrim`（截尾平均），server **原封轉送、不自己算**。
 
 三個容易踩的點：
 
 1. **遊標必須是「每個訂閱者一份」** —— 寫在 `_handleStream()` 的閉包裡，**不可以提到 `K2Engine` 去共用**。兩個訂閱者接上的時間不同，共用一份的話先接上的會把樣本「領走」，後接上的只收得到殘缺片段，而且不會報錯。
 2. **遊標失效時整段重送，不是回空的** —— 免洗歸零（遊標比 `nextAbs` 大）與緩衝被 `_waveCap` 裁掉（遊標比 `_waveBase` 小）都算失效。回空的會讓對方永遠停在黑畫面。
-3. **只給 IR + trim 是刻意的** —— 心跳本來就是從 IR 算的（手指偵測看 IR DC、`irTroughs` 跑在 IR 上），主計算也本來就跑在 trim 上。要 RED 或 raw 走 `GET /waveform`。
+3. **只給 IR 是刻意的** —— 心跳本來就是從 IR 算的（手指偵測看 IR DC、`irTroughs` 跑在 IR 上）。要 RED 或 raw 走 `GET /waveform`。
 
 實測一次 12 秒的量測會有**一次**斷層，就是沉澱期結束時那 200 筆一次吐出（`firstAbs` 從 0 跳到 140）。這不是 bug，是核心丟棄空轉期樣本的結果。
 
@@ -350,7 +371,7 @@ Windows 排程工作、USB 選擇性暫停／電源管理、ST-Link 大量儲存
 
 ### 已知問題
 
-- `test/k2_replay_verify_test.dart` **目前失敗**：重放快照的 RR 跨度差 2.52%，超過測試設定的 2.0% 門檻。這是 K2 演算法本身的容差問題，與精簡改造無關，尚未處理。
+- `test/k2_replay_verify_test.dart` **目前失敗**：重放快照的 RR 跨度差 2.75%（0.0.0.8；0.0.0.7 時是 2.52%），超過測試設定的 2.0% 門檻。查證結果是**測試本身對齊錯一拍**（K2 少的是第一拍，錯開一拍後比對後 4 筆只差 0.24%），不是演算法的誤差。尚未修測試。
 - **設定檢查訊息的本文仍是繁體中文**：`Max30102SettingLimits.check()` 回傳的 `message` / `applied` 寫在核心層 [k2_setting_limits.dart](lib/main_mode/max30102_K2/k2_setting_limits.dart)，那是交接內容，UI 依設計原則「原封輸出、一個字都不改」。日誌裡的 `↳ UI:` 註解行會跟著語言走，但它引述的核心訊息不會。要翻譯就得動交接核心，需另行決定。
 - 從別處複製整個專案資料夾後首次建置，可能因殘留的 plugin symlink 而報 `PathExistsException`。解法：`flutter clean && flutter pub get`。
 
@@ -369,10 +390,11 @@ Windows 排程工作、USB 選擇性暫停／電源管理、ST-Link 大量儲存
 
 | 文件 | 路徑 | 說明 |
 |------|------|------|
-| K2 架構 | `aidocs/k2_architecture.html` | **MAX30102 K2 交接核心的完整說明，最重要** |
-| **數值推導速查** | `aidocs/vitals_metrics_derivation.md` | **每個輸出數字怎麼算出來的：公式 + 出處 + 短視窗可用性，依資料流排序（ADC → 拍 → HRV → 28 個欄位）** |
-| **可信度** | `aidocs/confidence.md` | **`confidence` 的現行規則（SQI + ≥ 9 拍 + 無 RR 空洞）、站台怎麼拿它把關、為什麼不用 SNR / 只看 SQI、快照實測、尚未採用的候選條件** |
+| **數值推導速查** | `aidocs/vitals_metrics_derivation.md` | **每個輸出數字怎麼算出來的：公式 + 出處 + 短視窗可用性，依資料流排序（ADC → 拍 → HRV → 28 個欄位）。現為 0.0.0.8** |
+| **找谷的線** | `aidocs/trough_line.md` | **0.0.0.8 的 troughLine：截尾 + 0.7~3.5 Hz 帶通、係數與逐步走查、右緣 154 筆、MA 與帶通的頻響比較、Δ ≈ −s/c、RMSSD 敏感度、與 Maxim RD117 的差別** |
+| **可信度** | `aidocs/confidence.md` | **`confidence` 的現行規則（0.0.0.8：乾淨 RR 比例 + ≥ 9 乾淨拍 + SQI → good / rough / very rough）、classify() 分類、站台怎麼拿它把關、已知限制** |
 | 算法沿革 | `aidocs/vitals_metrics_history.md` | 已退場的算法、曾經訂錯的門檻、為什麼換掉 |
+| 舊版文件 | `aidocs/old/` | 已被取代的版本，檔名標版本：`confidence_v0.0.0.7.md`、`vitals_metrics_derivation_v0.0.0.6.md`、`k2_architecture_交接初版_2026-08-26.html`（原「K2 架構」，內容停在交接初版）。每份開頭都有「已過時」標示 |
 | ~~MAX30102 運算方式~~ | `aidocs/max30102_algorithms.md` | 已拆進上面兩份，只剩轉址頁 |
 | 串口通訊協定 | `aidocs/serial_protocol.md` | STM32 通訊協定、封包格式、ADC 對應表（含已移除功能的協定，僅供參考）|
 | BIA 生物阻抗原理 | `aidocs/bia_principle.md` | 導電機制、細胞膜電容、頻率與電流路徑、相位量測、誤差排行、手把式限制 |
