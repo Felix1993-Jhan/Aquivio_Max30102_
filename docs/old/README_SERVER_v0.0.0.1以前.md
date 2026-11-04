@@ -1,3 +1,7 @@
+> ⚠️ **已過時**（2026-11-04 搬入 `docs/old/`）。內容停在版本號出現之前（`0.0.0.1` 以前）：
+> 沒有 `/chip/*`、`strapi`、`wave`、通道方向，`/health` 範例也沒有 `version`。
+> 現行說明請看根目錄 [README.md](../../README.md) 與 [SERVER_GUIDE](../SERVER_GUIDE.zh-TW.md)。
+
 # MAX30102 K2 無頭伺服器（headless server）
 
 把 MAX30102 K2 計算核心包成 HTTP / WebSocket 服務，供上層 **React + Koa（Node.js）** 透過 localhost 呼叫。

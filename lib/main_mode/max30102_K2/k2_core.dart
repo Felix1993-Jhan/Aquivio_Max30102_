@@ -260,6 +260,7 @@ class Max30102K2 {
       maxBeats: Max30102Config.maxBeats,
     );
     _clearOrient(); // 強制模式(指標 1 / 2)一開機就是「已鎖定」,不必等第一次手指離開
+    _noFingerBatches = this.config.fingerOffBatches; // 開機 = 沒手指,見 [_noFingerBatches]
   }
 
   /// 指標 1 / 2:方向寫死,不走判定(見 [Max30102Config.channelModeDefault])。
@@ -303,7 +304,14 @@ class Max30102K2 {
   int _sinceFingerOn = 0;
 
   /// 連續幾批低於手指門檻(去彈跳用)。有手指的一批 → 歸零。
-  int _noFingerBatches = 0;
+  ///
+  /// **起始值 = `fingerOffBatches`**(建構與 [reset] 都是):剛開始一律當成「沒手指」。
+  /// 去彈跳只是用來容忍「手指壓著時」的微抖,還沒有手指的時候沒有東西可以容忍。
+  /// 起始值給 0 的話,核心一開始等於「手指在上面、正在觀察是否離開」,前
+  /// `fingerOffBatches - 1` 批沒手指的資料會走進空轉期,回報 `fingerPresent: true`
+  /// (實測:晶片 init 後、server 啟動後,沒手指也先閃約 0.2 秒的 true)。
+  /// 放上手指不受影響 —— 有手指的一批照樣立刻歸零、單批就生效。
+  int _noFingerBatches = 0; // 宣告時還拿不到 config,建構子裡再設成 fingerOffBatches
 
   // ── 通道方向判定(見 [K2ChannelOrient])──────────────────────────────
   //
@@ -469,9 +477,11 @@ class Max30102K2 {
 
         // ── 免洗模式:連絕對索引一起歸零,下一次量測完全從零開始 ──────────
         //
-        // ⚠️ 這裡**刻意不呼叫 reset()** —— reset() 裡有 `_noFingerBatches = 0`,
+        // ⚠️ 這裡**刻意不呼叫 reset()** —— 當初的理由是 reset() 裡有 `_noFingerBatches = 0`,
         //    而手指離開後通常會持續沒有手指。把去彈跳計數歸零的話,會變成
         //    「每隔 fingerOffBatches 批就重新觸發一次歸零」,didReset 被反覆回報。
+        //    (reset() 現在改設成 fingerOffBatches,這個顧慮已不成立;仍維持只清
+        //    該清的,避免動到 reset() 裡其他與這裡無關的狀態。)
         //    這裡只補該補的兩件事,其餘狀態上面幾行已經清乾淨了。
         //
         // 不會重複觸發:外層的 `_ir.isNotEmpty || _sinceFingerOn > 0` 守衛在第一次
@@ -721,7 +731,11 @@ class Max30102K2 {
     _lastFedAbs = -1;
     _settled = false;
     _sinceFingerOn = 0;
-    _noFingerBatches = 0;
+    // 【舊寫法,已停用】歸零 = 「手指在上面、觀察是否離開」→ reset 後前 2 批沒手指的資料
+    //   被當成有手指(空轉期)回報 fingerPresent: true。改成「當作已確認沒手指」,
+    //   理由見 [_noFingerBatches]。
+    // _noFingerBatches = 0;
+    _noFingerBatches = config.fingerOffBatches;
     _last = null;
     _clearOrient();
     _beats.reset();

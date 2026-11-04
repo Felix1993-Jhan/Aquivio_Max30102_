@@ -1,6 +1,6 @@
 # MAX30102 量測服務 — 使用說明
 
-> **目前版本 `0.0.0.6`** — 用 `./max30102_server --version` 或 `/health` 的 `version` 欄位確認手上是哪一版。
+> **目前版本 `0.0.0.9`** — 用 `./max30102_server --version` 或 `/health` 的 `version` 欄位確認手上是哪一版。
 > 版本沿革記在 `bin/server_version.dart`。
 
 
@@ -285,7 +285,7 @@ curl http://localhost:8770/health
 ```json
 {
   "ok": true,
-  "version": "0.0.0.6",
+  "version": "0.0.0.9",
   "mode": "serial",
   "uptimeMs": 60123,
   "totalSamples": 6000,
@@ -849,6 +849,8 @@ curl -X POST http://localhost:8770/chip/init
 ```
 
 `feed` 模式下服務沒有串口，改成把封包交給你（見[上方說明](#api-overview)）。
+
+**`/chip/reset` 之後（關燈期間）**：直到下一次 init 成功之前，服務**不收任何資料**，`fingerPresent` 固定是 `false`。指令完成後 `/stream` 會**立刻推一筆**，不必等下一次計算。關燈時沒有光可以偵測手指，所以這段期間不會回報有手指；要恢復偵測就呼叫 `/chip/init`。
 
 > 💡 `serial` 模式**連上串口時會自動 init 一次**。韌體開機本來就會 init，
 > 這是額外的保險——服務可能在韌體跑了很久之後才連上，期間晶片狀態

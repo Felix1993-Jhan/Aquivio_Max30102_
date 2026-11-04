@@ -128,10 +128,37 @@ class K2Engine {
 
   int get totalSamples => k2.totalSamples;
 
+  /// 晶片休眠中(`POST /chip/reset` 送出後、下一次 init 成功前)。
+  ///
+  /// 這段期間 [feedPacket] **丟棄所有 FIFO 資料**,`fingerPresent` 因此固定是 false。
+  ///
+  /// 為什麼要擋(v0.0.0.9):整合方回報 reset 關燈後,**沒放手指**的感測器也回報
+  /// `fingerPresent: true`,而且一直停在 true。實際經過(2026-11-04 實測):
+  ///   ① 韌體收到 RESET **不清 MCU 緩衝**,reset 後第一次 QUERY_FIFO 還會拿到
+  ///      reset 前留下的樣本(實測 24 筆)。
+  ///   ② 舊版在 `engine.reset()` 之後把這批舊樣本餵進核心;當時核心 reset 後的
+  ///      去彈跳計數是 0,前兩批沒手指的資料被當成「有手指、空轉期」→ true
+  ///      (核心已另外修正,見 `_noFingerBatches`)。
+  ///   ③ 之後晶片休眠、FIFO 一直是空的 → 核心不再計算 → `/stream` 不再推送,
+  ///      對方就停在那一筆 true。
+  /// 關燈時本來就沒有光可以偵測手指,這段期間的資料一筆都不該進判斷。
+  ///
+  /// 由 [SerialSource.resetChip] 設 true、[SerialSource.initChip] 成功後設 false
+  /// (含開串口時的自動 init);切換進料模式時也清掉(見 `_handleMode`)。
+  /// feed 模式下 server 不知道上層有沒有真的送出 reset,所以不會動這個旗標。
+  bool chipAsleep = false;
+
+  /// 立刻推一筆現況給 WS 訂閱者(不等下一次計算)。
+  void pushVitals() {
+    if (!_vitals.isClosed) _vitals.add(vitalsJson());
+  }
+
   /// 餵一個 MCU 原始封包(含表頭與 CS)。回傳這次有沒有算出新結果。
   ///
   /// 封包壞掉 / 不是資料回應 → 核心回 empty,這裡就什麼都不做。
+  /// 晶片休眠中([chipAsleep])→ 整包丟棄。
   bool feedPacket(List<int> packet) {
+    if (chipAsleep) return false;
     final r = k2.feedData(packet);
 
     // 核心自行清空過(絕對索引到頂)→ 我們存的波形與 base 全部作廢。
@@ -621,15 +648,27 @@ class SerialSource extends FeedSource {
       throw const BilingualException('MCU 回報初始化失敗(晶片是否接好?)',
           'MCU reported init failure (is the chip connected?)');
     }
+    engine.chipAsleep = false; // 確認初始化成功才恢復收資料
   }
 
   /// RESET:軟體復位 → 晶片進入 POR 休眠。
   /// ⚠️ 復位後晶片**不可用**,必須再 [initChip] 才會恢復採樣。
+  ///
+  /// [K2Engine.chipAsleep] 在**送出之前**就設好:reset 那一刻前後回來的 FIFO
+  /// 資料正是要擋的東西,等 MCU 確認才設就漏掉了。送失敗(MCU 沒回)就還原,
+  /// 晶片多半還醒著,不該把資料擋掉。
   Future<void> resetChip() async {
-    await request(
-      Max30102Protocol.buildReset(board: board),
-      Max30102Protocol.kSubReset,
-    );
+    final wasAsleep = engine.chipAsleep;
+    engine.chipAsleep = true;
+    try {
+      await request(
+        Max30102Protocol.buildReset(board: board),
+        Max30102Protocol.kSubReset,
+      );
+    } catch (_) {
+      engine.chipAsleep = wasAsleep;
+      rethrow;
+    }
   }
 
   /// 讀一顆暫存器,回傳讀到的值。
@@ -937,6 +976,9 @@ class ApiServer {
       }
       // 晶片狀態變了 → 之前累積的波形與拍全部作廢。
       engine.reset();
+      // 立刻推一筆(fingerPresent: false)。不推的話 reset 後 FIFO 一直是空的、
+      // 核心不再計算,訂閱者會一直停在指令之前的最後一筆(v0.0.0.9)。
+      engine.pushVitals();
       _log('🔧 晶片指令完成:${action.name}',
           'chip command done: ${action.name}');
       await _json(req, {
@@ -1093,6 +1135,9 @@ class ApiServer {
       await _source.stop();
       // 換來源 = 換時間軸,核心與波形都要從乾淨狀態重新開始。
       engine.reset();
+      // 休眠旗標也清掉:切到 feed 模式時 server 無從得知晶片狀態,留著會把上層
+      // POST 的資料全部丟掉;切到 serial 則由開串口時的自動 init 重新決定。
+      engine.chipAsleep = false;
 
       try {
         await next.start();

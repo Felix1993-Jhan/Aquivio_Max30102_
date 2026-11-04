@@ -33,6 +33,28 @@
 /// | `0.0.0.6` | RED/IR 通道方向自動判定(**行為變更**);新增 `channelOrient` |
 /// | `0.0.0.7` | `confidence` 改看脈搏(SQI + 拍數 + RR 空洞),只剩 `good` / `very rough`(**數值變動**);WS `wave` 改由核心輸出 = 找谷用的線(批尾截斷修正、補上低通) |
 /// | `0.0.0.8` | 找谷 / 畫圖的線改成 0.7~3.5 Hz 零相位帶通(兩者仍是同一條);只收離最新資料 1.5 秒以前的谷;RR 逐筆分類(乾淨 / 漏拍 / 偽拍),只有乾淨的進 HRV;`confidence` 改看乾淨比例,恢復 `rough`(**數值變動**);`wave` 落後約 1.5 秒 |
+/// | `0.0.0.9` | `POST /chip/reset` 之後到下一次 init 成功前,丟棄所有 FIFO 資料 → `fingerPresent` 固定 false;`/chip/*` 完成後立刻推一筆 `/stream`;核心 reset / 啟動後第一批沒手指的資料就回報 false(原本前 2 批誤報 true)(**行為變更**) |
+///
+/// ## ⚠️ `0.0.0.9`:關燈期間 `fingerPresent` 固定是 false
+///
+/// 起因(整合方回報):多台感測器的站台用「關掉其他台的 LED」表示那幾台暫停使用,
+/// 但 reset 關燈後,**沒放手指**的那台也回報 `fingerPresent: true`,而且一直停在 true。
+/// 實際經過(2026-11-04 實測):
+///   ① 韌體收到 RESET **不清 MCU 緩衝**,reset 後第一次查詢還會拿到 reset 前的樣本(實測 24 筆)。
+///   ② server `engine.reset()` 之後把這批舊樣本餵進核心;核心 reset 後去彈跳計數是 0,
+///      前 2 批沒手指的資料被當成「有手指、空轉期」→ `true`。
+///   ③ 之後晶片休眠、FIFO 一直空、不再計算 → `/stream` 不再推送,停在 `true`。
+/// 同一個 ② 也造成「init 開燈後、手指不在,仍先閃約 0.2 秒 `true`」。
+///
+/// | 改了什麼 | 在哪 |
+/// |---|---|
+/// | RESET **送出前**就進入休眠狀態,下一次 RE-INIT 成功(含開串口的自動 init)才恢復;期間 FIFO 資料整包丟棄 | `K2Engine.chipAsleep`、`SerialSource.resetChip` / `initChip` |
+/// | `/chip/init`、`/chip/reset`、`/chip/reset-init` 成功後立刻推一筆 `/stream`,不等下一次計算 | `_handleChipCommand` → `K2Engine.pushVitals` |
+/// | 核心的去彈跳計數起始值(建構與 `reset()`)從 0 改成 `fingerOffBatches` = 一開始就當作沒手指。放上手指仍是單批生效 | `Max30102K2._noFingerBatches` |
+///
+/// 沒變的:欄位名稱、API 路徑、啟動參數、串口協定。feed 模式的休眠旗標不受影響(server
+/// 不知道上層有沒有真的送出 reset),但核心去彈跳的修正兩種模式都有。韌體若在 reset 後自己把 LED 打開(撞到轉換中 / 傳輸中),
+/// server 仍視為休眠、不收資料,直到收到 `/chip/init`。
 ///
 /// ## ⚠️ `0.0.0.8`:HRV 不再被谷的偏移與漏拍灌水
 ///
@@ -145,4 +167,4 @@
 ///
 /// 手上若有自稱 `0.0.0.3` 的執行檔,**一律當成 `8ec45ce` 那版**(偏嚴),
 /// 並建議升到 `0.0.0.4`。
-const String kServerVersion = '0.0.0.8';
+const String kServerVersion = '0.0.0.9';

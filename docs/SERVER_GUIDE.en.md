@@ -1,6 +1,6 @@
 # MAX30102 Vitals Service — Integration Guide
 
-> **Current version `0.0.0.6`** — check which build you have with
+> **Current version `0.0.0.9`** — check which build you have with
 > `./max30102_server --version` or the `version` field in `/health`.
 > The changelog lives in `bin/server_version.dart`.
 
@@ -296,7 +296,7 @@ curl http://localhost:8770/health
 ```json
 {
   "ok": true,
-  "version": "0.0.0.6",
+  "version": "0.0.0.9",
   "mode": "serial",
   "uptimeMs": 60123,
   "totalSamples": 6000,
@@ -900,6 +900,13 @@ Failures explain themselves:
 
 In `feed` mode the service has no port, so it hands you the packet instead
 (see [above](#api-overview)).
+
+**After `/chip/reset` (while the LEDs are off)**: until the next successful
+init, the service **ignores all incoming data** and `fingerPresent` stays
+`false`. `/stream` **pushes a message right away** when the command completes,
+without waiting for the next computation. With the LEDs off there is no light
+to detect a finger with, so no finger is reported during this period. Call
+`/chip/init` to resume detection.
 
 > 💡 In `serial` mode the chip is **initialised automatically on connect**.
 > The firmware already does this at boot; this is an extra safeguard — the

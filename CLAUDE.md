@@ -131,11 +131,12 @@ K2 的 `ui/` 已全面接上 `LocalizationService`（繁中 / English），字�
 
 本專案是「一人一次」的量測情境，所以 `Max30102Config(resetOnFingerOff: true)`：**確認手指離開時，核心連絕對索引 `totalSamples` 一起歸零**，下一位使用者完全從零開始。核心預設是 `false`（交接版的通用行為不變），開關只在兩個地方打開：[k2_serial_adapter.dart](lib/main_mode/max30102_K2/ui/k2_serial_adapter.dart) 的建構、以及 server 的 `K2Engine`。
 
-三個容易踩的點：
+四個容易踩的點：
 
-1. **不能直接呼叫 `reset()`** — `reset()` 內含 `_noFingerBatches = 0`，會把去彈跳計數清掉，導致持續沒手指時每隔 `fingerOffBatches` 批就重複觸發一次 `didReset`。核心裡是在既有清除區塊內只補 `_totalSamples = 0` 與 `didReset = true`。
+1. **歸零處不呼叫 `reset()`，只在既有清除區塊內補 `_totalSamples = 0` 與 `didReset = true`。** 當初的理由是 `reset()` 會把去彈跳計數歸零、導致重複觸發；那個顧慮已因下面第 4 點不成立，但仍維持只清該清的。
 2. **歸零後的空檔不計入時間軸** — 手指拿開後放著時，若繼續 `_totalSamples += n`，等越久下一位的起始索引越大，就不叫「從零開始」。核心用 `_ir.isEmpty && _sinceFingerOn == 0` 判斷「已經歸零、正在等下一位」並直接早退。
 3. **去彈跳照舊** — 觸發條件完全沒動，仍是 `!fingerNow && _noFingerBatches >= config.fingerOffBatches`，單批雜訊不會觸發歸零。
+4. **去彈跳計數的起始值是 `fingerOffBatches`，不是 0**（建構與 `reset()` 都是）— 一開始一律當作「已確認沒手指」。給 0 的話，前 2 批沒手指的資料會走進空轉期、回報 `fingerPresent: true`：晶片 init 後、server 啟動後都會先閃約 0.2 秒的 true；reset 關燈時若緩衝裡剩一批舊樣本，`/stream` 還會一直停在 true（v0.0.0.9 修正）。放上手指照樣單批生效。
 
 UI 這一側原本有的「長期 RR 池（`allPoints`，上限 300 拍）」**已整個移除** — 跨測試累積會把不同使用者的拍混在一起。K2 頁面的區塊因此從 ①②③④ 重編為 ①②③，快照也不再寫 `longTerm` 欄位（舊快照檔仍可開啟，只是不顯示那段）。
 
@@ -176,7 +177,7 @@ UI 這一側原本有的「長期 RR 池（`allPoints`，上限 300 拍）」**�
 
 ## 無頭伺服器（bin/max30102_server.dart）
 
-同一份 K2 核心的第二個消費者：包成 HTTP/WS 服務給 React + Koa 呼叫。詳見 [README_SERVER.md](README_SERVER.md)。
+同一份 K2 核心的第二個消費者：包成 HTTP/WS 服務給 React + Koa 呼叫。對外說明：根目錄 [README.md](README.md)（中英總覽 + 版本表）、[docs/SERVER_GUIDE](docs/SERVER_GUIDE.zh-TW.md)（中英完整整合指南）。舊的 `README_SERVER.md` 已搬到 `docs/old/`。
 
 ### ⛔ 這支檔案的鐵則
 
@@ -372,6 +373,7 @@ Windows 排程工作、USB 選擇性暫停／電源管理、ST-Link 大量儲存
 ### 已知問題
 
 - `test/k2_replay_verify_test.dart` **目前失敗**：重放快照的 RR 跨度差 2.75%（0.0.0.8；0.0.0.7 時是 2.52%），超過測試設定的 2.0% 門檻。查證結果是**測試本身對齊錯一拍**（K2 少的是第一拍，錯開一拍後比對後 4 筆只差 0.24%），不是演算法的誤差。尚未修測試。
+- **兩個日誌框沒有捲動條**：K2 頁 `_chipControl()` 底下的日誌框（`ListView.builder(reverse: true)`）與 UR 面板 `_buildLogSection()` 的接收日誌（`SingleChildScrollView`）都沒包 `Scrollbar(thumbVisibility: true)`，可以捲但看不出來。做法同快照列 `_snapshotViewer()`（flutter-ui skill B2、B3）。
 - **設定檢查訊息的本文仍是繁體中文**：`Max30102SettingLimits.check()` 回傳的 `message` / `applied` 寫在核心層 [k2_setting_limits.dart](lib/main_mode/max30102_K2/k2_setting_limits.dart)，那是交接內容，UI 依設計原則「原封輸出、一個字都不改」。日誌裡的 `↳ UI:` 註解行會跟著語言走，但它引述的核心訊息不會。要翻譯就得動交接核心，需另行決定。
 - 從別處複製整個專案資料夾後首次建置，可能因殘留的 plugin symlink 而報 `PathExistsException`。解法：`flutter clean && flutter pub get`。
 
