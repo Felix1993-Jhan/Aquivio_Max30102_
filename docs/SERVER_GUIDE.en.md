@@ -1198,8 +1198,19 @@ those hardware differences out.
 
 ### What the service does about it
 
-The core **determines the orientation itself on every measurement**
-(`K2ChannelOrient`), using that AC/DC ratio:
+**The service currently always treats the module as swapped**
+(`Max30102Config.channelModeDefault = 1`). The two channels are swapped the moment
+they are decoded, so every output (`ir` / `red`, waveform, SpO₂) refers to the actual
+light source. This is because 7 of the 8 modules we have are swapped.
+
+- The waveform and SpO₂ are available as soon as the settling period ends, with no
+  orientation check to wait for
+- `channelOrient` in `/vitals` is `unknown` with no finger and always `swapped` during a
+  measurement. This is **a fixed setting, not a measured result**
+- ⚠️ **With a correctly wired module, SpO₂ will be completely wrong, with no warning.**
+  Before switching modules, use the visual check above to find out which kind it is
+
+The core still includes **automatic detection** (setting `0`), based on the AC/DC ratio:
 
 ```
 R < 0.9    -> current assumption is correct
@@ -1207,21 +1218,11 @@ R > 1.3    -> current assumption is inverted
 0.9 .. 1.3 -> cannot tell -> no verdict, and no SpO2 (heart rate still reported)
 ```
 
-**No waveform samples are emitted until the orientation is settled** — the same
-principle as the settling period: better two seconds late than mislabelled. So the
-first waveform sample arrives about 2 seconds later than in `0.0.0.5`.
-
-The verdict is exposed in `/vitals` as `channelOrient`:
-
-| Value | Meaning |
-|---|---|
-| `unknown` | Still determining (no waveform, no SpO₂ yet; heart rate is unaffected) |
-| `normal` | Matches the datasheet |
-| `swapped` | This module is wired backwards — **the service has already corrected the output**, so the `ir` / `red` you receive are the actual light sources |
-
-The orientation belongs to *one measurement*: it resets when the finger leaves and is
-re-determined for the next person. Swapping modules mid-deployment is therefore handled
-automatically, with no configuration.
+With automatic detection, no waveform is emitted and `channelOrient` stays `unknown`
+until the orientation is settled, so the first waveform sample arrives about 2 seconds
+later; the orientation is re-determined for each measurement. Setting `2` always
+treats the module as correctly wired. The setting is fixed at build time, so switching
+requires a rebuild.
 
 ### Purchasing note
 

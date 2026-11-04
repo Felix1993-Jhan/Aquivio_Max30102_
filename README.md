@@ -34,7 +34,7 @@ AQUIVIO K2 指尖感測器（MAX30102）的量測服務：從 MCU 收原始光�
 - **即時串流**：WS `/stream` 每秒推一次數值，加上 `wave` 區塊（找谷用的帶通線，落後約 1.5 秒）
 - **晶片控制**：開 / 關 LED、讀晶片狀態；關燈期間 `fingerPresent` 固定為 `false`
 - **免洗模式**：手指離開就全部歸零，下一位從零開始（一人一次的量測情境）
-- **LED 方向**：部分 MAX30102 模組把兩顆 LED 裝反，核心可自動判定或強制指定方向
+- **LED 方向**：部分 MAX30102 模組把兩顆 LED 裝反（手上 8 片有 7 片）。目前**固定當作裝反處理**，輸出已轉正；接到方向正常的模組，血氧會算錯。核心另有自動判定，改設定後重新建置即可切換
 
 ### API
 
@@ -133,7 +133,7 @@ CI（[build.yml](.github/workflows/build.yml)）產出三種執行檔：
 | 版本 | 重點 |
 |------|------|
 | 0.0.0.9 | 關燈（`/chip/reset`）期間 `fingerPresent` 固定 `false`；晶片指令完成後立刻推送 `/stream`；開燈或啟動後不再短暫誤報有手指 |
-| 0.0.0.8 | 找谷 / 畫圖改用 0.7~3.5 Hz 帶通；RR 逐筆分類，只有乾淨的進 HRV；`confidence` 恢復三級 |
+| 0.0.0.8 | 找谷 / 畫圖改用 0.7~3.5 Hz 帶通；RR 逐筆分類，只有乾淨的進 HRV；`confidence` 恢復三級；LED 方向改為固定對調，不再自動判定 |
 | 0.0.0.7 | `confidence` 改看脈搏品質；`wave` 改由核心輸出 |
 | 0.0.0.6 | LED 方向自動判定；新增 `channelOrient` |
 | 0.0.0.5 | WS `/stream` 加推 `wave` 波形 |
@@ -176,7 +176,7 @@ The chip only outputs raw readings; **heart rate and SpO2 are computed in this s
 - **Live stream**: WS `/stream` pushes values once per second, plus a `wave` block (the band-pass line used for trough detection, about 1.5 s behind)
 - **Chip control**: turn the LEDs on / off and read the chip status; `fingerPresent` stays `false` while the LEDs are off
 - **Single-session mode**: everything resets when the finger is removed, so the next person starts from zero
-- **LED orientation**: some MAX30102 modules have the two LEDs swapped; the core can detect the orientation or use a fixed setting
+- **LED orientation**: some MAX30102 modules have the two LEDs swapped (7 of the 8 we have). The service currently **always treats the module as swapped** and corrects the output; with a correctly wired module, SpO2 will be wrong. The core also has automatic detection, which can be enabled by changing the setting and rebuilding
 
 ### API
 
@@ -277,7 +277,7 @@ Some documents are in Chinese only, as noted.
 | Version | Highlights |
 |------|------|
 | 0.0.0.9 | `fingerPresent` stays `false` while the LEDs are off (`/chip/reset`); `/stream` pushes right after a chip command; no brief false finger detection after the LEDs turn on or the service starts |
-| 0.0.0.8 | Trough detection and plotting use a 0.7–3.5 Hz band-pass filter; RR intervals classified individually, only clean ones used for HRV; `confidence` back to three levels |
+| 0.0.0.8 | Trough detection and plotting use a 0.7–3.5 Hz band-pass filter; RR intervals classified individually, only clean ones used for HRV; `confidence` back to three levels; LED orientation fixed to swapped instead of detected automatically |
 | 0.0.0.7 | `confidence` based on pulse quality; `wave` produced by the core |
 | 0.0.0.6 | Automatic LED orientation detection; new `channelOrient` field |
 | 0.0.0.5 | WS `/stream` adds the `wave` waveform |
