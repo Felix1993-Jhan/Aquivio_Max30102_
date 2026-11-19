@@ -2,7 +2,7 @@
 // MainNavigationPage — MAX30102 K2 交接測試主畫面
 // ============================================================================
 // 功能：
-// - 3 個頁面：MAX30102 K2（交接版，預設首頁）/ STM32 控制面板 / 設定
+// - 4 個頁面：MAX30102 K2（交接版，預設首頁）/ STM32 控制面板 / MAX 晶片暫存器 / 設定
 // - 啟動時自動掃描 COM 埠並連線 STM32
 // - 使用 SerialController mixin 提供 STM32 串口操作
 //
@@ -22,6 +22,7 @@ import 'controllers/serial_controller.dart';
 import 'services/ur_command_builder.dart';
 import '../shared/ui/glass.dart';
 import 'max30102_K2/ui/k2_page.dart';
+import 'widgets/max_chip_page.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/ur_panel.dart';
 
@@ -30,6 +31,7 @@ class _Pages {
   static const int k2 = 0;
   static const int urPanel = 1;
   static const int settings = 2;
+  static const int maxChip = 3; // MAX 晶片暫存器對照（drawer 排在 STM32 控制之後）
 }
 
 class MainNavigationPage extends StatefulWidget {
@@ -293,6 +295,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
           ),
           _drawerItem(_Pages.k2, Icons.monitor_heart, tr('page_k2')),
           _drawerItem(_Pages.urPanel, Icons.bolt, tr('stm32_control')),
+          _drawerItem(_Pages.maxChip, Icons.memory, tr('page_max_chip')),
           _drawerItem(_Pages.settings, Icons.settings, tr('page_settings')),
         ],
       ),
@@ -326,16 +329,22 @@ class _MainNavigationPageState extends State<MainNavigationPage>
         return tr('stm32_control');
       case _Pages.settings:
         return tr('page_settings');
+      case _Pages.maxChip:
+        return tr('page_max_chip');
       default:
         return tr('app_title');
     }
   }
 
   /// 依目前分頁套用 STM32 連線模式（只在模式切換時動作，避免每次 rebuild 重置心跳）
-  /// K2 頁：自己接管 onRawBytes、自己輪詢，心跳必須停掉不可干擾
+  /// K2 頁 / MAX 晶片頁：自己接管 onRawBytes，心跳必須停掉不可干擾
   /// 其餘頁：清掉診斷 parser、恢復心跳
   void _applyStm32Mode() {
-    final diagnostic = _selectedPageIndex == _Pages.k2;
+    // 〔2026-11-19 新增 MAX 晶片頁：它也是一問一答讀暫存器，心跳 PING 的回應
+    //   會混進來，所以跟 K2 頁一樣算診斷模式（停心跳、自己掛 onRawBytes）〕
+    // final diagnostic = _selectedPageIndex == _Pages.k2;
+    final diagnostic = _selectedPageIndex == _Pages.k2 ||
+        _selectedPageIndex == _Pages.maxChip;
     if (diagnostic == _stm32DiagnosticMode) return;
     _stm32DiagnosticMode = diagnostic;
     if (diagnostic) {
@@ -357,6 +366,8 @@ class _MainNavigationPageState extends State<MainNavigationPage>
         return _buildUrPanel();
       case _Pages.settings:
         return const SettingsPage();
+      case _Pages.maxChip:
+        return MaxChipPage(key: const ValueKey('max_chip'), manager: _urManager);
       case _Pages.k2:
       default:
         return _buildK2Page();
