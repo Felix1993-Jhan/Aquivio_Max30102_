@@ -374,6 +374,12 @@ Windows 排程工作、USB 選擇性暫停／電源管理、ST-Link 大量儲存
 
 - `test/k2_replay_verify_test.dart` **目前失敗**：重放快照的 RR 跨度差 2.75%（0.0.0.8；0.0.0.7 時是 2.52%），超過測試設定的 2.0% 門檻。查證結果是**測試本身對齊錯一拍**（K2 少的是第一拍，錯開一拍後比對後 4 筆只差 0.24%），不是演算法的誤差。尚未修測試。
 - **兩個日誌框沒有捲動條**：K2 頁 `_chipControl()` 底下的日誌框（`ListView.builder(reverse: true)`）與 UR 面板 `_buildLogSection()` 的接收日誌（`SingleChildScrollView`）都沒包 `Scrollbar(thumbVisibility: true)`，可以捲但看不出來。做法同快照列 `_snapshotViewer()`（flutter-ui skill B2、B3）。
+- **K2 頁視窗窄時有 4 處 RenderFlex overflow**（2026-11-04 DevTools Inspector 實測，共通原因：`Row` 裡元件全是固定寬度、沒有能縮的）：
+  1. 區塊 ① 標題右側 `_sec1Controls()`（溢出 226px）— 只有最後的進料計數是 `Flexible`，前面視窗選項／輸入框／實際涵蓋／定數／存快照都不能縮。建議整串包水平捲動（同 `_connectionBar()`）。
+  2. 波形圖上方的對照開關列（原始 IR／0.0.0.7 移動平均線，溢出 133px）— 右欄被兩個 215px 側欄（`_sidePanel` + `_v7Panel`）擠窄。0.0.0.7 對照拿掉後可能自然消失。
+  3. `Max30102HrvChartView` 的 RR 趨勢 + Poincaré 列（溢出 87px）— 外層固定高 175、Poincaré 是 `AspectRatio(1)`，右欄寬度 < 183px 就溢出。建議 Poincaré 邊長改取寬高較小者。與 2 同為右欄過窄。
+  4. 憋氣血氧曲線標題列（溢出 136px）— `Spacer` 後面的提示文字 `k2_bh_hint` 太長且沒包 `Flexible`。建議包 `Flexible` + 省略號，全文放 Tooltip。
+  **使用者決定暫不修（2026-11-19）**：不要主動提議修、也不要問要不要修；等使用者再提起時才處理。
 - **設定檢查訊息的本文仍是繁體中文**：`Max30102SettingLimits.check()` 回傳的 `message` / `applied` 寫在核心層 [k2_setting_limits.dart](lib/main_mode/max30102_K2/k2_setting_limits.dart)，那是交接內容，UI 依設計原則「原封輸出、一個字都不改」。日誌裡的 `↳ UI:` 註解行會跟著語言走，但它引述的核心訊息不會。要翻譯就得動交接核心，需另行決定。
 - 從別處複製整個專案資料夾後首次建置，可能因殘留的 plugin symlink 而報 `PathExistsException`。解法：`flutter clean && flutter pub get`。
 

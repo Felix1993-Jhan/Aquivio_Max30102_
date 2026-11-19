@@ -340,9 +340,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   /// K2 頁 / MAX 晶片頁：自己接管 onRawBytes，心跳必須停掉不可干擾
   /// 其餘頁：清掉診斷 parser、恢復心跳
   void _applyStm32Mode() {
-    // 〔2026-11-19 新增 MAX 晶片頁：它也是一問一答讀暫存器，心跳 PING 的回應
-    //   會混進來，所以跟 K2 頁一樣算診斷模式（停心跳、自己掛 onRawBytes）〕
-    // final diagnostic = _selectedPageIndex == _Pages.k2;
+    // MAX 晶片頁也是一問一答讀暫存器，心跳 PING 的回應會混進來，所以跟 K2 頁同列
     final diagnostic = _selectedPageIndex == _Pages.k2 ||
         _selectedPageIndex == _Pages.maxChip;
     if (diagnostic == _stm32DiagnosticMode) return;
