@@ -14,7 +14,7 @@ import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_config.dart';
-import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_core.dart';
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/realtime/k2_core.dart';
 
 const int kFs = Max30102Config.samplingRateHz; // 100
 const int kBatch = 24; // 一批樣本數，比照實機一次 QUERY_FIFO 的量

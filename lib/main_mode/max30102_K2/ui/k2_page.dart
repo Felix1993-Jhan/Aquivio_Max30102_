@@ -19,16 +19,14 @@ import 'package:flutter_libserialport/flutter_libserialport.dart';
 
 import '../../../shared/services/localization_service.dart';
 import '../../../shared/services/serial_port_manager.dart';
+import '../fixed30/k2_core_fixed30.dart';
 import '../k2_config.dart';
-import '../k2_core.dart';
+import '../realtime/k2_core.dart';
 import '../k2_hrv_calculator.dart';
 import '../k2_protocol.dart';
 import '../k2_setting_limits.dart';
 import '../k2_signal.dart';
 import '../k2_vitals_metrics.dart';
-// 0.0.0.7 對照核心(類別名與現行核心相同 → 一律用 v7 前綴),見該資料夾的 README
-import '../../max30102_K2_v007/k2_hrv_calculator.dart' as v7;
-import '../../max30102_K2_v007/k2_vitals_metrics.dart' as v7;
 import 'k2_drink_preview.dart';
 import 'k2_fixed_window.dart';
 import 'k2_formula_panel.dart';
@@ -80,9 +78,6 @@ class _K2PageState extends State<K2Page> {
   /// 波形圖上疊原始 IR(白線,獨立刻度)—— 看濾波前的訊號長什麼樣、漂移有多大。
   bool _showRawIr = false;
 
-  /// 波形圖上疊 0.0.0.7 找谷用的移動平均線(金線,與 IR 線同刻度)—— 與現行的帶通線比形狀。
-  bool _showV7Line = false;
-
   /// 完整存檔:開 = 快照額外寫入開頭段與全部衍生數值。**預設關** ——
   /// 關閉時產出的檔案與以往逐位元相同,舊檢視器與既有的比對流程不受影響。
   bool _fullSnapshot = false;
@@ -98,10 +93,6 @@ class _K2PageState extends State<K2Page> {
   /// 圖在窗後多接這一段,窗內最後那段的線才是定下來的(也是核心找谷時看到的)。
   K2FixedView? _fixedView() =>
       _adapter.fixedWindow.view(_shortSec, tail: _waveTail);
-
-  /// 0.0.0.7 對照核心的定長窗,取法與 [_fixedView] 相同(同一個 tail,memo 互不干擾)。
-  K2FixedView? _fixedViewV7() =>
-      _adapter.fixedWindowV7.view(_shortSec, tail: _waveTail);
 
   // v0.0.0.7 是 4 + 100 + 6 = 110(三個置中移動平均的半窗)。
   int get _waveTail =>
@@ -844,7 +835,8 @@ class _K2PageState extends State<K2Page> {
               // 推演結果不另外存 —— 它是從當下的緩衝區即時算的,所以
               // 開始新的一次、核心歸零之後自然就跟著換掉,沒有「殘留上一位
               // 使用者的結果」這個問題。
-              onPressed: connected ? () => _adapter.start() : null,
+              // 模擬軟體的流程:每次開始都先歸零、送 init(見 adapter.startMeasurement)
+              onPressed: connected ? () => _adapter.startMeasurement() : null,
               style: small.copyWith(
                 backgroundColor: WidgetStatePropertyAll(Colors.teal),
               ),
@@ -1576,23 +1568,21 @@ class _K2PageState extends State<K2Page> {
           bpm: v?.bpm,
           ir: _adapter.waveIr,
         );
-    // ── 0.0.0.7 對照:同一段時間、同一套取法,只換核心 ────────────────────
-    //    HRV 與可信度一律用 0.0.0.7 自己的函式算(異常次數、兩級可信度都在那裡)。
-    final fx7 = _fixedMode ? _fixedViewV7() : null;
-    final pts7 = fx7?.pts ?? _adapter.pointsRecentSecondsV7(_shortSec);
-    final hv7 = pts7.isEmpty ? null : v7.Max30102HrvCalculator.hrvFrom(pts7);
-    final c7 = _adapter.latestV7;
-    final metrics7 = v7.Max30102VitalsMetrics.compute(
-      pts: pts7,
-      hv: hv7,
-      // 定長模式照定長窗的規則取 SQI(窗內輪次多數決),與現行那份一致
-      sqiOk: fx7 != null
-          ? fx7.rounds > 0 && fx7.sqiOkRounds * 2 >= fx7.rounds
-          : (c7?.sqiOk ?? false),
-      settling: fx7 != null ? false : (c7?.settling ?? false),
-      bpm: _adapter.displayComputeV7?.bpm,
-      ir: _adapter.waveIr,
-    );
+    // ── 固定 30 秒對照:30 秒到了才一次算(= server 預設的算法)──────────────
+    //    與 server 的 strapi 區塊同一套取法:傳計算窗起訖 → 乾淨比例連頭尾也算。
+    final fr = _adapter.fixedResult;
+    final metricsFx = fr == null
+        ? null
+        : Max30102VitalsMetrics.compute(
+            pts: fr.compute.rrPoints,
+            hv: fr.compute.hrv,
+            sqiOk: fr.compute.sqiOk,
+            settling: false,
+            bpm: fr.compute.bpm,
+            ir: fr.windowIr,
+            spanStart: fr.windowStartAbs,
+            spanEnd: fr.windowEndAbs,
+          );
     // ── 波形圖的輸入:定長 / 滾動兩條路在這裡收斂成同一組變數 ──────────
     //
     // 開頭那 3.5 秒(空轉 + 沉澱 + 方向判定)**兩種模式都要看得到** ——
@@ -1728,14 +1718,14 @@ class _K2PageState extends State<K2Page> {
                 _strapiPanel(metrics),
               ]),
               const SizedBox(width: 8),
-              // ── 0.0.0.7 對照欄:與左欄同一段時間,並排比數字 ──
-              _v7Panel(hv7, pts7.length, metrics7),
+              // ── 固定 30 秒對照欄:同一份原始資料,並排比數字 ──
+              _fixedPanel(fr, metricsFx),
               const SizedBox(width: 8),
               // ── 綠:右側(上波形 / 下 RR趨勢+Poincaré)──
               Expanded(
                 child: Column(
                   children: [
-                    // ── 波形圖上方的對照開關:原始 IR(白)/ 0.0.0.7 移動平均線(金)──
+                    // ── 波形圖上方的對照開關:原始 IR(白)──
                     Row(
                       children: [
                         for (final (label, on, set) in [
@@ -1743,11 +1733,6 @@ class _K2PageState extends State<K2Page> {
                             tr('k2_toggle_raw_ir'),
                             _showRawIr,
                             (bool b) => _showRawIr = b,
-                          ),
-                          (
-                            tr('k2_toggle_v7_line'),
-                            _showV7Line,
-                            (bool b) => _showV7Line = b,
                           ),
                         ])
                           Padding(
@@ -1799,13 +1784,16 @@ class _K2PageState extends State<K2Page> {
                                 for (final t in _adapter.displayTroughs())
                                   t + preLen,
                               ];
-                          // 0.0.0.7 的谷:座標規則與上面完全相同(兩個核心吐樣本的時間點一樣)
-                          final srcTroughsAlt =
-                              fx7?.chartTroughs ??
-                              [
-                                for (final t in _adapter.displayTroughsV7())
-                                  t + preLen,
-                              ];
+                          // 固定 30 秒的谷:絕對位置 → 圖上索引。兩個核心的絕對位置規則相同,
+                          // 換算照即時版那份(定長 = abs − base + 開頭段;滾動 = abs − waveBase + 開頭段)。
+                          int toChart(int abs) => fx != null
+                              ? abs + fw.preIr.length - fw.base
+                              : abs - _adapter.waveBase + preLen;
+                          bool onChart(int i) => i >= 0 && i < srcIr.length;
+                          final srcTroughsAlt = [
+                            for (final a in fr?.compute.troughAbs ?? const <int>[])
+                              if (onChart(toChart(a))) toChart(a),
+                          ];
                           // 底部時間線要標數字的 RR(起谷, 終谷)→ 圖上索引。
                           // 定長照定長窗自己的換算(abs − base + 開頭段長度,同 chartTroughs);
                           // 滾動照波形陣列,前面接了開頭段就整批平移。
@@ -1840,11 +1828,30 @@ class _K2PageState extends State<K2Page> {
                                 ]
                               : s;
                           final srcSpans = spans(fx, fw, _adapter.displaySpans());
-                          final srcSpansAlt = spans(
-                            fx7,
-                            _adapter.fixedWindowV7,
-                            _adapter.displaySpansV7(),
-                          );
+                          final srcSpansAlt = [
+                            for (final p in fr?.compute.rrPoints ?? const <HrvRrPoint>[])
+                              if (onChart(toChart(p.startAbs)) &&
+                                  onChart(toChart(p.endAbs)))
+                                (from: toChart(p.startAbs), to: toChart(p.endAbs)),
+                          ];
+                          // 固定 30 秒的計算窗起訖、提早結束時的抬起點 L 與切點(L − 154)
+                          final fxEvents = <({int at, String label, Color color})>[
+                            if (fr != null)
+                              for (final (abs, label, color) in [
+                                (fr.windowStartAbs, tr('k2_ev_fx_start'), const Color(0xFFFFD740)),
+                                (fr.windowEndAbs, tr('k2_ev_fx_end'), const Color(0xFFFFD740)),
+                                if (fr.liftAbs != null) ...[
+                                  (fr.liftAbs!, tr('k2_ev_fx_lift'), Colors.pinkAccent),
+                                  (
+                                    fr.liftAbs! - Max30102K2Fixed30.hold,
+                                    tr('k2_ev_fx_cut'),
+                                    Colors.pinkAccent.withValues(alpha: 0.7),
+                                  ),
+                                ],
+                              ])
+                                if (onChart(toChart(abs)) && toChart(abs) >= dropHead)
+                                  (at: toChart(abs) - dropHead, label: label, color: color),
+                          ];
                           final srcBands = fx != null
                               ? fx.bands
                               : (headInRolling
@@ -1884,7 +1891,6 @@ class _K2PageState extends State<K2Page> {
                             rrSpans: cut(srcSpans),
                             rrSpansAlt: cut(srcSpansAlt),
                             showRawIr: _showRawIr,
-                            showAltLine: _showV7Line,
                             // 圖上第 0 筆的絕對位置(點選的谷靠它記住,滾動時直線才跟得住):
                             // 定長 = 定長窗的換算(abs − base + 開頭段)反過來,再加上裁掉的空轉段;
                             // 滾動 = 波形陣列的起點,前面接了開頭段就往前推 preLen。
@@ -1906,7 +1912,7 @@ class _K2PageState extends State<K2Page> {
                                     ]
                                   : srcBands,
                             ),
-                            events: chartEvents,
+                            events: [...chartEvents, ...fxEvents],
                             version: ver,
                             markSeconds: preLen > 0 ? const [] : marks,
                             displaySamples: waveSamples,
@@ -2099,19 +2105,25 @@ class _K2PageState extends State<K2Page> {
   String _cleanSharePct(VitalsMetrics m) =>
       '${(m.cleanShare * 100).toStringAsFixed(0)} %';
 
-  /// 0.0.0.7 對照欄 —— 與左欄同一段時間、同一批原始資料,只換核心(改版前的算法)。
+  /// 固定 30 秒對照欄 —— 同一批原始資料,30 秒到了才一次找谷(= server 預設的算法)。
   ///
-  /// 只放比較時要看的:HRV(同 [_kvList])、可信度與它的依據(異常次數、拍數)。
-  /// 這些數字**不會送出去**,server 送的是現行核心(0.0.0.8)的。
-  Widget _v7Panel(HrvStats? hv, int rrCount, v7.VitalsMetrics m) {
-    // 圖上 0.0.0.7 對照一律金色;白底上用深一點的金,才看得清楚
+  /// 階段 / 倒數照 server 的 `phase` / `remainingSec`;結果出來前數值一律「—」。
+  /// [m] 用計算窗起訖算(乾淨比例連頭尾沒拍的兩段也算),與 server 的 strapi 同一套。
+  Widget _fixedPanel(K2Fixed30Result? r, VitalsMetrics? m) {
+    // 圖上固定版一律金色;白底上用深一點的金,才看得清楚
     const gold = Color(0xFFB8860B);
-    final conf = m.confidenceByPulse;
-    final confColor =
-        conf == 'good' ? Colors.green.shade700 : Colors.red.shade700;
+    final k = _adapter.coreFixed;
+    final c = r?.compute;
+    final phase = switch (k.phase) {
+      K2Phase.waiting => tr('k2_f30_phase_waiting'),
+      K2Phase.measuring =>
+        trParams('k2_f30_phase_measuring', {'sec': k.remainingSec ?? 0}),
+      K2Phase.done => tr('k2_f30_phase_done'),
+      K2Phase.aborted => tr('k2_f30_phase_aborted'),
+    };
     return _sidePanel([
       Text(
-        tr('k2_v7_title'),
+        tr('k2_f30_title'),
         style: const TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.bold,
@@ -2119,32 +2131,58 @@ class _K2PageState extends State<K2Page> {
         ),
       ),
       Text(
-        tr('k2_v7_note'),
+        tr('k2_f30_note'),
         style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
       ),
       const Divider(height: 14),
+      _kv(
+        tr('k2_f30_phase'),
+        phase,
+        color: k.phase == K2Phase.aborted ? Colors.red.shade700 : null,
+        api: 'phase',
+      ),
+      // 提示另起一行:值那一欄沒有 Flexible,長句子放在值裡會撐爆 215px 的側欄
+      if (k.phase == K2Phase.aborted || k.phase == K2Phase.done)
+        Text(
+          tr(k.phase == K2Phase.aborted ? 'k2_f30_abort_hint' : 'k2_f30_done_hint'),
+          style: TextStyle(
+            fontSize: 10,
+            color: k.phase == K2Phase.aborted
+                ? Colors.red.shade700
+                : Colors.grey.shade600,
+          ),
+        ),
+      const Divider(height: 14),
       Text(
-        trParams(_fixedMode ? 'k2_hrv_fixed' : 'k2_hrv_short', {
-          'sec': _shortSec,
-        }),
+        tr('k2_f30_hrv_title'),
         style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
       ),
       const SizedBox(height: 4),
-      _kvList(hv, rrCount, showCounts: false),
+      _kvList(c?.hrv, c?.rr.length ?? 0, showCounts: false),
       const Divider(height: 18),
-      _kv('confidence', conf, color: confColor, api: 'confidence'),
       _kv(
-        tr('k2_v7_anomalies'),
-        '${m.anomalies} / ${v7.VitalsMetrics.maxAnomalies}',
-        color: m.anomalies > v7.VitalsMetrics.maxAnomalies
-            ? Colors.red.shade700
-            : null,
+        'confidence',
+        m?.confidenceByPulse ?? '—',
+        color: m == null ? null : _confColor(m.confidenceByPulse),
+        api: 'confidence',
       ),
-      _kv(tr('k2_v7_beats'), '${m.beats} (≥ ${m.minBeatsNeeded})'),
-      _kv('SQI', m.sqiOk ? 'OK' : '✗'),
+      _kv(
+        tr('k2_f30_clean_share'),
+        m == null ? '—' : _cleanSharePct(m),
+        color: m == null ? null : _cleanShareColor(m.cleanShare),
+      ),
+      _kv(tr('k2_f30_beats'), m == null ? '—' : '${m.beats} (≥ 9)'),
+      _kv('SQI', c == null ? '—' : (c.sqiOk ? 'OK' : '✗')),
+      _kv(
+        tr('k2_f30_spo2'),
+        c?.spo2 == null ? '—' : '${c!.spo2!.toStringAsFixed(1)} %',
+        api: 'spo2',
+      ),
+      _kv(tr('k2_f30_orient'), c == null ? '—' : c.orient.name),
+      if (r?.liftAbs != null) _kv(tr('k2_f30_lift'), '#${r!.liftAbs}'),
       const SizedBox(height: 6),
       Text(
-        tr('k2_v7_rule'),
+        tr('k2_f30_rule'),
         style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
       ),
     ]);

@@ -34,6 +34,20 @@
 /// | `0.0.0.7` | `confidence` 改看脈搏(SQI + 拍數 + RR 空洞),只剩 `good` / `very rough`(**數值變動**);WS `wave` 改由核心輸出 = 找谷用的線(批尾截斷修正、補上低通) |
 /// | `0.0.0.8` | 找谷 / 畫圖的線改成 0.7~3.5 Hz 零相位帶通(兩者仍是同一條);只收離最新資料 1.5 秒以前的谷;RR 逐筆分類(乾淨 / 漏拍 / 偽拍),只有乾淨的進 HRV;`confidence` 改看乾淨比例,恢復 `rough`(**數值變動**);`wave` 落後約 1.5 秒;通道方向改為**固定對調**、不再自動判定(**行為變更**) |
 /// | `0.0.0.9` | `POST /chip/reset` 之後到下一次 init 成功前,丟棄所有 FIFO 資料 → `fingerPresent` 固定 false;`/chip/*` 完成後立刻推一筆 `/stream`;核心 reset / 啟動後第一批沒手指的資料就回報 false(原本前 2 批誤報 true)(**行為變更**) |
+/// | `0.0.1-fixed30s` | **固定 30 秒模式(預設)**:倒數 30 秒只送波形,到點一次算出結果;新增 `calcMode` / `phase` / `remainingSec` / `abortReason`;結果保留到 init;`bpm` = HRV 平均心率;`--calc realtime` 可切回即時模式(**行為變更**) |
+///
+/// ## ⚠️ `0.0.1-fixed30s`:預設改成固定 30 秒、最後一次算
+///
+/// 對外說明:`aidocs/notes/fixed30_plan.md`(中英)。重點:
+///   · 倒數期間 `bpm` / `spo2` / `hrv` / `strapi` 一律 null、`sqiOk` false;結果出來 `phase` = `done`。
+///   · 倒數未滿 28 秒手指離開 → `phase` = `aborted`(`abortReason` = `fingerRemoved`),等 init;
+///     滿 28 秒才離開 → 用已收到的資料照算。
+///   · 結果保留到 `/chip/init` 成功(或下一次倒數開始);手指離開、`/chip/reset` 都不清。
+///   · WS 由計時器每秒推一次,結果算出時另外立刻推一次。
+///   · 固定模式的 SQI 只回報(`sqiOk`)、不擋拍;`cleanShare` 連計算窗頭尾沒拍的兩段也算。
+///
+/// 程式位置:`lib/main_mode/max30102_K2/fixed30/k2_core_fixed30.dart`、`bin/engine_fixed30.dart`。
+/// 即時模式的核心搬到 `realtime/k2_core.dart`,邏輯沒動;多了 `calcMode` 欄位。
 ///
 /// ## ⚠️ `0.0.0.9`:關燈期間 `fingerPresent` 固定是 false
 ///
@@ -168,4 +182,4 @@
 ///
 /// 手上若有自稱 `0.0.0.3` 的執行檔,**一律當成 `8ec45ce` 那版**(偏嚴),
 /// 並建議升到 `0.0.0.4`。
-const String kServerVersion = '0.0.0.9';
+const String kServerVersion = '0.0.1-fixed30s';

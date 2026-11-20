@@ -19,8 +19,6 @@ import 'package:flutter/services.dart'; // Ctrl + 滾輪 = 振幅縮放
 import '../../../shared/services/localization_service.dart';
 import '../k2_config.dart';
 import '../k2_signal.dart';
-// 0.0.0.7 對照:畫它找谷用的移動平均線(見 max30102_K2_v007/README)
-import '../../max30102_K2_v007/k2_signal.dart' as v7;
 
 // ⚠️ K2 版:原本綁 Max30102Controller(ring buffer + troughFates)。
 //    K2 核心「只算不存、也不吐谷位置」(顯示是 UI 的事),故改成:
@@ -35,7 +33,7 @@ class K2WaveChart extends StatefulWidget {
   /// 谷位置:對應 [ir]/[red] 的索引(UI 自行偵測後傳入)。
   final List<int> troughs;
 
-  /// 對照用的第二組谷(0.0.0.7 對照核心),索引規則同 [troughs]。
+  /// 對照用的第二組谷(固定 30 秒核心),索引規則同 [troughs]。
   /// 畫成金色:波形上一個空心圈 + 底部時間線上方的金色直條。
   final List<int> troughsAlt;
 
@@ -44,16 +42,12 @@ class K2WaveChart extends StatefulWidget {
   /// 那樣跨過空洞也會標一個數字,但它不是 RR,所以有 RR 時一律傳這個。
   final List<({int from, int to})>? rrSpans;
 
-  /// 0.0.0.7 對照的 RR,規則同 [rrSpans],金字標在時間線上方。
+  /// 固定 30 秒對照的 RR,規則同 [rrSpans],金字標在時間線上方。
   final List<({int from, int to})>? rrSpansAlt;
 
   /// 疊一條**原始 IR**(白線,只轉正、不濾波)。獨立刻度:DC 約 8 萬、
   /// 漂移常比脈搏大,沒辦法與去趨勢後的線共用 ±振幅。
   final bool showRawIr;
-
-  /// 疊一條 **0.0.0.7 找谷用的線**(金線,截尾 → 減 2 秒移動平均 → 13 點平均),
-  /// 與 IR 線(現行 0.0.0.8 的帶通線)共用刻度,形狀可以直接比。
-  final bool showAltLine;
 
   /// [ir] 第 0 筆的**絕對樣本位置**。只用來記住「點選了哪顆谷」——
   /// 滾動模式下陣列一直往前裁,索引會變,絕對位置不會,直線才跟得住那顆谷。
@@ -107,7 +101,6 @@ class K2WaveChart extends StatefulWidget {
     this.rrSpans,
     this.rrSpansAlt,
     this.showRawIr = false,
-    this.showAltLine = false,
     this.absOffset = 0,
     this.irWave,
     required this.version,
@@ -136,7 +129,7 @@ class K2WaveChart extends StatefulWidget {
 ///   左右拖曳      放大後左右移動
 ///   雙擊          全部還原
 ///   點時間線直條  從那顆谷畫一條貫穿整張圖的直線,標出它落在每條線的哪個點;
-///                 線上方點 = 對照 0.0.0.7(金)、線下方點 = 現行(IR 色);再點一次取消,
+///                 線上方點 = 對照固定 30 秒(金)、線下方點 = 即時(IR 色);再點一次取消,
 ///                 點時間線上的空白處全部取消。可以同時選好幾顆。
 ///
 /// 縮放狀態存在這裡,所以頁面每秒 / 每 0.1 秒重建圖時不會被重設;
@@ -155,7 +148,7 @@ class _K2WaveChartState extends State<K2WaveChart> {
   static const double _maxZoomY = 8;
   static const double _step = 1.25; // 滾輪一格
 
-  /// 點選的谷:絕對樣本位置 + 是不是對照(0.0.0.7)那一組(見 [K2WaveChart.absOffset])。
+  /// 點選的谷:絕對樣本位置 + 是不是對照(固定 30 秒)那一組(見 [K2WaveChart.absOffset])。
   final Set<({int abs, bool alt})> _picked = {};
 
   void _clampView() => _viewStart = _viewStart.clamp(0.0, 1 - 1 / _zoomX);
@@ -168,7 +161,7 @@ class _K2WaveChartState extends State<K2WaveChart> {
   }
 
   /// 點在時間線附近 → 找最近的直條(左右 6px 內)切換它;附近沒有直條 → 全部取消。
-  /// 線的上方找對照 0.0.0.7(金,往上凸),下方找現行(往下凸)—— 兩版同位置時才分得開。
+  /// 線的上方找對照固定 30 秒(金,往上凸),下方找即時(往下凸)—— 兩版同位置時才分得開。
   /// 位置換算與 painter 完全相同(xOfVisible / 時間線高度)。
   void _onTap(Offset p, Size size) {
     final c = widget;
@@ -268,11 +261,10 @@ class _K2WaveChartState extends State<K2WaveChart> {
                 showIr: c.showIr,
                 showRed: c.showRed,
                 hrvTroughAbs: c.troughs, // 🟡 谷標點
-                altTroughAbs: c.troughsAlt, // 金:0.0.0.7 對照的谷
+                altTroughAbs: c.troughsAlt, // 金:固定 30 秒對照的谷
                 rrSpans: c.rrSpans,
                 rrSpansAlt: c.rrSpansAlt,
                 showRawIr: c.showRawIr,
-                showAltLine: c.showAltLine,
                 searchBackAbs: const [], // K2 無補漏拍白點
                 cleanRejectAbs: const [], // K2 核心不吐命運 → 不繪
                 beatRejectAbs: const [],
@@ -316,16 +308,15 @@ class _Waveform2Painter extends CustomPainter {
   final bool showIr;
   final bool showRed;
   final List<int> hrvTroughAbs; // 🟡 進 HRV(clean 保留拍端點)
-  final List<int> altTroughAbs; // 金:0.0.0.7 對照核心的谷
+  final List<int> altTroughAbs; // 金:固定 30 秒對照核心的谷
   final List<({int from, int to})>? rrSpans; // IR 色字:現行核心(0.0.0.8)的 RR
-  final List<({int from, int to})>? rrSpansAlt; // 金字:0.0.0.7 對照的 RR
+  final List<({int from, int to})>? rrSpansAlt; // 金字:固定 30 秒對照的 RR
   final bool showRawIr; // 白線:原始 IR(獨立刻度)
-  final bool showAltLine; // 金線:0.0.0.7 的移動平均線(與 IR 同刻度)
   // 圖內縮放(見 _K2WaveChartState):時間倍數 / 振幅倍數 / 畫面左緣在整段的第幾成
   final double zoomX;
   final double zoomY;
   final double viewStart;
-  // 點選的谷(陣列索引 + 是不是 0.0.0.7 對照):畫一條貫穿整張圖的直線
+  // 點選的谷(陣列索引 + 是不是固定 30 秒對照):畫一條貫穿整張圖的直線
   final List<({int index, bool alt})> picked;
   final List<int> searchBackAbs;
 
@@ -364,7 +355,6 @@ class _Waveform2Painter extends CustomPainter {
     this.rrSpans,
     this.rrSpansAlt,
     this.showRawIr = false,
-    this.showAltLine = false,
     this.zoomX = 1,
     this.zoomY = 1,
     this.viewStart = 0,
@@ -611,8 +601,8 @@ class _Waveform2Painter extends CustomPainter {
       }
     }
 
-    // ── 對照用的兩條線(開關,預設關)─────────────────────────────────────
-    const cmpColor = Color(0xFFFFD740); // 對照(0.0.0.7)一律金色(線、谷圈、時間線)
+    // ── 對照用的線(開關,預設關)─────────────────────────────────────────
+    const cmpColor = Color(0xFFFFD740); // 對照(固定 30 秒)一律金色(谷圈、時間線)
     final rawFrom = ir.length - visible;
     // 白線:原始 IR,只轉正、不濾波。獨立刻度 —— 撐滿上下 88%,左上標峰峰值。
     double Function(int i)? rawYOf; // 點選直線要在白線上標交會點,換算留著
@@ -645,40 +635,8 @@ class _Waveform2Painter extends CustomPainter {
       _text(canvas, trParams('k2_chart_raw_ir', {'v': span.round()}),
           const Offset(4, 28), Colors.white, 9);
     }
-    // 金線:0.0.0.7 找谷用的線 = 截尾 → 減 2 秒移動平均 → 13 點平均(與 IR 線同刻度)。
-    // 用 0.0.0.7 對照核心自己的那支函式,算法與它當時一模一樣。
-    List<double>? altLine;
-    if (showAltLine && visible >= 2) {
-      final rawD =
-          List<double>.generate(visible, (i) => ir[rawFrom + i].toDouble());
-      final line = v7.Max30102Signal.troughLine(
-        rawD,
-        trimWindow: trimWindow,
-        baselineWindow: baselineWindow,
-        lowpassWindow: lowpassWindow,
-      );
-      altLine = line;
-      final path = Path();
-      for (int i = 0; i < visible; i++) {
-        final y = yOf(line[i]);
-        if (i == 0) {
-          path.moveTo(xOfVisible(i), y);
-        } else {
-          path.lineTo(xOfVisible(i), y);
-        }
-      }
-      canvas.drawPath(
-          path,
-          Paint()
-            ..color = cmpColor
-            ..strokeWidth = 1.4
-            ..style = PaintingStyle.stroke
-            ..strokeJoin = StrokeJoin.round);
-      _text(canvas, tr('k2_chart_v7_line'), const Offset(4, 40), cmpColor, 9);
-    }
-
     // ── 底部時間線:白線,谷 = 穿過白線的直條,RR = 直條之間的數字 ─────────────
-    //    現行核心(IR 色):直條往下凸、數字在線下;0.0.0.7 對照(金):往上凸、數字在線上。
+    //    即時核心(IR 色):直條往下凸、數字在線下;固定 30 秒對照(金):往上凸、數字在線上。
     //    兩版同一顆谷 → 上下接成一條貫穿的直線;位置不同 → 錯開,一眼看出移了多少。
     //    數字只標真正的 RR(rrSpans);沒給就退回相鄰谷距(那樣跨空洞也會標,但不是 RR)。
     final msPerSample = windowSeconds * 1000 / displaySamples;
@@ -721,13 +679,13 @@ class _Waveform2Painter extends CustomPainter {
       }
     }
 
-    // 現行核心用 IR 線的顏色(與波形上的 IR 線、谷標點同色),0.0.0.7 對照用金色 —— 兩版徹底分開
+    // 即時核心用 IR 線的顏色(與波形上的 IR 線、谷標點同色),固定 30 秒對照用金色 —— 兩版徹底分開
     timeline(goldVis, spansVis(rrSpans, goldVis), _irColor, up: false);
     timeline(altVis, spansVis(rrSpansAlt, altVis), cmpColor, up: true);
 
     // ── 點選的谷:貫穿整張圖的直線 + 與每條線的交會點 ─────────────────────────
     //    看「這顆谷落在線的哪個位置」:正好在最低點、還是偏在坡上。
-    //    直線顏色 = 那顆谷的版本(現行 IR 色 / 0.0.0.7 對照金);交會點用各條線自己的顏色。
+    //    直線顏色 = 那顆谷的版本(即時 IR 色 / 固定 30 秒對照金);交會點用各條線自己的顏色。
     for (final p in picked) {
       final i = p.index - firstAbs;
       if (i < 0 || i >= visible) continue;
@@ -747,7 +705,6 @@ class _Waveform2Painter extends CustomPainter {
       for (final ch in channels) {
         cross(yOf(ch.detr[i]), ch.color);
       }
-      if (altLine != null) cross(yOf(altLine[i]), cmpColor);
       if (rawYOf != null) cross(rawYOf(i), Colors.white);
       // 標號與底部 # 軸同一套(陣列索引),兩邊對得起來
       final label = '#${p.index}';
@@ -762,10 +719,9 @@ class _Waveform2Painter extends CustomPainter {
           sumY: (fixedAmp != null && fixedAmp! > 0) ? 14.0 : 2.0);
     }
 
-    // ── 0.0.0.7 對照核心的谷:波形上的金色空心圈(底部的金色直條見上方時間線) ─────
-    //    金線開著 → 圈在金線上(那才是 0.0.0.7 找谷的線);關著 → 圈在 IR 線上,
-    //    那條不是 0.0.0.7 找谷用的線,所以圈不一定剛好在最低點。
-    final ringLine = altLine ?? ps;
+    // ── 固定 30 秒對照核心的谷:波形上的金色空心圈(底部的金色直條見上方時間線) ─────
+    //    兩版找谷用的是同一條帶通線,圈畫在 IR 線上。
+    final ringLine = ps;
     if (altVis.isNotEmpty && ringLine != null) {
       final ring = Paint()
         ..color = cmpColor
@@ -1073,7 +1029,6 @@ class _Waveform2Painter extends CustomPainter {
       old.rrSpans?.length != rrSpans?.length ||
       old.rrSpansAlt?.length != rrSpansAlt?.length ||
       old.showRawIr != showRawIr ||
-      old.showAltLine != showAltLine ||
       old.zoomX != zoomX ||
       old.zoomY != zoomY ||
       old.viewStart != viewStart ||

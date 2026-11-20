@@ -720,18 +720,34 @@ class LocalizationService {
       'k2_orient_unchanged': '不變',
       'k2_orient_mode_auto': '自動偵測',
       'k2_orient_mode_fixed': '指標 {n}',
-      // 0.0.0.7 對照欄(改版前的算法,只在 App 比較,不送出)
-      'k2_v7_title': '0.0.0.7 對照',
-      'k2_v7_note': '同一份原始資料、換回改版前的核心;不送出。圖上金色(圈、往上的直條、數字)= 0.0.0.7',
+      // 固定 30 秒對照欄(= server 預設的算法;App 用同一份資料並排比較)
+      'k2_f30_title': '固定 30 秒(一次算)',
+      'k2_f30_note': '同一份原始資料,30 秒到了才一次找谷(= server 預設算法)。'
+          '圖上金色(圈、往上的直條、數字)= 固定版',
+      'k2_f30_phase': '階段',
+      'k2_f30_phase_waiting': '等待 / 準備中',
+      'k2_f30_phase_measuring': '倒數 {sec} 秒',
+      'k2_f30_phase_done': '已出結果',
+      'k2_f30_phase_aborted': '中止',
+      'k2_f30_abort_hint': '倒數中手指離開。請放好手指後按「開始量測」(會重新 init)',
+      'k2_f30_done_hint': '已自動送 RESET 關燈(模擬軟體);按「開始量測」會重新 init',
+      'k2_f30_hrv_title': 'HRV(計算窗 30 秒)',
+      'k2_f30_clean_share': '乾淨比例(含頭尾)',
+      'k2_f30_beats': '拍數',
+      'k2_f30_spo2': '血氧',
+      'k2_f30_orient': '通道方向(R 驗證後)',
+      'k2_f30_lift': '提早結束:抬起點 L',
+      'k2_f30_rule': 'bpm = HRV 平均心率;SQI 只回報、不擋拍;'
+          '血氧先用 R 驗證方向(< 0.9 照給、> 1.3 兩路換回重算、中間不給)',
+      'k2_ev_fx_start': '固定窗起點',
+      'k2_ev_fx_end': '固定窗終點',
+      'k2_ev_fx_lift': '抬起點 L',
+      'k2_ev_fx_cut': '切點 L−154',
+      'k2_log_fx_done': '固定 30 秒出結果 → 自動送 RESET 關燈、停止輪詢(模擬軟體)',
+      'k2_log_fx_aborted': '固定 30 秒中止:倒數中手指離開 → 停止輪詢,請放好手指後按「開始量測」',
       'k2_toggle_raw_ir': '原始 IR(白)',
-      'k2_toggle_v7_line': '0.0.0.7 移動平均線(金)',
       'k2_chart_raw_ir': '原始 IR(獨立刻度)p2p {v}',
-      'k2_chart_v7_line': '0.0.0.7 移動平均線',
       'k2_chart_zoom': '時間 ×{x} · 振幅 ×{y} · 雙擊還原',
-      'k2_v7_anomalies': '異常次數 / 容許',
-      'k2_v7_beats': '拍數',
-      'k2_v7_rule': '可信度(0.0.0.7):異常(空洞 + SQI 沒過)≤ 1 次 且 拍數 ≥ 9 + 空洞數 → good;'
-          '其餘 very rough',
       // 憋氣血氧曲線(驗證波長用:血氧壓低才分得出兩片板子的差)
       'k2_bh_title': '憋氣血氧曲線',
       'k2_bh_start': '開始憋氣',
@@ -1716,19 +1732,37 @@ class LocalizationService {
       'k2_orient_unchanged': 'unchanged',
       'k2_orient_mode_auto': 'auto',
       'k2_orient_mode_fixed': 'mode {n}',
-      // 0.0.0.7 comparison column (the previous algorithm; App only, not sent)
-      'k2_v7_title': '0.0.0.7 comparison',
-      'k2_v7_note': 'Same raw data, the previous core; not sent. '
-          'Gold on the chart (rings, upward ticks, numbers) = 0.0.0.7',
+      // Fixed 30 s comparison column (= the server's default algorithm)
+      'k2_f30_title': 'Fixed 30 s (computed once)',
+      'k2_f30_note': 'Same raw data; troughs are found once, after 30 s '
+          '(= server default). Gold on the chart (rings, upward ticks, numbers) = fixed',
+      'k2_f30_phase': 'phase',
+      'k2_f30_phase_waiting': 'waiting',
+      'k2_f30_phase_measuring': '{sec} s left',
+      'k2_f30_phase_done': 'done',
+      'k2_f30_phase_aborted': 'aborted',
+      'k2_f30_abort_hint': 'Finger removed during the countdown. Place it and press Start (re-init).',
+      'k2_f30_done_hint': 'RESET sent automatically (LEDs off, like the station); Start re-inits.',
+      'k2_f30_hrv_title': 'HRV (30 s window)',
+      'k2_f30_clean_share': 'clean share (incl. edges)',
+      'k2_f30_beats': 'beats',
+      'k2_f30_spo2': 'SpO₂',
+      'k2_f30_orient': 'channel orientation (R-verified)',
+      'k2_f30_lift': 'early stop: lift point L',
+      'k2_f30_rule': 'bpm = HRV mean HR; SQI reported only, not gating; '
+          'SpO₂ orientation verified by R (< 0.9 as is, > 1.3 swapped and recomputed, '
+          'in between none)',
+      'k2_ev_fx_start': 'fixed window start',
+      'k2_ev_fx_end': 'fixed window end',
+      'k2_ev_fx_lift': 'lift point L',
+      'k2_ev_fx_cut': 'cut L−154',
+      'k2_log_fx_done': 'Fixed 30 s result ready → RESET sent (LEDs off), polling stopped '
+          '(simulating the station)',
+      'k2_log_fx_aborted': 'Fixed 30 s aborted: finger removed during the countdown → '
+          'polling stopped; place the finger and press Start',
       'k2_toggle_raw_ir': 'raw IR (white)',
-      'k2_toggle_v7_line': '0.0.0.7 moving-average line (gold)',
       'k2_chart_raw_ir': 'raw IR (own scale) p2p {v}',
-      'k2_chart_v7_line': '0.0.0.7 moving-average line',
       'k2_chart_zoom': 'time ×{x} · amplitude ×{y} · double-click to reset',
-      'k2_v7_anomalies': 'anomalies / allowed',
-      'k2_v7_beats': 'beats',
-      'k2_v7_rule': 'confidence (0.0.0.7): anomalies (holes + SQI failed) ≤ 1 and '
-          'beats ≥ 9 + holes → good; otherwise very rough',
       // Breath-hold SpO2 curve (for validating wavelength: the two modules can
       // only be told apart once SpO2 is driven down)
       'k2_bh_title': 'Breath-hold SpO₂ curve',

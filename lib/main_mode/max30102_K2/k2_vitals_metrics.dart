@@ -683,7 +683,16 @@ class Max30102VitalsMetrics {
   /// 與「逐筆數分類結果」的差別:一個漏拍(≈ 2 倍)這裡算 2 個間距,原型算 1 個;
   /// 被推偏的一長一短(加起來 ≈ 2 倍)兩邊都算 2 個。差別只在漏拍,而且是偏嚴的那一側。
   /// 第一筆乾淨 RR 之前、最後一筆之後的不乾淨拍看不到(同 [rrGaps])。
-  static double cleanShare(List<HrvRrPoint> pts) {
+  ///
+  /// **頭尾(固定 30 秒模式用)**:給了 [spanStart] / [spanEnd](計算窗的起點 / 終點,
+  /// 絕對位置)時,窗頭到第一筆乾淨 RR、最後一筆到窗尾這兩段也算空洞。
+  /// 換算用**無條件捨去** —— 第一顆谷本來就不會剛好落在窗頭,天生有不到一拍的空白,
+  /// 不到一拍算 0,不冤枉正常的量測。即時模式不傳(窗尾那段是「還在等」,不是「少了」)。
+  static double cleanShare(
+    List<HrvRrPoint> pts, {
+    int? spanStart,
+    int? spanEnd,
+  }) {
     if (pts.isEmpty) return 0;
     const fs = Max30102Config.samplingRateHz;
     final sorted = [for (final p in pts) p.rr]..sort();
@@ -704,6 +713,11 @@ class Max30102VitalsMetrics {
       final gapMs = gapSamples * 1000.0 / fs;
       lost += math.max(1, (gapMs / med).round());
     }
+    // 頭尾兩段:長度 ÷ 中位數,無條件捨去(見上方說明)
+    int edge(int samples) =>
+        samples > 0 ? (samples * 1000.0 / fs / med).floor() : 0;
+    if (spanStart != null) lost += edge(pts.first.startAbs - spanStart);
+    if (spanEnd != null) lost += edge(spanEnd - pts.last.endAbs);
     return pts.length / (pts.length + lost);
   }
 
@@ -711,6 +725,7 @@ class Max30102VitalsMetrics {
   ///
   /// [pts] 這段的 RR(帶絕對位置);[hv] 同一段算出來的 HRV 統計;
   /// [ir] 波形(算 snr_db 用,給 null 就不算);其餘是核心的狀態旗標。
+  /// [spanStart] / [spanEnd]:計算窗的起訖(固定 30 秒模式才給),見 [cleanShare]。
   static VitalsMetrics compute({
     required List<HrvRrPoint> pts,
     required HrvStats? hv,
@@ -718,6 +733,8 @@ class Max30102VitalsMetrics {
     required bool settling,
     double? bpm,
     List<int>? ir,
+    int? spanStart,
+    int? spanEnd,
   }) {
     final rr = [for (final p in pts) p.rr];
     final spec = spectrum(pts);
@@ -725,7 +742,7 @@ class Max30102VitalsMetrics {
     return VitalsMetrics(
       beats: pts.isEmpty ? 0 : rr.length + 1,
       rrGaps: rrGaps(pts),
-      cleanShare: cleanShare(pts),
+      cleanShare: cleanShare(pts, spanStart: spanStart, spanEnd: spanEnd),
       hrv: hv,
       spectrum: spec,
       stress: si,

@@ -36,7 +36,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../k2_config.dart';
-import '../k2_core.dart';
+import '../realtime/k2_core.dart';
 import '../k2_hrv_calculator.dart';
 import '../k2_vitals_metrics.dart';
 

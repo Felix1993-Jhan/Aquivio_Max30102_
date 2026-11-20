@@ -29,13 +29,13 @@
 
 import 'dart:typed_data';
 
-import 'k2_algorithm.dart';
-import 'k2_beatseries.dart';
-import 'k2_config.dart';
-import 'k2_hrv_calculator.dart';
-import 'k2_protocol.dart';
-import 'k2_setting_limits.dart';
-import 'k2_signal.dart';
+import '../k2_algorithm.dart';
+import '../k2_beatseries.dart';
+import '../k2_config.dart';
+import '../k2_hrv_calculator.dart';
+import '../k2_protocol.dart';
+import '../k2_setting_limits.dart';
+import '../k2_signal.dart';
 
 /// 一次計算的產物(全部是「原始值」,未做任何顯示平滑)。
 /// FIFO 兩個資料槽與實際光源的對應關係。

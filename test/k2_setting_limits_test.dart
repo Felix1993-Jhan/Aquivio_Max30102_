@@ -8,7 +8,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_config.dart';
-import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_core.dart';
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/realtime/k2_core.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_setting_limits.dart';
 
 void main() {

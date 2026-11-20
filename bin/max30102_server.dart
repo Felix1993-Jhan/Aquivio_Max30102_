@@ -11,7 +11,10 @@
 //   一旦混進 package:flutter 或 ui/ 底下的東西,dart compile exe 會直接編不過。
 //
 // 內部分三塊:
-//   ① K2Engine    —— 持有 Max30102K2,負責計算 + 累積波形供畫圖
+//   ① 引擎        —— 持有計算核心,負責計算 + 累積波形供畫圖。兩種計算模式各一支檔:
+//                     engine_base.dart     共用骨架(波形累積、WS 推送通道)
+//                     engine_fixed30.dart  固定 30 秒(預設)
+//                     engine_realtime.dart 即時(`--calc realtime`)
 //   ② FeedSource  —— 進料來源(串口 / HTTP 餵料),同一時間只有一種作用中
 //   ③ ApiServer   —— HTTP/WS API 層(dart:io HttpServer)
 // ============================================================================
@@ -23,14 +26,20 @@ import 'dart:typed_data';
 
 import 'package:libserialport/libserialport.dart';
 
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/fixed30/k2_core_fixed30.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_config.dart';
-import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_core.dart';
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_hrv_calculator.dart';
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/realtime/k2_core.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_protocol.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_signal.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_vitals_metrics.dart';
 
 // 版本號單獨一支檔 —— 改版只動 server_version.dart,那裡也記著沿革。
 import 'server_version.dart';
+
+part 'engine_base.dart';
+part 'engine_fixed30.dart';
+part 'engine_realtime.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
 // 常數與小工具
@@ -78,340 +87,6 @@ String _errEn(Object e) => e is BilingualException ? e.en : '$e';
   final zh = _errZh(e);
   final en = _errEn(e);
   return (zh == en ? zhPrefix : '$zhPrefix:$zh', '$enPrefix: $en');
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// ① K2Engine —— 計算引擎 + 波形累積
-// ════════════════════════════════════════════════════════════════════════════
-
-/// 包住 [Max30102K2]:餵資料進來、算出結果、順便替上層累積一段波形。
-///
-/// 核心本身**不囤長歷史**(只留 config.dataHistoryMs),要畫圖得由外面自己存 ——
-/// 這裡就是那個「外面」,把每次 feedData 回傳的 newIr/newRed 接起來。
-class K2Engine {
-  K2Engine({int waveSeconds = 30, bool resetOnFingerOff = true})
-      : _waveCap = waveSeconds * kFs,
-        // 免洗式量測(一人一次):確認手指離開時核心連絕對索引一起歸零,
-        // 下一位使用者完全從零開始。核心預設是 false,這裡明確打開。
-        k2 = Max30102K2(
-          config: Max30102Config(resetOnFingerOff: resetOnFingerOff),
-        );
-
-  final Max30102K2 k2;
-
-  /// 波形保留上限(筆)。超過就從頭裁掉。
-  final int _waveCap;
-
-  // 原始樣本
-  final List<int> _waveIr = [];
-  final List<int> _waveRed = [];
-
-  /// `_waveIr[0]` 的**絕對樣本位置**。上層靠它把波形對齊到 troughAbs / rrPoints。
-  int _waveBase = 0;
-
-  // 畫圖用的處理後 IR —— 核心算好的 K2FeedResult.newIrWave / newIrWaveTrim,原封轉送。
-  //
-  // ⚠️ 不再用 newIrTrim(v0.0.0.7 起)。那是每批一到就算的截尾值,批尾 4 筆的右側
-  //    是截斷的,送出去就凍住;站台照著畫,每 0.1 秒左右會出現一個小缺口。
-  //    newIrWave 是核心等線定下來(落後約 1.5 秒)才給的,就是核心找谷用的那條線
-  //    (Max30102Signal.troughLine:截尾 → 0.7~3.5 Hz 帶通,v0.0.0.8)。server 不再自己算。
-  //
-  // 落後原始樣本約 1.5 秒,所以有自己的起點 [_detBase],不與 [_waveBase] 共用。
-  final List<double> _det = []; // 找谷用的線:截尾 → 帶通(→ WS `wave`)
-  final List<double> _detTrim = []; // 截尾、帶 DC(→ WS `raw_wave`)
-  int _detBase = 0;
-
-  /// 每算出一份新結果就 push 給 WS 訂閱者。
-  final StreamController<Map<String, dynamic>> _vitals =
-      StreamController<Map<String, dynamic>>.broadcast();
-  Stream<Map<String, dynamic>> get vitalsStream => _vitals.stream;
-
-  int get totalSamples => k2.totalSamples;
-
-  /// 晶片休眠中(`POST /chip/reset` 送出後、下一次 init 成功前)。
-  ///
-  /// 這段期間 [feedPacket] **丟棄所有 FIFO 資料**,`fingerPresent` 因此固定是 false。
-  ///
-  /// 為什麼要擋(v0.0.0.9):整合方回報 reset 關燈後,**沒放手指**的感測器也回報
-  /// `fingerPresent: true`,而且一直停在 true。實際經過(2026-11-04 實測):
-  ///   ① 韌體收到 RESET **不清 MCU 緩衝**,reset 後第一次 QUERY_FIFO 還會拿到
-  ///      reset 前留下的樣本(實測 24 筆)。
-  ///   ② 舊版在 `engine.reset()` 之後把這批舊樣本餵進核心;當時核心 reset 後的
-  ///      去彈跳計數是 0,前兩批沒手指的資料被當成「有手指、空轉期」→ true
-  ///      (核心已另外修正,見 `_noFingerBatches`)。
-  ///   ③ 之後晶片休眠、FIFO 一直是空的 → 核心不再計算 → `/stream` 不再推送,
-  ///      對方就停在那一筆 true。
-  /// 關燈時本來就沒有光可以偵測手指,這段期間的資料一筆都不該進判斷。
-  ///
-  /// 由 [SerialSource.resetChip] 設 true、[SerialSource.initChip] 成功後設 false
-  /// (含開串口時的自動 init);切換進料模式時也清掉(見 `_handleMode`)。
-  /// feed 模式下 server 不知道上層有沒有真的送出 reset,所以不會動這個旗標。
-  bool chipAsleep = false;
-
-  /// 立刻推一筆現況給 WS 訂閱者(不等下一次計算)。
-  void pushVitals() {
-    if (!_vitals.isClosed) _vitals.add(vitalsJson());
-  }
-
-  /// 餵一個 MCU 原始封包(含表頭與 CS)。回傳這次有沒有算出新結果。
-  ///
-  /// 封包壞掉 / 不是資料回應 → 核心回 empty,這裡就什麼都不做。
-  /// 晶片休眠中([chipAsleep])→ 整包丟棄。
-  bool feedPacket(List<int> packet) {
-    if (chipAsleep) return false;
-    final r = k2.feedData(packet);
-
-    // 核心自行清空過(絕對索引到頂)→ 我們存的波形與 base 全部作廢。
-    if (r.didReset) _clearWave();
-
-    if (r.newIr.isNotEmpty) {
-      // ⚠️ 核心在空轉期/沉澱期會**丟棄樣本**,所以 firstAbs 不保證等於
-      //    「上一批結尾 + 1」。對不上就整段重接,不要硬接 —— 硬接會讓波形
-      //    索引與 troughAbs 錯開,而且錯得很安靜。
-      final expected = _waveBase + _waveIr.length;
-      if (_waveIr.isEmpty || r.firstAbs != expected) {
-        _clearWave();
-        _waveBase = r.firstAbs;
-      }
-      _waveIr.addAll(r.newIr);
-      _waveRed.addAll(r.newRed);
-
-      final over = _waveIr.length - _waveCap;
-      if (over > 0) {
-        _waveIr.removeRange(0, over);
-        _waveRed.removeRange(0, over);
-        _waveBase += over; // 裁掉幾筆,base 就往前推幾筆
-      }
-    }
-
-    // 處理後波形:與原始樣本同樣的接法 —— 對不上就整段重接,不硬接。
-    if (r.newIrWave.isNotEmpty) {
-      if (_det.isEmpty || r.waveFirstAbs != _detBase + _det.length) {
-        _det.clear();
-        _detTrim.clear();
-        _detBase = r.waveFirstAbs;
-      }
-      _det.addAll(r.newIrWave);
-      _detTrim.addAll(r.newIrWaveTrim);
-      final over = _det.length - _waveCap;
-      if (over > 0) {
-        _det.removeRange(0, over);
-        _detTrim.removeRange(0, over);
-        _detBase += over;
-      }
-    }
-
-    if (r.computed != null) {
-      if (!_vitals.isClosed) _vitals.add(vitalsJson());
-      return true;
-    }
-    return false;
-  }
-
-  /// 重置:核心 + 波形都清乾淨。切換進料來源時一定要呼叫。
-  void reset() {
-    k2.reset();
-    _clearWave();
-  }
-
-  void _clearWave() {
-    _waveIr.clear();
-    _waveRed.clear();
-    _waveBase = 0;
-    _det.clear();
-    _detTrim.clear();
-    _detBase = 0;
-  }
-
-  /// 最新一次計算結果。沒手指 / 沉澱中時對應欄位為 null,照核心現況輸出。
-  ///
-  /// ⚠️ **`/vitals` 與 `/stream` 吐的是同一個函式的輸出** —— WS 一接上先推
-  ///    一份現況,之後每算完一次推一份。所以改這裡兩個端點會自動同步,
-  ///    不會有一邊漏改。
-  ///
-  ///    **唯一的例外是 `wave`**(v0.0.0.5 起):`/stream` 會在這份輸出之外再蓋
-  ///    一個 `wave` 區塊,`/vitals` 沒有。理由是 `wave` 給的是**增量**(自這個
-  ///    訂閱者上次收到之後的新樣本),那需要「上次收到哪裡」這個**每連線一份**
-  ///    的狀態 —— HTTP 輪詢沒有連線可依附,問十次就會拿到十份不相接的碎片。
-  ///    要用 HTTP 拿波形請走 `GET /waveform`,那邊是「近 N 秒」的絕對切片。
-  ///
-  /// 回應分兩區:
-  ///   · 頂層 + `hrv` —— **我們自己的欄位**,名稱與型別照核心的語意。
-  ///   · `strapi` —— **整合方介面的形狀**(aquivio-station 的 `VitalsResult`),
-  ///     欄位名與型別完全照他們的宣告,可以直接 `const v: VitalsResult = json.strapi`
-  ///     零映射取用。
-  ///
-  /// 為什麼不直接把頂層欄位改名成他們的:**有些根本不是同一個量**。
-  ///   · `sqiOk`(布林閘門) vs `sqi`(number 1/0)—— 型別不同
-  ///   · `bpm`(最近 6 拍**中位**) vs `mean_hr`(全窗**平均**)—— 同一次量測
-  ///     會差 1~3 bpm,改名等於送錯值
-  /// 所以兩區並存,重複幾個 byte 不是問題。
-  Map<String, dynamic> vitalsJson() {
-    final c = k2.latest;
-    final hv = c?.hrv;
-    return {
-      'fingerPresent': c?.fingerPresent ?? false,
-      'sqiOk': c?.sqiOk ?? false,
-      'settling': c?.settling ?? false,
-      // 通道方向的判定結果(v0.0.0.6 起)。'unknown' = 還在判,此時波形與血氧
-      // 都還不會出來(心率照給)。'swapped' = 手上這片模組把兩顆 LED 裝反了,
-      // **輸出已經由核心轉正**,這個欄位只是讓上層知道、可以記錄或警示。
-      'channelOrient': (c?.orient ?? K2ChannelOrient.unknown).name,
-      'bpm': c?.bpm,
-      'spo2': c?.spo2,
-      'hrv': hv == null
-          ? null
-          : {
-              'sdnn': hv.sdnn,
-              'rmssd': hv.rmssd,
-              'pnn50': hv.pnn50,
-              'sd1': hv.sd1,
-              'sd2': hv.sd2,
-              'meanRr': hv.meanRr,
-              'meanHr': hv.meanHr,
-              'hrvScore': hv.hrvScore,
-              'beats': hv.beats,
-            },
-      'totalSamples': k2.totalSamples,
-      'strapi': strapiJson(),
-    };
-  }
-
-  /// 整合方介面(`VitalsResult`)形狀的區塊。
-  ///
-  /// ⚠️ **與 `hrv` 區塊必須同源。** 兩區的 `sdnn` / `rmssd` / `mean_hr` 是同一份
-  ///    `HrvStats` 導出的,不可以各算各的 —— 各算一次就會有一天只改到一邊。
-  ///    這裡直接把 `c.hrv` 傳進 [Max30102VitalsMetrics.compute]。
-  Map<String, dynamic> strapiJson() {
-    final c = k2.latest;
-    final m = Max30102VitalsMetrics.compute(
-      pts: c?.rrPoints ?? const [],
-      hv: c?.hrv,
-      sqiOk: c?.sqiOk ?? false,
-      settling: c?.settling ?? false,
-      bpm: c?.bpm,
-      ir: _waveIr,
-    );
-    // 欄位、單位與可信度資訊全部由 toStrapiJson() 決定 —— server 不再自己
-    // 補欄位。之前這裡加過 lf / hf / lf_reliable 等等,結果與核心那邊重複,
-    // 兩處都要改才不會漂移。現在只有一個地方定義那份契約。
-    return m.toStrapiJson();
-  }
-
-  /// 近一段波形。[seconds] 為 null → 給出全部保留的長度。
-  ///
-  /// `firstAbs` 是回傳陣列第 0 筆的絕對位置 —— 上層要把波形跟 `troughAbs`
-  /// 對齊就靠它:`陣列索引 = abs - firstAbs`。
-  ///
-  /// 四個陣列**逐筆對應、等長**:
-  ///   · `ir` / `red`         —— 感測器原始讀值
-  ///   · `irTrim` / `redTrim` —— 截尾平滑後的值(還帶著 DC)
-  /// 兩組都給,由呈現層自己選(與核心 K2FeedResult 的做法一致)。
-  ///
-  /// trim 是在**回應的當下**對整段保留的原始值重算的(與核心同一支
-  /// [Max30102Signal.slidingTrimmedMean]),不是存下核心逐批給的 newIrTrim ——
-  /// 那個每批尾端 4 筆的右側是截斷的。整段重算之後,只剩陣列**最後 4 筆**
-  /// 還沒有右邊的資料,那是「現在」本來就沒有未來,不是錯。
-  Map<String, dynamic> waveformJson({int? seconds}) {
-    var from = 0;
-    if (seconds != null && seconds > 0) {
-      final want = seconds * kFs;
-      if (_waveIr.length > want) from = _waveIr.length - want;
-    }
-    // 平滑值取一位小數就夠 —— IR 讀值是 ~90000 的量級,更多位數只是把
-    // JSON 撐大(未修剪的 double 一筆可以長到 18 個字元)。
-    List<double> trim1(List<int> v) => [
-      for (final x in Max30102Signal.slidingTrimmedMean(
-        [for (final s in v) s.toDouble()],
-        Max30102Config.trimWindow,
-      ).sublist(from))
-        (x * 10).roundToDouble() / 10,
-    ];
-    return {
-      'firstAbs': _waveBase + from,
-      'fs': kFs,
-      'count': _waveIr.length - from,
-      'ir': _waveIr.sublist(from),
-      'red': _waveRed.sublist(from),
-      'irTrim': trim1(_waveIr),
-      'redTrim': trim1(_waveRed),
-    };
-  }
-
-  /// WS `/stream` 用的**增量**波形。回傳兩個區塊:
-  ///
-  ///   · `wave`     —— **核心找谷用的那條線,畫圖直接用這個**:截尾 → 0.7~3.5 Hz 帶通
-  ///                   (v0.0.0.8)。= 核心的 K2FeedResult.newIrWave,原封轉送。
-  ///   · `raw_wave` —— 截尾平滑後、**還帶著 DC** 的值(舊版 `wave` 的內容)。
-  ///                   = 核心的 newIrWaveTrim。除錯與看灌流用。
-  ///
-  /// 兩者都由核心等線定下來才給(落後約 1.5 秒;帶通是 IIR,最新那段每多一筆資料就會變),
-  /// 核心也只收這之前的谷 —— 與核心找谷用的是同一條線(Max30102Signal.troughLine)。
-  /// server 不再自己延遲、自己算(v0.0.0.6 以前是在這裡算的,截尾那一步用了
-  /// 核心逐批給的 newIrTrim,批尾 4 筆的右側是截斷的)。
-  ///
-  /// 為什麼要分兩個:DC 漂移是脈搏的 20~50 倍(實測漂移 5000~7100、脈搏 rms
-  /// 只有 143~269)。直接畫帶 DC 的值,脈搏只佔畫面 3~10%,形狀完全看不出來 ——
-  /// 那正是整合方回報「波形很醜」的成因,不是感測器的問題。
-  ///
-  /// 為什麼是「IR + trim」而不是四條線都送:
-  ///   · **IR** —— 心跳本身就是從這一路算出來的。手指偵測看 IR DC,谷點偵測
-  ///     (`irTroughs`)跑在 IR 上,RED 只在算 SpO2 的 ratio 時才用到。畫 IR
-  ///     等於畫「演算法看到的那條線」,畫面上的谷就是我們數的拍。
-  ///   · **trim** —— 截尾滑動平均(去突波)。核心的主計算本來就跑在 trim 上
-  ///     (見 k2_algorithm「殺掉尖刺型假谷」),raw 上那些尖刺是我們**判定為
-  ///     雜訊而不採信**的東西。送 trim 不是美化,是與計算一致。
-  /// 想要 RED 或未平滑的原始值就走 `GET /waveform`,那邊四條線照舊全給。
-  ///
-  /// [fromAbs] = 呼叫端**上次收到的下一筆**絕對位置;null = 沒收過。
-  /// 遊標落在保留範圍外時**整段重送**,不硬接 —— 有兩種情況會這樣:
-  ///   · 免洗歸零(下一位使用者)→ base 掉回 0,遊標比 nextAbs 還大
-  ///   · 訂閱者太久沒收 / 剛接上 → 要的樣本已經被 `_waveCap` 裁掉了
-  /// 兩種都是「接不上」,硬接會讓波形與 `troughAbs` 錯開,而且錯得很安靜。
-  ({Map<String, dynamic> wave, Map<String, dynamic> rawWave}) waveSinceJson(
-      int? fromAbs) {
-    // 核心給的就已經是「前後文完整」的那段,不必再壓著。
-    final nextAbs = _detBase + _det.length;
-    final from = (fromAbs == null || fromAbs < _detBase || fromAbs > nextAbs)
-        ? _detBase
-        : fromAbs;
-    final lo = from - _detBase;
-    final hi = nextAbs - _detBase;
-
-    // 一位小數就夠 —— IR 讀值是 ~90000 的量級(與 waveformJson 同樣的理由)。
-    double r1(double x) => (x * 10).roundToDouble() / 10;
-
-    if (hi <= lo) {
-      final empty = {
-        'firstAbs': from,
-        'fs': kFs,
-        'count': 0,
-        'irTrim': const <double>[],
-      };
-      return (wave: Map.of(empty), rawWave: Map.of(empty));
-    }
-
-    final det = [for (int i = lo; i < hi; i++) r1(_det[i])];
-    final raw = [for (int i = lo; i < hi; i++) r1(_detTrim[i])];
-    return (
-      wave: {
-        'firstAbs': from,
-        'fs': kFs,
-        'count': det.length,
-        'irTrim': det,
-      },
-      rawWave: {
-        'firstAbs': from,
-        'fs': kFs,
-        'count': raw.length,
-        'irTrim': raw,
-      },
-    );
-  }
-
-  Future<void> dispose() async {
-    await _vitals.close();
-  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -463,7 +138,7 @@ class SerialSource extends FeedSource {
     required this.intervalMs,
   });
 
-  final K2Engine engine;
+  final VitalsEngine engine;
   final String portName;
   final int baud;
   final int board;
@@ -654,7 +329,7 @@ class SerialSource extends FeedSource {
   /// RESET:軟體復位 → 晶片進入 POR 休眠。
   /// ⚠️ 復位後晶片**不可用**,必須再 [initChip] 才會恢復採樣。
   ///
-  /// [K2Engine.chipAsleep] 在**送出之前**就設好:reset 那一刻前後回來的 FIFO
+  /// [VitalsEngine.chipAsleep] 在**送出之前**就設好:reset 那一刻前後回來的 FIFO
   /// 資料正是要擋的東西,等 MCU 確認才設就漏掉了。送失敗(MCU 沒回)就還原,
   /// 晶片多半還醒著,不該把資料擋掉。
   Future<void> resetChip() async {
@@ -778,7 +453,7 @@ class ApiServer {
     required FeedSource initial,
   }) : _source = initial;
 
-  final K2Engine engine;
+  final VitalsEngine engine;
   final ServerOptions opts;
 
   FeedSource _source;
@@ -832,6 +507,7 @@ class ApiServer {
           await _json(req, {
             'ok': true,
             'version': kServerVersion,
+            'calcMode': engine.calcMode,
             'mode': mode,
             'uptimeMs': DateTime.now().difference(_startedAt).inMilliseconds,
             'totalSamples': engine.totalSamples,
@@ -974,8 +650,12 @@ class ApiServer {
           await Future<void>.delayed(const Duration(milliseconds: 500));
           await src.initChip();
       }
-      // 晶片狀態變了 → 之前累積的波形與拍全部作廢。
-      engine.reset();
+      // 晶片狀態變了 → 交給引擎決定要清什麼。
+      //   即時模式:波形與拍全部作廢(= 舊寫法 engine.reset())。
+      //   固定 30 秒:init → 全清(含結果);只有 reset 關燈 → 結果保留給軟體讀。
+      // 〔0.0.1-fixed30s 舊寫法,換成 afterChipCommand:固定模式 reset 時不能清掉結果〕
+      // engine.reset();
+      engine.afterChipCommand(initialized: action != _ChipAction.reset);
       // 立刻推一筆(fingerPresent: false)。不推的話 reset 後 FIFO 一直是空的、
       // 核心不再計算,訂閱者會一直停在指令之前的最後一筆(v0.0.0.9)。
       engine.pushVitals();
@@ -1038,7 +718,7 @@ class ApiServer {
       final ledRed = await src.readReg(Max30102Protocol.kRegLedRed);
       final ledIr = await src.readReg(Max30102Protocol.kRegLedIr);
 
-      final cfg = engine.k2.config;
+      final cfg = engine.config;
       final chipOk = partId == Max30102Protocol.kPartIdValue;
       // 晶片實際的 LED 電流與本程式設定的是否一致。不一致代表晶片被別的東西
       // 改過(或復位回 baseline 0x24) → 演算法用的參數與硬體實況對不上。
@@ -1172,7 +852,7 @@ class ApiServer {
     final ws = await WebSocketTransformer.upgrade(req);
     _log('🔌 WS 訂閱者接上(/stream)', 'WS subscriber connected (/stream)');
 
-    // ⚠️ 遊標是**每個訂閱者一份**,不能提到 K2Engine 去共用 —— 兩個訂閱者接上的
+    // ⚠️ 遊標是**每個訂閱者一份**,不能提到引擎去共用 —— 兩個訂閱者接上的
     //    時間不同,共用一份的話先接上的那個會把樣本「領走」,後接上的只收得到
     //    殘缺片段,而且不會報錯。
     int? cursor;
@@ -1238,7 +918,11 @@ class ServerOptions {
     required this.intervalMs,
     required this.waveSeconds,
     required this.resetOnFingerOff,
+    this.calc = 'fixed30',
   });
+
+  /// 計算模式:`fixed30`(預設)/ `realtime`。不帶參數 = fixed30,軟體的啟動指令不必改。
+  final String calc;
 
   final String mode;
   final String serialPath;
@@ -1288,6 +972,7 @@ class ServerOptions {
       waveSeconds: num_('wave-seconds', 'K2_WAVE_SECONDS', 30),
       resetOnFingerOff:
           flag('reset-on-finger-off', 'K2_RESET_ON_FINGER_OFF', true),
+      calc: str('calc', 'K2_CALC', 'fixed30').toLowerCase(),
     );
   }
 }
@@ -1299,6 +984,10 @@ max30102_server v$kServerVersion — MAX30102 K2 無頭伺服器 / headless vita
   max30102_server [選項 / options]
 
 選項 / Options:
+  --calc <fixed30|realtime>
+      計算模式(預設 fixed30):固定 30 秒後一次算 / 即時每秒算
+      calculation mode (default: fixed30): compute once after 30 s / every second
+
   --mode <serial|feed>
       預設進料模式(預設 feed;可執行中用 POST /mode 改)
       input mode at startup (default: feed; changeable at runtime via POST /mode)
@@ -1325,9 +1014,10 @@ max30102_server v$kServerVersion — MAX30102 K2 無頭伺服器 / headless vita
       seconds of waveform retained for /waveform (default: 30)
 
   --reset-on-finger-off <true|false>
-      免洗模式:確認手指離開時連絕對索引一起歸零(預設 true)
+      免洗模式:確認手指離開時連絕對索引一起歸零(預設 true;只影響 realtime,
+      fixed30 一律一人一次)
       single-session mode: reset the sample index when the finger is
-      confirmed removed (default: true)
+      confirmed removed (default: true; realtime only, fixed30 always resets)
 
   --help
       顯示這份說明 / show this help
@@ -1336,7 +1026,7 @@ max30102_server v$kServerVersion — MAX30102 K2 無頭伺服器 / headless vita
       只印出版本號 / print the version and exit
 
 環境變數(優先度低於命令列)/ Environment variables (lower precedence than CLI):
-  K2_MODE  K2_SERIAL  K2_BAUD  K2_PORT  K2_BOARD  K2_INTERVAL
+  K2_CALC  K2_MODE  K2_SERIAL  K2_BAUD  K2_PORT  K2_BOARD  K2_INTERVAL
   K2_WAVE_SECONDS  K2_RESET_ON_FINGER_OFF
 
 API:
@@ -1347,10 +1037,12 @@ API:
   POST /feed                  餵原始 MCU bytes(僅 feed 模式)
                               push raw MCU bytes (feed mode only)
   POST /mode                  切換進料模式 / switch input mode
-  WS   /stream                每算出新結果就推播(約 1 秒一次),內容 = /vitals
-                              再加一個 wave 區塊(IR 截尾平滑的增量樣本)
-                              push on every new result (~1/s): /vitals plus a
-                              `wave` block of incremental trim-smoothed IR
+  WS   /stream                約 1 秒推播一次,內容 = /vitals 再加一個 wave 區塊
+                              (IR 找谷線的增量樣本)。fixed30 由計時器每秒推,
+                              結果算出時另外立刻推一次
+                              pushed ~1/s: /vitals plus a `wave` block of
+                              incremental samples. fixed30 pushes on a 1 s timer,
+                              plus once immediately when the result is ready
   GET  /chip                  MCU 與 MAX30102 在線狀態(僅 serial 模式)
                               MCU and MAX30102 status (serial mode only)
   POST /chip/init             初始化晶片(RE-INIT) / initialise the chip
@@ -1374,10 +1066,16 @@ Future<void> main(List<String> args) async {
   }
 
   final opts = ServerOptions.parse(args);
-  final engine = K2Engine(
-    waveSeconds: opts.waveSeconds,
-    resetOnFingerOff: opts.resetOnFingerOff,
-  );
+  final VitalsEngine engine = opts.calc == 'realtime'
+      ? K2Engine(
+          waveSeconds: opts.waveSeconds,
+          resetOnFingerOff: opts.resetOnFingerOff,
+        )
+      : K2EngineFixed30(waveSeconds: opts.waveSeconds);
+  if (opts.calc != 'realtime' && opts.calc != 'fixed30') {
+    _log('⚠ 不認得的 --calc "${opts.calc}",改用 fixed30',
+        'unknown --calc "${opts.calc}", using fixed30');
+  }
 
   FeedSource initial = HttpFeedSource();
   if (opts.mode == 'serial') {
