@@ -5,4 +5,5 @@ App 沒有獨立版本號，檔名用日期。
 
 | 日期 | 檔案 | 位置 | 換掉什麼 |
 |---|---|---|---|
+| 2026-11-23 | [2026-11-23.md](2026-11-23.md) | `k2_serial_adapter.dart` `startMeasurement()` | 開始量測：歸零 → 輪詢 → init → init 等到回覆成功才歸零、輪詢 |
 | 2026-11-19 | [2026-11-19.md](2026-11-19.md) | `main_navigation_page.dart` `_applyStm32Mode()` | 停心跳的頁面：只有 K2 頁 → K2 頁 + MAX 晶片頁 |

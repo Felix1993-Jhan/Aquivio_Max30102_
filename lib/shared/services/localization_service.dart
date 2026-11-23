@@ -1093,6 +1093,9 @@ class LocalizationService {
       'k2_log_board_expansion': '🔒 板子鎖定:擴充板 0x31',
       'k2_log_tx_failed': '❌ 送出失敗:{label}',
       'k2_log_tx': '→ TX {label}',
+      'k2_log_init_ok': '✅ init 成功 → 清空並開始量測',
+      'k2_log_init_fail': '❌ MCU 回報 init 失敗(晶片是否接好?),未開始量測',
+      'k2_log_init_timeout': '❌ init 1 秒內沒有回應(擴充板 0x31 是否在線?),未開始量測',
       // 免洗模式下每次手指離開都會印這句,所以寫中性的
       // (didReset 只有一個旗標,分不出是「手指離開歸零」還是「索引到頂」)
       'k2_log_core_reset': '♻ 核心已歸零,UI 波形同步重來',
@@ -2147,6 +2150,9 @@ class LocalizationService {
       'k2_log_board_expansion': '🔒 Board locked: expansion 0x31',
       'k2_log_tx_failed': '❌ Send failed: {label}',
       'k2_log_tx': '→ TX {label}',
+      'k2_log_init_ok': '✅ init OK → cleared, measuring started',
+      'k2_log_init_fail': '❌ MCU reported init failure (is the chip connected?); not started',
+      'k2_log_init_timeout': '❌ no init reply within 1 s (is board 0x31 online?); not started',
       'k2_log_core_reset': '♻ Core reset; UI waveform restarted',
       'k2_log_no_wave': '⚠ No waveform data — cannot save snapshot',
       'k2_log_snap_saved': '📸 Snapshot saved: {name}',

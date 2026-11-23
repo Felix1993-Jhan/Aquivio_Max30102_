@@ -261,14 +261,37 @@ class K2SerialAdapter extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 開始一次量測(模擬軟體的流程):全部歸零 → 開始輪詢 → 送 init。
+  /// 正在等 init 的回覆:true = 成功、false = MCU 回報失敗;逾時由呼叫端當 null。
+  Completer<bool>? _initWait;
+
+  /// 開始一次量測(照 server 的順序):送 init → 等 MCU 回覆成功 → 全部歸零 → 開始輪詢。
   ///
-  /// init 放在最後:開始輪詢時才掛上接收,init 的回應才收得到(它不是 FIFO 封包,
-  /// 核心會略過)。固定核心的 done / aborted 只有在這裡(= init)才會解開。
-  void startMeasurement() {
+  /// 為什麼要等:先開始輪詢再送 init 的話,第一輪探測會連續送 QUERY 0x31、QUERY 0x30,
+  /// INIT 緊接著擠進去 —— 實測燈沒亮(同一個封包單獨送就會亮)。server 一直是
+  /// 「init 等到回覆才開始輪詢」,沒有這個問題。
+  /// 歸零放在 init 成功之後,與 server 收到 init 成功才清結果一致;
+  /// 固定核心的 done / aborted 也只有在這裡才會解開。
+  Future<void> startMeasurement() async {
+    if (_roundRunning || _initWait != null) return; // 量測中 / 正在等回覆 → 不重複送
+    manager.onRawBytes = _parser.feed; // 先掛上接收,init 的回覆才收得到
+    final wait = _initWait = Completer<bool>();
+    sendInit();
+    notifyListeners();
+    final ok = await wait.future
+        .then<bool?>((v) => v)
+        .timeout(const Duration(seconds: 1), onTimeout: () => null);
+    _initWait = null;
+    if (ok != true) {
+      _log(tr(ok == false ? 'k2_log_init_fail' : 'k2_log_init_timeout'));
+      if (!_roundRunning && manager.onRawBytes == _parser.feed) {
+        manager.onRawBytes = null;
+      }
+      notifyListeners();
+      return;
+    }
+    _log(tr('k2_log_init_ok'));
     reset();
     start();
-    sendInit();
   }
 
   /// 停止量測:停輪次迴圈 + 卸載接收。
@@ -471,6 +494,15 @@ class K2SerialAdapter extends ChangeNotifier {
     //    是「完全沒有回應」,不是逐包對帳。
     final waiting = _awaiting;
     if (waiting != null && !waiting.isCompleted) waiting.complete(true);
+
+    // 開始量測正在等的 init 回覆:byte[4] = sub、byte[5] = 1 成功 / 0 失敗(同 server 的判法)
+    final initWait = _initWait;
+    if (initWait != null &&
+        !initWait.isCompleted &&
+        packet.length > 5 &&
+        packet[4] == Max30102Protocol.kSubReInit) {
+      initWait.complete(packet[5] == 1);
+    }
 
     // ── 板子偵測:packet[2] 是來源板子身分 ──────────────────────────
     if (packet.length >= 3) {
