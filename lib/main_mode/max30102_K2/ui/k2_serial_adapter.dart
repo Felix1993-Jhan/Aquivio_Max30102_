@@ -32,12 +32,17 @@ import 'k2_lf_experiment.dart';
 import 'k2_snapshot.dart';
 
 class K2SerialAdapter extends ChangeNotifier {
-  K2SerialAdapter({required this.manager, Max30102K2? core})
-      // 本專案是「免洗式」量測(一人一次),所以開 resetOnFingerOff:
+  /// [coreFixed]:測試用(注入假時鐘);正式執行不帶 = 預設時鐘。
+  K2SerialAdapter({
+    required this.manager,
+    Max30102K2? core,
+    Max30102K2Fixed30? coreFixed,
+  })  // 本專案是「免洗式」量測(一人一次),所以開 resetOnFingerOff:
       // 確認手指離開時核心連絕對索引一起歸零,下一位使用者完全從零開始。
       // 核心預設是 false(交接版的通用行為),這個開關只在這裡打開。
       : core = core ??
-            Max30102K2(config: Max30102Config(resetOnFingerOff: true)) {
+            Max30102K2(config: Max30102Config(resetOnFingerOff: true)),
+        coreFixed = coreFixed ?? Max30102K2Fixed30() {
     _parser.onPacket = _onPacket;
     _parser.onError = (reason, partial) {
       _log(trParams('k2_log_parse_error', {'reason': reason}));
@@ -209,7 +214,7 @@ class K2SerialAdapter extends ChangeNotifier {
   // 量測流程照軟體的做法模擬(見 [startMeasurement]):
   //   開始 → init;固定核心出結果(done)→ 自動送 RESET 關燈、停止輪詢;
   //   中途離開(aborted)→ 停止輪詢,等使用者重按開始(→ 再 init)。
-  final Max30102K2Fixed30 coreFixed = Max30102K2Fixed30();
+  final Max30102K2Fixed30 coreFixed;
 
   /// 固定 30 秒的結果(還沒出 / 已清除 = null)。
   K2Fixed30Result? get fixedResult => coreFixed.result;

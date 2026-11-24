@@ -40,6 +40,8 @@
 ///
 /// 對外說明:`aidocs/notes/fixed30_plan.md`(中英)。重點:
 ///   · 倒數期間 `bpm` / `spo2` / `hrv` / `strapi` 一律 null、`sqiOk` false;結果出來 `phase` = `done`。
+///   · 倒數 30 秒與「滿 28 秒」看真實時鐘(從開始倒數那一刻起算),不數樣本
+///     (2026-11-24 改;原本數 3000 / 2800 筆,實機資料每秒不足 100 筆時碼表 30 秒倒數還剩 3~4 秒)。
 ///   · 倒數未滿 28 秒手指離開 → `phase` = `aborted`(`abortReason` = `fingerRemoved`),等 init;
 ///     滿 28 秒才離開 → 用已收到的資料照算。
 ///   · 結果保留到 `/chip/init` 成功(或下一次倒數開始);手指離開、`/chip/reset` 都不清。

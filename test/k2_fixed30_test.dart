@@ -56,12 +56,18 @@ class _Ppg {
   }
 }
 
-/// 餵 [seconds] 秒(每批 10 筆)。回傳這段期間 computed 非 null 的次數。
+/// 假時鐘(ms)。倒數用真實時鐘計時(0.0.1-fixed30s 之後),測試瞬間餵完資料,
+/// 所以每餵一批 10 筆就讓時間前進 100ms(= 100 Hz 準時到達)。
+int _nowMs = 0;
+int _clock() => _nowMs;
+
+/// 餵 [seconds] 秒(每批 10 筆,時鐘每批 +100ms)。回傳這段期間 computed 非 null 的次數。
 int _feed(Max30102K2Fixed30 k, _Ppg g, double seconds, {bool finger = true}) {
   int computed = 0;
   for (int i = 0; i < (seconds * 10).round(); i++) {
     final b = g.next(10, finger: finger);
     if (k.feedSamples(b.red, b.ir).computed != null) computed++;
+    _nowMs += 100;
   }
   return computed;
 }
@@ -88,13 +94,14 @@ void _feedEngine(VitalsEngine e, _Ppg g, double seconds, {bool finger = true}) {
   for (int i = 0; i < (seconds * 10).round(); i++) {
     final b = g.next(10, finger: finger);
     e.feedPacket(_packetOf(b.red, b.ir));
+    _nowMs += 100;
   }
 }
 
 void main() {
   group('核心狀態機', () {
     test('沒手指 → waiting;放上手指 → 空轉/沉澱仍是 waiting 且 settling', () {
-      final k = Max30102K2Fixed30();
+      final k = Max30102K2Fixed30(clockMs: _clock);
       final g = _Ppg();
       _feed(k, g, 1, finger: false);
       expect(k.phase, K2Phase.waiting);
@@ -107,7 +114,7 @@ void main() {
     });
 
     test('★ 沉澱完開始倒數:measuring、剩餘秒數遞減、結果前 result 為 null', () {
-      final k = Max30102K2Fixed30();
+      final k = Max30102K2Fixed30(clockMs: _clock);
       final g = _Ppg();
       _feed(k, g, 4); // 空轉 1.5 + 沉澱 2.0 → 已進入倒數
       expect(k.phase, K2Phase.measuring);
@@ -120,7 +127,7 @@ void main() {
     });
 
     test('★ 30 秒 + 右緣 154 筆到齊才算一次;bpm = HRV 平均心率', () {
-      final k = Max30102K2Fixed30();
+      final k = Max30102K2Fixed30(clockMs: _clock);
       final g = _Ppg();
       final n = _feed(k, g, 36);
       expect(n, 1, reason: '整次量測只算一次');
@@ -141,7 +148,7 @@ void main() {
     });
 
     test('出結果後手指不離開 → 不會自動開始下一次量測', () {
-      final k = Max30102K2Fixed30();
+      final k = Max30102K2Fixed30(clockMs: _clock);
       final g = _Ppg();
       _feed(k, g, 36);
       final r = k.result;
@@ -151,7 +158,7 @@ void main() {
     });
 
     test('★ done 鎖到 reset():手指拿開再放上也不會開始新量測', () {
-      final k = Max30102K2Fixed30();
+      final k = Max30102K2Fixed30(clockMs: _clock);
       final g = _Ppg();
       _feed(k, g, 36);
       final r = k.result;
@@ -170,7 +177,7 @@ void main() {
     });
 
     test('★ 倒數未滿 28 秒手指離開 → aborted,手指放回去也不重量,直到 reset()', () {
-      final k = Max30102K2Fixed30();
+      final k = Max30102K2Fixed30(clockMs: _clock);
       final g = _Ppg();
       _feed(k, g, 15);
       _feed(k, g, 0.5, finger: false);
@@ -190,7 +197,7 @@ void main() {
     });
 
     test('空轉 / 沉澱中離開不算中止(倒數還沒開始)', () {
-      final k = Max30102K2Fixed30();
+      final k = Max30102K2Fixed30(clockMs: _clock);
       final g = _Ppg();
       _feed(k, g, 2);
       _feed(k, g, 0.5, finger: false);
@@ -198,7 +205,7 @@ void main() {
     });
 
     test('★ 倒數滿 28 秒後離開 → 照算;計算窗止於 L − 154', () {
-      final k = Max30102K2Fixed30();
+      final k = Max30102K2Fixed30(clockMs: _clock);
       final g = _Ppg();
       _feed(k, g, 3.5 + 29); // 倒數約 29 秒
       expect(k.phase, K2Phase.measuring);
@@ -213,14 +220,14 @@ void main() {
     });
 
     test('dropMeasurement(關燈):倒數中 → 回到 waiting;已有結果則保留', () {
-      final k = Max30102K2Fixed30();
+      final k = Max30102K2Fixed30(clockMs: _clock);
       final g = _Ppg();
       _feed(k, g, 10);
       k.dropMeasurement();
       expect(k.phase, K2Phase.waiting);
       expect(k.fingerPresent, isFalse);
 
-      final k2 = Max30102K2Fixed30();
+      final k2 = Max30102K2Fixed30(clockMs: _clock);
       _feed(k2, _Ppg(), 36);
       k2.dropMeasurement();
       expect(k2.phase, K2Phase.done);
@@ -228,9 +235,104 @@ void main() {
     });
   });
 
+  // 倒數 30 秒 / 滿 28 秒看真實時鐘,不數樣本(0.0.1-fixed30s 之後)。
+  // 實機曾發生:樣本到達不足 100 筆/秒,碼表 30 秒時倒數還剩 3~4 秒。
+  group('倒數用真實時鐘', () {
+    /// 每 100ms 到 [perBatch] 筆(9 = 只有 90 筆/秒)。
+    int feedRate(Max30102K2Fixed30 k, _Ppg g, double seconds, int perBatch,
+        {bool finger = true}) {
+      int computed = 0;
+      for (int i = 0; i < (seconds * 10).round(); i++) {
+        final b = g.next(perBatch, finger: finger);
+        if (k.feedSamples(b.red, b.ir).computed != null) computed++;
+        _nowMs += 100;
+      }
+      return computed;
+    }
+
+    test('★ 樣本只有 90 筆/秒:碼表 30 秒就結束倒數,計算窗 ≈ 2700 筆', () {
+      final k = Max30102K2Fixed30(clockMs: _clock);
+      final g = _Ppg();
+      feedRate(k, g, 4, 10); // 空轉 + 沉澱(照筆數)→ 倒數已開始約 0.6 秒
+      expect(k.phase, K2Phase.measuring);
+      feedRate(k, g, 29, 9); // 倒數經過約 29.6 秒
+      expect(k.phase, K2Phase.measuring);
+      expect(k.remainingSec, 1);
+      expect(feedRate(k, g, 3, 9), 1, reason: '30 秒到 + 右緣 154 筆 → 算一次');
+      expect(k.phase, K2Phase.done);
+      final r = k.result!;
+      expect(r.liftAbs, isNull);
+      expect(r.windowEndAbs - r.windowStartAbs, inInclusiveRange(2650, 2760),
+          reason: '舊寫法(數 3000 筆)要等到碼表約 33 秒');
+      expect(r.compute.hrv, isNotNull);
+    });
+
+    test('★ 90 筆/秒、碼表 28.6 秒拿掉(只收到約 2570 筆)→ 判定為提早結束,照算', () {
+      final k = Max30102K2Fixed30(clockMs: _clock);
+      final g = _Ppg();
+      feedRate(k, g, 4, 10);
+      feedRate(k, g, 28, 9); // 倒數經過約 28.6 秒
+      expect(k.phase, K2Phase.measuring);
+      expect(feedRate(k, g, 0.5, 9, finger: false), 1);
+      expect(k.phase, K2Phase.done, reason: '舊寫法數不到 2800 筆 → 會被判成 aborted');
+      final r = k.result!;
+      expect(r.liftAbs, isNotNull);
+      expect(r.windowEndAbs, lessThanOrEqualTo(r.liftAbs! - Max30102K2Fixed30.hold));
+      expect(r.compute.hrv, isNotNull);
+    });
+
+    test('碼表未滿 28 秒拿掉 → aborted', () {
+      final k = Max30102K2Fixed30(clockMs: _clock);
+      final g = _Ppg();
+      feedRate(k, g, 4, 10);
+      feedRate(k, g, 27, 10); // 倒數經過約 27.6 秒,確認離開還要 3 批 = 0.3 秒 → 27.9 秒
+      feedRate(k, g, 0.5, 10, finger: false);
+      expect(k.phase, K2Phase.aborted);
+      expect(k.result, isNull);
+    });
+
+    test('30 秒已到、還在等右緣時拿掉 → 走提早結束,窗終點不超過 30 秒那一點', () {
+      final k = Max30102K2Fixed30(clockMs: _clock);
+      final g = _Ppg();
+      _feed(k, g, 4);
+      _feed(k, g, 29.5); // 倒數經過約 30.1 秒:窗終點已定,右緣才收 1 批
+      expect(k.phase, K2Phase.measuring);
+      expect(k.remainingSec, 0);
+      expect(_feed(k, g, 0.5, finger: false), 1);
+      expect(k.phase, K2Phase.done);
+      final r = k.result!;
+      expect(r.liftAbs, isNotNull);
+      expect(r.windowEndAbs - r.windowStartAbs, lessThanOrEqualTo(3000));
+    });
+
+    test('沒有新資料時,剩餘秒數照樣跟著時鐘走', () {
+      final k = Max30102K2Fixed30(clockMs: _clock);
+      _feed(k, _Ppg(), 4); // 倒數經過約 0.6 秒
+      expect(k.remainingSec, 30);
+      _nowMs += 10000;
+      expect(k.remainingSec, 20);
+    });
+
+    test('時鐘不動、資料一直灌(積壓)→ 收滿 maxWindowSamples 就當作窗滿,緩衝有界', () {
+      final k = Max30102K2Fixed30(clockMs: _clock);
+      final g = _Ppg();
+      _feed(k, g, 4);
+      int n = 0;
+      for (int i = 0; i < 400 && k.phase == K2Phase.measuring; i++) {
+        final b = g.next(10); // 時鐘不前進
+        if (k.feedSamples(b.red, b.ir).computed != null) n++;
+      }
+      expect(n, 1);
+      final r = k.result!;
+      expect(r.windowEndAbs - r.windowStartAbs,
+          inInclusiveRange(Max30102K2Fixed30.maxWindowSamples - 60,
+              Max30102K2Fixed30.maxWindowSamples + 10));
+    });
+  });
+
   group('血氧的通道方向驗證(預設指標 1 = 假設對調)', () {
     K2Fixed30Result run(_Ppg g) {
-      final k = Max30102K2Fixed30();
+      final k = Max30102K2Fixed30(clockMs: _clock);
       _feed(k, g, 36);
       expect(k.phase, K2Phase.done);
       return k.result!;
@@ -343,7 +445,7 @@ void main() {
     }
 
     setUp(() async {
-      e = K2EngineFixed30();
+      e = K2EngineFixed30(clockMs: _clock);
       api = ApiServer(
         engine: e,
         opts: ServerOptions(
@@ -388,7 +490,7 @@ void main() {
 
   group('server K2EngineFixed30', () {
     late K2EngineFixed30 e;
-    setUp(() => e = K2EngineFixed30());
+    setUp(() => e = K2EngineFixed30(clockMs: _clock));
     tearDown(() => e.dispose());
 
     test('★ 倒數中:結果欄位全 null、sqiOk false、有 phase / remainingSec', () {
@@ -474,6 +576,7 @@ void main() {
         final b = g.next(10, finger: finger);
         feed(Uint8List.fromList(_packetOf(b.red, b.ir)));
         async.flushMicrotasks();
+        _nowMs += 100;
       }
     }
 
@@ -504,7 +607,9 @@ void main() {
 
     test('正常結束(滿 30 秒):長度 = 沉澱 + 30 秒 + 右緣', () {
       fakeAsync((async) {
-        final ad = K2SerialAdapter(manager: SerialPortManager('TEST', isTextMode: false));
+        final ad = K2SerialAdapter(
+            manager: SerialPortManager('TEST', isTextMode: false),
+            coreFixed: Max30102K2Fixed30(clockMs: _clock));
         ad.start();
         final feed = ad.manager.onRawBytes!;
         feedAd(feed, _Ppg(), 36, async);
@@ -520,7 +625,9 @@ void main() {
 
     test('★ 提早結束(≥ 28 秒手指離開):畫面保留(同正常結束),凍結資料止於 L', () {
       fakeAsync((async) {
-        final ad = K2SerialAdapter(manager: SerialPortManager('TEST', isTextMode: false));
+        final ad = K2SerialAdapter(
+            manager: SerialPortManager('TEST', isTextMode: false),
+            coreFixed: Max30102K2Fixed30(clockMs: _clock));
         ad.start();
         final feed = ad.manager.onRawBytes!;
         final g = _Ppg();
@@ -545,7 +652,9 @@ void main() {
 
     test('reset()(= 開始量測 init 成功 / 清空)清掉凍結資料', () {
       fakeAsync((async) {
-        final ad = K2SerialAdapter(manager: SerialPortManager('TEST', isTextMode: false));
+        final ad = K2SerialAdapter(
+            manager: SerialPortManager('TEST', isTextMode: false),
+            coreFixed: Max30102K2Fixed30(clockMs: _clock));
         ad.start();
         feedAd(ad.manager.onRawBytes!, _Ppg(), 36, async);
         expect(ad.fixedBuf, isNotNull);

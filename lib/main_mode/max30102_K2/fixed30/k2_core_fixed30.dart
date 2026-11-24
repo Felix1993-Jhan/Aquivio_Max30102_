@@ -13,15 +13,18 @@
 //
 // 一次量測的時間軸(手指放上 = 絕對位置 0):
 //
-//   0 ── 150 ──────── ~293 ─────────────── +3000 ──── +154 ─▶
-//   │ 空轉 │ 沉澱(左側前後文) │ 倒數 30 秒(計算窗) │ 右緣前後文 │ → 算一次
+//   0 ── 150 ──────── ~293 ──────────────────── 30 秒到 ──── +154 筆 ─▶
+//   │ 空轉 │ 沉澱(左側前後文) │ 倒數 30 秒(計算窗,真實時鐘) │ 右緣前後文 │ → 算一次
 //                  └ windowStart(= 開始輸出 = 即時版開始收谷的同一點)
+//
+// 空轉 / 沉澱 / 右緣 是**資料量**的要求(濾波器前後文),照樣數筆數;
+// 倒數 30 秒與「滿 28 秒」用**真實時鐘**(從倒數開始那一刻起算,見 [clockMs])。
 //
 // 狀態([K2Phase]):
 //   waiting   ── 沒手指,或空轉 / 沉澱中
 //   measuring ── 倒數中(只算線、交波形)
 //   done      ── 已出結果
-//   aborted   ── 倒數未滿 [earlyStopSamples] 手指就離開
+//   aborted   ── 倒數未滿 [earlyStopMs] 手指就離開
 //   done / aborted 都**鎖到 [reset]**(= server 收到 init):期間資料一筆都不進量測,
 //   手指拿開再放上也不會開始新的量測(只更新 fingerPresent)。
 //
@@ -31,7 +34,7 @@
 //   兩者之間(模糊帶)            → 分不出「真缺氧」與「接反」,不給(null)
 // 心率 / HRV 不受方向影響(兩路脈搏同一個),不重算。
 //
-// 倒數滿 [earlyStopSamples](28 秒)後才離開 → 照算:從離開判定的那一筆往回,
+// 倒數滿 [earlyStopMs](28 秒,真實時鐘)後才離開 → 照算:從離開判定的那一筆往回,
 // 在截尾 IR 上找「開始往下掉」的點 L([liftAbs]),只收 L − [hold] 之前的谷
 // (與正常結束同一條右緣規則)。
 //
@@ -81,11 +84,23 @@ class K2Fixed30Result {
 }
 
 class Max30102K2Fixed30 {
-  /// 計算窗長度(筆)= 30 秒。
+  /// 計算窗的名目長度(筆)= 30 秒 × 100 Hz。只用來估緩衝上限;倒數本身看 [windowMs]。
   static const int windowSamples = 30 * Max30102Config.samplingRateHz;
 
-  /// 倒數滿這麼多筆後手指離開,照常計算(28 秒)。
-  static const int earlyStopSamples = 28 * Max30102Config.samplingRateHz;
+  /// 倒數長度(真實時鐘,ms)。
+  static const int windowMs = 30000;
+
+  /// 倒數經過這麼久(真實時鐘,ms)之後手指離開,照常計算(28 秒)。
+  static const int earlyStopMs = 28000;
+
+  // 〔0.0.1-fixed30s 舊寫法:倒數與「滿 28 秒」數樣本(3000 / 2800 筆)。換成真實時鐘
+  //   ([windowMs] / [earlyStopMs]):實機上樣本到達不足 100 筆/秒時,碼表 30 秒倒數還剩 3~4 秒。〕
+  // /// 倒數滿這麼多筆後手指離開,照常計算(28 秒)。
+  // static const int earlyStopSamples = 28 * Max30102Config.samplingRateHz;
+
+  /// 倒數期間最多收這麼多筆(名目 30 秒的 1.2 倍),到了就當作窗滿、開始收右緣。
+  /// 防上層一次灌進大量積壓資料(feed 模式)時,緩衝無限長、或裁切吃進計算窗。
+  static const int maxWindowSamples = windowSamples + windowSamples ~/ 5;
 
   /// 右緣:線要離最新資料這麼多筆才算定下來 = 截尾半窗(4)+ troughGuardSamples(150)。
   /// 與即時版的 `_lineHold` 同一個數字。
@@ -104,18 +119,30 @@ class Max30102K2Fixed30 {
   /// 可調參數(與即時版共用同一個類別)。
   final Max30102Config config;
 
-  Max30102K2Fixed30({Max30102Config? config})
-      : config = config ?? Max30102Config() {
+  /// 時鐘(ms,只看差值,起點任意)。預設 = 建構時開始跑的 [Stopwatch];測試可注入假時鐘。
+  /// 核心不開 Timer:只在收到資料、或有人讀 [remainingSec] 時看一眼。
+  final int Function() clockMs;
+
+  Max30102K2Fixed30({Max30102Config? config, int Function()? clockMs})
+      : config = config ?? Max30102Config(),
+        clockMs = clockMs ?? _stopwatchClock() {
     Max30102SettingLimits.enforce(this.config);
     _noFingerBatches = this.config.fingerOffBatches; // 開機 = 沒手指(同即時版)
+  }
+
+  static int Function() _stopwatchClock() {
+    final sw = Stopwatch()..start();
+    return () => sw.elapsedMilliseconds;
   }
 
   // ── 樣本緩衝(本次量測;上限見 [_bufCap])──
   final List<int> _ir = [];
   final List<int> _red = [];
 
-  /// 緩衝上限:沉澱 + 30 秒 + 右緣,再留 1 秒餘裕。
-  int get _bufCap => config.settleSamples + windowSamples + hold + 100;
+  /// 緩衝上限:沉澱 + 倒數最多收的筆數 + 右緣,再留 1 秒餘裕。
+  int get _bufCap => config.settleSamples + maxWindowSamples + hold + 100;
+  // 〔0.0.1-fixed30s 舊寫法:倒數固定 3000 筆。換成真實時鐘後筆數不固定,上限改用 maxWindowSamples。〕
+  // int get _bufCap => config.settleSamples + windowSamples + hold + 100;
 
   int _totalSamples = 0;
   int _sinceFingerOn = 0;
@@ -124,6 +151,12 @@ class Max30102K2Fixed30 {
 
   /// 計算窗起點(絕對位置);-1 = 還沒開始倒數。
   int _windowStart = -1;
+
+  /// 倒數開始那一刻的時鐘值(ms);-1 = 還沒開始倒數。
+  int _windowStartMs = -1;
+
+  /// 計算窗終點(絕對位置,不含):30 秒到的那一刻收到的總筆數;-1 = 還沒到。
+  int _winEnd = -1;
 
   /// 原始樣本 / 處理後波形下一筆要輸出的絕對位置;-1 = 還沒開始輸出。
   int _rawNextAbs = -1;
@@ -150,12 +183,19 @@ class Max30102K2Fixed30 {
   bool get settling =>
       fingerPresent && !_settled && _phase == K2Phase.waiting;
 
-  /// 倒數剩餘秒數(無條件進位);只在 measuring 時有值。
+  /// 倒數剩餘秒數(真實時鐘,無條件進位);只在 measuring 時有值。
+  /// 30 秒到了、還在等右緣那 1.5 秒 → 0。
   int? get remainingSec {
     if (_phase != K2Phase.measuring) return null;
-    final left = _windowStart + windowSamples - _totalSamples;
-    return left <= 0 ? 0 : (left / Max30102Config.samplingRateHz).ceil();
+    final left = windowMs - (clockMs() - _windowStartMs);
+    return left <= 0 ? 0 : (left / 1000).ceil();
   }
+  // 〔0.0.1-fixed30s 舊寫法:剩餘筆數 ÷ 100。換成真實時鐘(原因見 [windowMs])。〕
+  // int? get remainingSec {
+  //   if (_phase != K2Phase.measuring) return null;
+  //   final left = _windowStart + windowSamples - _totalSamples;
+  //   return left <= 0 ? 0 : (left / Max30102Config.samplingRateHz).ceil();
+  // }
 
   /// 本次量測的絕對位置基準。
   int get totalSamples => _totalSamples;
@@ -219,10 +259,14 @@ class Max30102K2Fixed30 {
       if (alreadyClean) return _emptyResult();
       K2Fixed30Result? early;
       if (_phase == K2Phase.measuring) {
-        // 先算(若已滿 28 秒)再清 —— 清了就沒資料可算
-        if (_totalSamples - _windowStart >= earlyStopSamples) {
+        // 先算(若倒數已滿 28 秒,真實時鐘)再清 —— 清了就沒資料可算
+        if (clockMs() - _windowStartMs >= earlyStopMs) {
           early = _computeEarlyStop();
         }
+        // 〔0.0.1-fixed30s 舊寫法:數樣本。換成真實時鐘(原因見 [windowMs])。〕
+        // if (_totalSamples - _windowStart >= earlyStopSamples) {
+        //   early = _computeEarlyStop();
+        // }
         if (early != null) {
           _result = early;
           _phase = K2Phase.done;
@@ -272,6 +316,7 @@ class Max30102K2Fixed30 {
     if (!_settled) {
       _settled = true;
       _windowStart = _bufStart + config.settleSamples;
+      _windowStartMs = clockMs(); // 正式放行 = 開始計時
       _rawNextAbs = _windowStart;
       _waveNextAbs = _windowStart;
       _phase = K2Phase.measuring;
@@ -285,10 +330,19 @@ class Max30102K2Fixed30 {
     _rawNextAbs = _totalSamples;
     final wave = _takeWave();
 
-    // ── 30 秒 + 右緣到齊 → 算一次 ──
+    // ── 30 秒到(真實時鐘)→ 記下計算窗終點;再等右緣 [hold] 筆到齊 → 算一次 ──
+    // 倒數期間收到的筆數到了 [maxWindowSamples] 也當作窗滿(防積壓資料灌爆緩衝)。
+    if (_winEnd < 0 &&
+        (clockMs() - _windowStartMs >= windowMs ||
+            _totalSamples - _windowStart >= maxWindowSamples)) {
+      _winEnd = _totalSamples;
+    }
     K2Compute? computed;
-    final winEnd = _windowStart + windowSamples;
-    if (_totalSamples >= winEnd + hold) {
+    // 〔0.0.1-fixed30s 舊寫法:窗終點固定 = 起點 + 3000 筆。換成真實時鐘(原因見 [windowMs])。〕
+    // final winEnd = _windowStart + windowSamples;
+    // if (_totalSamples >= winEnd + hold) {
+    if (_winEnd >= 0 && _totalSamples >= _winEnd + hold) {
+      final winEnd = _winEnd;
       final res = _computeWindow(dataEnd: winEnd + hold, winEnd: winEnd);
       _result = res;
       _phase = K2Phase.done;
@@ -339,6 +393,8 @@ class Max30102K2Fixed30 {
     _sinceFingerOn = 0;
     _settled = false;
     _windowStart = -1;
+    _windowStartMs = -1;
+    _winEnd = -1;
     _rawNextAbs = -1;
     _waveNextAbs = -1;
   }
@@ -533,7 +589,10 @@ class Max30102K2Fixed30 {
   K2Fixed30Result? _computeEarlyStop() {
     final lift = _findLiftAbs();
     if (lift == null) return null;
-    final winEnd = math.min(lift - hold, _windowStart + windowSamples);
+    // 30 秒已到、還在等右緣時離開 → 窗終點不超過 30 秒那一點
+    final winEnd = math.min(lift - hold, _winEnd >= 0 ? _winEnd : _totalSamples);
+    // 〔0.0.1-fixed30s 舊寫法:上限 = 起點 + 3000 筆。換成真實時鐘(原因見 [windowMs])。〕
+    // final winEnd = math.min(lift - hold, _windowStart + windowSamples);
     // 計算窗至少要有 1 秒,否則等同沒資料
     if (winEnd - _windowStart < Max30102Config.samplingRateHz) return null;
     return _computeWindow(dataEnd: lift, winEnd: winEnd, liftAbs: lift);

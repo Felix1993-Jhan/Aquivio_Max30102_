@@ -1,6 +1,6 @@
 # MAX30102 server 固定 30 秒量測模式 / Fixed 30-second measurement mode
 
-> 加入版本：0.0.1-fixed30s（規劃中，尚未實作）／最後修改：0.0.1-fixed30s（2026-11-20）
+> 加入版本：0.0.1-fixed30s（規劃中，尚未實作）／最後修改：0.0.1-fixed30s（2026-11-24）
 >
 > 狀態：暫定方案，待與 Mark 討論。中文版最後一節「內部對照」不給軟體。
 
@@ -48,10 +48,13 @@
     這一包開始帶 confidence 與所有數值
 ```
 
+- 倒數用的是**真實時間**：從開始倒數起，碼表 30 秒就倒數完，不受資料到達快慢影響。
 - 從**開始收到波形**算起，大約 **31.5～32.5 秒**會收到結果。
 - 判斷「結果到了」的方式：**`phase` 第一次變成 `done`**，也就是 `confidence` 第一次不是 `null` 的那一包。請以這一包為準，不要用自己的計時器決定。
 
 ## 4. 手指中途離開
+
+以下的「28 秒」同樣是真實時間，從開始倒數那一刻算起。
 
 | 手指離開的時間點 | server 的處理 |
 |---|---|
@@ -140,6 +143,9 @@
 ## （內部對照，不給軟體）
 
 - **起算點**：倒數從「開始輸出」那一刻算起，跟即時版開始收谷是同一個時間點，約放上手指後 2.9 秒。倒數到 0 後多收 154 筆，作為右緣的前後文。
+- **計時方式**：倒數 30 秒與「滿 28 秒」看真實時鐘（核心的 `clockMs`，預設 `Stopwatch`）；30 秒到那一刻收到的最後一筆就是計算窗終點。空轉、沉澱、右緣 154 筆是濾波器要的資料量，照樣數筆數。資料每秒不足 100 筆時，窗內筆數少於 3000。
+- **緩衝上限**：倒數期間最多收 3600 筆（名目 30 秒的 1.2 倍），收滿就當作窗滿、開始收右緣。防止 feed 模式上層一次灌進積壓資料時緩衝無上限。
+- **30 秒已到、還在等右緣時離開**：走提早結束（找 L），窗終點不超過 30 秒那一點。
 - **倒數期間只算線**：只算帶通線來推波形；找谷、HRV、SpO2、SQI 都不算。WS 改成由計時器每秒推送，結果算出來時另外立刻推一次。
 - **第 28 秒後提早結束**：從手指離開判定的那一筆往回，在截尾平均的 IR 上找平台邊緣 L，只收 `L − 154` 之前的谷，跟正常結束是同一條右緣規則。抬手指時 IR 的實際形狀要上機確認。
 - **`aborted` 期間**：資料不進量測、不倒數，等 init。
@@ -188,10 +194,13 @@ Results computed and pushed immediately             phase = done
     from this packet on, confidence and all values are filled in
 ```
 
+- The countdown runs on **real time**: it ends 30 seconds by the clock after it starts, regardless of how fast the data arrives.
 - You will receive the results approx. **31.5–32.5 seconds after the waveform starts arriving**.
 - How to tell the results have arrived: **the first packet where `phase` becomes `done`** (the same packet where `confidence` is first not `null`). Please rely on this packet, not on your own timer.
 
 ## 4. Finger removed during the measurement
+
+The "28 s" below is also real time, counted from the moment the countdown starts.
 
 | When the finger is removed | What the server does |
 |---|---|
@@ -283,5 +292,6 @@ Results available:
 
 | 版本 | 日期 | 改了什麼 |
 |---|---|---|
+| 0.0.1-fixed30s | 2026-11-24 | 第 3、4 節與內部對照：倒數 30 秒與「滿 28 秒」改用真實時鐘（原本數樣本：3000 / 2800 筆）。起因：Linux 實機碼表 30 秒時倒數還剩 3～4 秒（資料每秒不足 100 筆）。內部對照補上緩衝上限 3600 筆、30 秒已到還在等右緣時離開的處理 |
 | 0.0.1-fixed30s | 2026-11-20 | 第 5 節：出結果後沒下 init、手指拿開再放上 → 結果保留，不會開始新量測（原寫「新倒數開始時清除」） |
 | 0.0.1-fixed30s（規劃中） | 2026-11-20 | 建立：固定 30 秒模式的對外說明草案（中英） |

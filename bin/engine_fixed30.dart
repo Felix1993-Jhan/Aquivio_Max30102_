@@ -15,11 +15,13 @@
 part of 'max30102_server.dart';
 
 class K2EngineFixed30 extends VitalsEngine {
-  K2EngineFixed30({super.waveSeconds}) {
+  /// [clockMs]:倒數用的時鐘,只給測試注入假時鐘;正式執行不帶 = 核心預設的 Stopwatch。
+  K2EngineFixed30({super.waveSeconds, int Function()? clockMs})
+      : core = Max30102K2Fixed30(clockMs: clockMs) {
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) => pushVitals());
   }
 
-  final Max30102K2Fixed30 core = Max30102K2Fixed30();
+  final Max30102K2Fixed30 core;
 
   late final Timer _ticker;
 
