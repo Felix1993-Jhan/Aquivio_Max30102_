@@ -8,6 +8,8 @@
 //   即時版:每 100 筆在最近 5 秒找一次谷,逐輪收谷,數值每秒更新。
 //   本檔  :倒數 30 秒期間**只算畫圖的線**;30 秒到(再多收 154 筆右緣前後文)
 //          才對整段資料**一次**找谷 → 生理閘門 → classify → HRV。
+//          找谷門檻(P70)、SQI、血氧 R 用整段緩衝(沉澱 + 30 秒 + 右緣 154 筆);
+//          谷只收 30 秒窗內的 → classify(整段 RR 中位數 ±20%)、cleanShare 都以這 30 秒為準。
 //
 // 一次量測的時間軸(手指放上 = 絕對位置 0):
 //
@@ -42,6 +44,7 @@ import 'dart:typed_data';
 import '../k2_algorithm.dart';
 import '../k2_beatseries.dart';
 import '../k2_config.dart';
+import '../k2_hrv_calculator.dart';
 import '../k2_protocol.dart';
 import '../k2_setting_limits.dart';
 import '../k2_signal.dart';
@@ -168,7 +171,7 @@ class Max30102K2Fixed30 {
       };
 
   /// 設定上假設的方向(指標 0 = 照 datasheet,當作 normal)。
-  K2ChannelOrient get _assumedOrient =>
+  static K2ChannelOrient _assumedOf(Max30102Config config) =>
       config.channelMode == Max30102Config.channelModeSwapped
           ? K2ChannelOrient.swapped
           : K2ChannelOrient.normal;
@@ -349,7 +352,7 @@ class Max30102K2Fixed30 {
         computed: null,
       );
 
-  ({List<double> trim, List<double> line}) _lineOf(List<int> buf) {
+  static ({List<double> trim, List<double> line}) _lineOf(List<int> buf) {
     final d = List<double>.generate(buf.length, (i) => buf[i].toDouble());
     final trim = Max30102Signal.slidingTrimmedMean(d, Max30102Config.trimWindow);
     final line = Max30102Signal.bandpass(
@@ -383,18 +386,51 @@ class Max30102K2Fixed30 {
     required int winEnd,
     int? liftAbs,
   }) {
-    final bufStart = _bufStart;
-    final len = dataEnd - bufStart;
-    final ir = _ir.sublist(0, len);
-    final red = _red.sublist(0, len);
+    final len = dataEnd - _bufStart;
+    return computeBuffer(
+      red: _red.sublist(0, len),
+      ir: _ir.sublist(0, len),
+      bufStartAbs: _bufStart,
+      windowStartAbs: _windowStart,
+      windowEndAbs: winEnd,
+      liftAbs: liftAbs,
+      config: config,
+    );
+  }
 
-    final r = _algo(red, ir);
-    final spo2 = _verifiedSpo2(r, red, ir);
+  /// 固定版的計算本體(公開、純函式):**資料多長都算**,什麼時候算由呼叫端決定。
+  ///
+  /// 狀態機在「滿 30 秒 / ≥ 28 秒手指離開」時呼叫它;快照重放可以直接呼叫(12 秒也行)。
+  /// 只用參數與區域變數,不碰任何共用狀態 → 多處同時呼叫各算各的。
+  ///
+  ///   [red] / [ir]      一段連續資料,第 0 筆的絕對位置 = [bufStartAbs]。
+  ///                     要照 config.channelMode 的假設排好(指標 1 = 呼叫端已對調);
+  ///                     快照存的是實際光源 → 用指標 2(強制正常)或 0。
+  ///   [windowStartAbs]  計算窗起點(含)。前面那段 = 沉澱,只當帶通線的左側前後文,谷不收。
+  ///   [windowEndAbs]    計算窗終點(不含)。後面到資料尾 = 右緣前後文,谷不收;
+  ///                     正常應留 [hold] 筆,線的右緣才定下來。
+  ///   [liftAbs]         提早結束的 L 點,只是原封放進結果(畫圖用),不影響計算。
+  ///
+  /// 找谷門檻(P70)、SQI、血氧 R 用整段資料;谷 → RR → classify → HRV 只用窗內的谷。
+  static K2Fixed30Result computeBuffer({
+    required List<int> red,
+    required List<int> ir,
+    required int bufStartAbs,
+    required int windowStartAbs,
+    required int windowEndAbs,
+    required Max30102Config config,
+    int? liftAbs,
+  }) {
+    Max30102SettingLimits.enforce(config);
+    final bufStart = bufStartAbs;
+    final r = _algo(red, ir, config);
+    final spo2 = _verifiedSpo2(r, red, ir, config);
 
     // 只收計算窗內的谷;右緣前後文裡的谷(含最右一顆)自然被排除
     final troughs = [
       for (final t in r.irTroughs)
-        if (bufStart + t >= _windowStart && bufStart + t < winEnd) bufStart + t,
+        if (bufStart + t >= windowStartAbs && bufStart + t < windowEndAbs)
+          bufStart + t,
     ];
 
     // 谷 → RR(生理閘門)→ classify,與即時版同一支 BeatSeries。
@@ -408,8 +444,14 @@ class Max30102K2Fixed30 {
       maxBeats: Max30102Config.maxBeats,
     );
     beats.feed(troughs, true);
-    final cleanPts = beats.rrCleanPts();
-    final hv = beats.hrvStats();
+    // classify 用整段 RR 中位數(即時版是局部 ±4 拍,見 old_code/2026-11-24.md)
+    final cleanPts = Max30102HrvCalculator.clean(
+      beats.samples,
+      includeRecovered: true,
+      apply: config.cleanEnabled,
+      wholeSeries: true,
+    );
+    final hv = Max30102HrvCalculator.hrvFrom(cleanPts);
     final troughAbs = <int>[];
     for (final p in cleanPts) {
       if (troughAbs.isEmpty || troughAbs.last != p.startAbs) {
@@ -431,14 +473,19 @@ class Max30102K2Fixed30 {
         spikeMax: r.sqiSpikeMax,
         troughAbs: troughAbs,
       ),
-      windowStartAbs: _windowStart,
-      windowEndAbs: winEnd,
-      windowIr: ir.sublist(_windowStart - bufStart, winEnd - bufStart),
+      windowStartAbs: windowStartAbs,
+      windowEndAbs: windowEndAbs,
+      windowIr: ir.sublist(windowStartAbs - bufStart, windowEndAbs - bufStart),
       liftAbs: liftAbs,
     );
   }
 
-  HrSpo2Result _algo(List<int> red, List<int> ir) => Max30102Algorithm.compute(
+  static HrSpo2Result _algo(
+    List<int> red,
+    List<int> ir,
+    Max30102Config config,
+  ) =>
+      Max30102Algorithm.compute(
         red: red,
         ir: ir,
         irLine: _lineOf(ir).line,
@@ -459,18 +506,19 @@ class Max30102K2Fixed30 {
   ///   R < 0.9 → 假設對,照給;R > 1.3 → 假設錯,兩路換回來重算一次血氧;
   ///   模糊帶或算不出 R → 不給(null),方向回報原本的假設。
   /// [red] / [ir] 是照假設排好的兩路(指標 1 在 feedData 已經對調過)。
-  ({double? value, K2ChannelOrient orient}) _verifiedSpo2(
+  static ({double? value, K2ChannelOrient orient}) _verifiedSpo2(
     HrSpo2Result r,
     List<int> red,
     List<int> ir,
+    Max30102Config config,
   ) {
-    final assumed = _assumedOrient;
+    final assumed = _assumedOf(config);
     final ratio = r.spo2Ratio;
     if (ratio > 0 && ratio < Max30102Config.orientRatioNormal) {
       return (value: r.spo2 > 0 ? r.spo2 : null, orient: assumed);
     }
     if (ratio > Max30102Config.orientRatioSwapped) {
-      final flipped = _algo(ir, red); // 紅光 ↔ 紅外
+      final flipped = _algo(ir, red, config); // 紅光 ↔ 紅外
       return (
         value: flipped.spo2 > 0 ? flipped.spo2 : null,
         orient: assumed == K2ChannelOrient.swapped

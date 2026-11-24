@@ -6,8 +6,12 @@
 // 合成 PPG:70 bpm + 0.25 Hz 呼吸調變(讓 RR 有變異),IR DC 100000。
 // ============================================================================
 
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/fixed30/k2_core_fixed30.dart';
@@ -16,6 +20,8 @@ import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_hrv_cal
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/k2_vitals_metrics.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/realtime/k2_core.dart'
     show K2ChannelOrient;
+import 'package:flutter_firmware_tester_unified/main_mode/max30102_K2/ui/k2_serial_adapter.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/serial_port_manager.dart';
 
 import '../bin/max30102_server.dart';
 
@@ -279,6 +285,107 @@ void main() {
     });
   });
 
+  group('classify 基準:整段中位數(固定模式)vs 局部 ±4(即時模式)', () {
+    // 頭端連 3 顆壞拍(1050),後面 12 顆正常(約 800)
+    final rr = <double>[1050, 1050, 1050, 800, 790, 815, 780, 825, 805, 770, 830, 795, 810, 785, 820];
+    final pts = <HrvRrPoint>[];
+    int t = 0;
+    for (final r in rr) {
+      final s = t;
+      t += (r / 10).round();
+      pts.add((rr: r, startAbs: s, endAbs: t));
+    }
+
+    test('局部 ±4:最頭兩筆可比的太少、被壞拍翻盤 → 漏網成乾淨(即時模式行為不變)', () {
+      final k = Max30102HrvCalculator.classify(pts);
+      // 第 0 筆只看 5 筆(3 壞)、第 1 筆看 6 筆(3 壞)→ 中位數被帶偏;第 2 筆看 7 筆就判得出
+      expect(k.sublist(0, 2), everyElement(HrvRrKind.clean));
+      expect(k[2], isNot(HrvRrKind.clean));
+    });
+
+    test('★ 整段中位數:3 顆壞拍被剔除,其餘全乾淨', () {
+      final k = Max30102HrvCalculator.classify(pts, wholeSeries: true);
+      expect(k.sublist(0, 3), everyElement(isNot(HrvRrKind.clean)));
+      expect(k.sublist(3), everyElement(HrvRrKind.clean));
+    });
+
+    test('整段中位數:30 拍內心率漂移 30% 仍全部乾淨', () {
+      final drift = <HrvRrPoint>[];
+      int a = 0;
+      for (int i = 0; i < 30; i++) {
+        final r = 900 - 270 * i / 29; // 900 → 630
+        final s = a;
+        a += (r / 10).round();
+        drift.add((rr: r, startAbs: s, endAbs: a));
+      }
+      expect(
+        Max30102HrvCalculator.classify(drift, wholeSeries: true),
+        everyElement(HrvRrKind.clean),
+      );
+    });
+  });
+
+  group('server feed 模式的 /chip/*(固定模式)', () {
+    const port = 18773;
+    late K2EngineFixed30 e;
+    late ApiServer api;
+
+    Future<Map<String, dynamic>> post(String path) async {
+      final c = HttpClient();
+      try {
+        final req = await c.postUrl(Uri.parse('http://127.0.0.1:$port$path'));
+        final res = await req.close();
+        return jsonDecode(await res.transform(utf8.decoder).join())
+            as Map<String, dynamic>;
+      } finally {
+        c.close();
+      }
+    }
+
+    setUp(() async {
+      e = K2EngineFixed30();
+      api = ApiServer(
+        engine: e,
+        opts: ServerOptions(
+          mode: 'feed',
+          serialPath: '/dev/null',
+          baud: 115200,
+          port: port,
+          board: 0x31,
+          intervalMs: 100,
+          waveSeconds: 30,
+          resetOnFingerOff: true,
+        ),
+        initial: HttpFeedSource(),
+      );
+      await api.start();
+    });
+    tearDown(() => api.shutdown());
+
+    test('★ /chip/reset:休眠、結果保留;/chip/init:醒來、結果清除', () async {
+      _feedEngine(e, _Ppg(), 36);
+      expect(e.vitalsJson()['phase'], 'done');
+
+      final r = await post('/chip/reset');
+      expect(r['sent'], isFalse, reason: 'feed 模式照舊只回封包,由上層送');
+      expect(e.chipAsleep, isTrue);
+      expect(e.vitalsJson()['phase'], 'done');
+      expect(e.vitalsJson()['strapi'], isNotNull);
+
+      await post('/chip/init');
+      expect(e.chipAsleep, isFalse);
+      expect(e.vitalsJson()['phase'], 'waiting');
+      expect(e.vitalsJson()['strapi'], isNull);
+    });
+
+    test('/chip/reset-init:等同 init(醒來、清除)', () async {
+      _feedEngine(e, _Ppg(), 36);
+      await post('/chip/reset-init');
+      expect(e.chipAsleep, isFalse);
+      expect(e.vitalsJson()['phase'], 'waiting');
+    });
+  });
+
   group('server K2EngineFixed30', () {
     late K2EngineFixed30 e;
     setUp(() => e = K2EngineFixed30());
@@ -355,5 +462,98 @@ void main() {
     expect(e.vitalsJson()['calcMode'], 'realtime');
     expect(e.vitalsJson().containsKey('phase'), isFalse);
     await e.dispose();
+  });
+
+  // App 在 done 那一刻凍結固定核心吃的那段資料(fixedBuf),快照存它。
+  // 驗證:拿凍結的資料直接呼叫 computeBuffer(),結果要與核心當時算的**完全相同**。
+  group('App 凍結的固定版資料 → computeBuffer() 重放一致', () {
+    /// 開始輪詢,逐包餵 [seconds] 秒。回傳收包入口(done 後 stop() 會卸載,先留著)。
+    void feedAd(void Function(Uint8List) feed, _Ppg g, double seconds,
+        FakeAsync async, {bool finger = true}) {
+      for (int i = 0; i < (seconds * 10).round(); i++) {
+        final b = g.next(10, finger: finger);
+        feed(Uint8List.fromList(_packetOf(b.red, b.ir)));
+        async.flushMicrotasks();
+      }
+    }
+
+    void expectSame(K2SerialAdapter ad) {
+      final r = ad.fixedResult!;
+      final buf = ad.fixedBuf!;
+      final re = Max30102K2Fixed30.computeBuffer(
+        red: buf.red,
+        ir: buf.ir,
+        bufStartAbs: buf.bufStartAbs,
+        windowStartAbs: r.windowStartAbs,
+        windowEndAbs: r.windowEndAbs,
+        liftAbs: r.liftAbs,
+        config: ad.coreFixed.config,
+      );
+      expect(re.compute.troughAbs, r.compute.troughAbs);
+      expect(re.compute.rr, r.compute.rr);
+      expect(re.compute.bpm, r.compute.bpm);
+      expect(re.compute.hrv?.rmssd, r.compute.hrv?.rmssd);
+      expect(re.compute.spo2, r.compute.spo2);
+      expect(re.compute.orient, r.compute.orient);
+      expect(re.compute.sqiOk, r.compute.sqiOk);
+      // 快照裡寫的就是這一份
+      final snap = ad.buildSnapshot(full: true)['fixed30'] as Map<String, dynamic>;
+      expect(snap['bufStartAbs'], buf.bufStartAbs);
+      expect(snap['bufIr'], buf.ir);
+    }
+
+    test('正常結束(滿 30 秒):長度 = 沉澱 + 30 秒 + 右緣', () {
+      fakeAsync((async) {
+        final ad = K2SerialAdapter(manager: SerialPortManager('TEST', isTextMode: false));
+        ad.start();
+        final feed = ad.manager.onRawBytes!;
+        feedAd(feed, _Ppg(), 36, async);
+        expect(ad.coreFixed.phase, K2Phase.done);
+        expect(ad.fixedResult!.liftAbs, isNull);
+        expect(ad.fixedBuf!.ir.length,
+            ad.coreFixed.config.settleSamples + 3000 + Max30102K2Fixed30.hold);
+        expectSame(ad);
+        ad.stop();
+        async.elapse(const Duration(seconds: 1));
+      });
+    });
+
+    test('★ 提早結束(≥ 28 秒手指離開):畫面保留(同正常結束),凍結資料止於 L', () {
+      fakeAsync((async) {
+        final ad = K2SerialAdapter(manager: SerialPortManager('TEST', isTextMode: false));
+        ad.start();
+        final feed = ad.manager.onRawBytes!;
+        final g = _Ppg();
+        feedAd(feed, g, 3.5 + 29, async);
+        // 手指離開:餵到 done 為止 —— 實機在 done 那一包就 stop(),之後不會再收到封包
+        for (int i = 0; i < 5 && ad.coreFixed.phase != K2Phase.done; i++) {
+          feedAd(feed, g, 0.1, async, finger: false);
+        }
+        expect(ad.coreFixed.phase, K2Phase.done);
+        final r = ad.fixedResult!;
+        expect(r.liftAbs, isNotNull);
+        // 即時核心在同一批歸零(手指離開),但這一批不清畫面、不覆蓋 latest
+        expect(ad.core.totalSamples, 0, reason: '即時核心內部照樣歸零');
+        expect(ad.waveIr, isNotEmpty, reason: '上方波形要保留');
+        expect(ad.displayTroughs(), isNotEmpty, reason: '谷標(讀 latest)要保留');
+        expect(ad.fixedBuf!.bufStartAbs + ad.fixedBuf!.ir.length, r.liftAbs);
+        expectSame(ad);
+        ad.stop();
+        async.elapse(const Duration(seconds: 1));
+      });
+    });
+
+    test('reset()(= 開始量測 init 成功 / 清空)清掉凍結資料', () {
+      fakeAsync((async) {
+        final ad = K2SerialAdapter(manager: SerialPortManager('TEST', isTextMode: false));
+        ad.start();
+        feedAd(ad.manager.onRawBytes!, _Ppg(), 36, async);
+        expect(ad.fixedBuf, isNotNull);
+        ad.reset();
+        expect(ad.fixedBuf, isNull);
+        ad.stop();
+        async.elapse(const Duration(seconds: 1));
+      });
+    });
   });
 }

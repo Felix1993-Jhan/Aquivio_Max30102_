@@ -619,6 +619,15 @@ class ApiServer {
     if (src is! SerialSource) {
       // feed 模式:給封包,讓上層用自己的串口送出去。
       // 這樣上層不必碰協定(表頭 / checksum 算錯會被 MCU 靜默丟棄,極難查)。
+      //
+      // 引擎照 serial 模式同樣更新(休眠旗標 + afterChipCommand + 立刻推一筆)。
+      // 〔0.0.1-fixed30s 舊寫法:feed 模式只回封包、不動引擎(server 不知道上層有沒有
+      //   真的送出)。換掉的原因:固定 30 秒的 done / aborted 只有 init 解得開,不更新的話
+      //   feed 模式永遠鎖住。上層有沒有真的送、晶片有沒有回,server 仍然無從得知 ——
+      //   所以是「收到請求就當作送出了」,不等 MCU 確認。〕
+      engine.chipAsleep = action == _ChipAction.reset; // reset → 休眠;init / reset-init → 醒
+      engine.afterChipCommand(initialized: action != _ChipAction.reset);
+      engine.pushVitals();
       await _json(req, {
         'ok': true,
         'sent': false,

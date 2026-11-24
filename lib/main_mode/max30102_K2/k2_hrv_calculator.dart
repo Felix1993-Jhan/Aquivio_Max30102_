@@ -104,13 +104,26 @@ class Max30102HrvCalculator {
   /// 9 筆裡要有一半以上是壞的才會被帶偏;只取乾淨的反而要先有「乾淨」的定義,
   /// 起步那幾拍就沒有基準可用(舊版 40% 閘門正是這樣鎖死在 2 倍的)。
   ///
+  /// [wholeSeries] = true(固定 30 秒模式):基準改成**整段所有 RR 的中位數**,
+  /// 每一筆都跟同一個基準比。一次算時整段資料都在手上,基準由 30 多拍決定,
+  /// 壞拍要超過一半才帶得偏;也沒有「清單兩端只有 5 筆可比」的問題。
+  /// 預設 false = 即時模式的局部中位數(行為不變)。
+  ///
   /// 回傳與 [pts] 等長、同順序。
-  static List<HrvRrKind> classify(List<HrvRrPoint> pts) {
+  static List<HrvRrKind> classify(
+    List<HrvRrPoint> pts, {
+    bool wholeSeries = false,
+  }) {
     final out = <HrvRrKind>[];
+    final wholeMed = wholeSeries && pts.isNotEmpty
+        ? _medianMid([for (final p in pts) p.rr])
+        : 0.0;
     for (int i = 0; i < pts.length; i++) {
       final lo = math.max(0, i - classifyHalfWindow);
       final hi = math.min(pts.length, i + classifyHalfWindow + 1);
-      final med = _medianMid([for (int j = lo; j < hi; j++) pts[j].rr]);
+      final med = wholeSeries
+          ? wholeMed
+          : _medianMid([for (int j = lo; j < hi; j++) pts[j].rr]);
       final rr = pts[i].rr;
       // RR 進池前已過生理閘門(必為正),中位數不可能 ≤ 0。真的出現就是上游壞了 ——
       // 照舊默默放行會讓 HRV 安靜地算錯,所以直接丟例外。
@@ -140,10 +153,11 @@ class Max30102HrvCalculator {
     List<HrvRrSample> history, {
     required bool includeRecovered,
     bool apply = true, // false → 不分類(clean 開關關閉時);RR 全收
+    bool wholeSeries = false, // true → 整段中位數當基準(固定 30 秒),見 [classify]
   }) {
     final base = _base(history, includeRecovered);
     if (!apply) return base;
-    final kinds = classify(base);
+    final kinds = classify(base, wholeSeries: wholeSeries);
     return [
       for (int i = 0; i < base.length; i++)
         if (kinds[i] == HrvRrKind.clean) base[i],

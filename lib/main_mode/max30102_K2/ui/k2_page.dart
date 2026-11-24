@@ -69,11 +69,16 @@ class _K2PageState extends State<K2Page> {
   /// 目前視窗長(秒)。上限受 K2SerialAdapter._waveCap 限制(目前 30s)。
   int _shortSec = 30;
 
-  /// 隱藏空轉段(只有定長模式有意義)。空轉期那 1.5 秒若是「先按開始、手指才
-  /// 壓上去」,IR 會從 5 萬爬到 9 萬,p2p 實測到 33554 —— 縱軸是跨通道取最大
-  /// 振幅,那根大波會把後面真正的脈搏壓成一條直線。看過一次確認核心在做什麼
-  /// 之後就可以收起來。滾動模式不需要這個:那段本來就會自己滑出畫面。
+  /// 隱藏空轉段(定長模式,以及滾動模式畫面上還接著開頭段時)。空轉期那 1.5 秒若是
+  /// 「先按開始、手指才壓上去」,IR 會從 5 萬爬到 9 萬,p2p 實測到 33554 —— 縱軸是
+  /// 跨通道取最大振幅,那根大波會把後面真正的脈搏壓成一條直線。看過一次確認核心在
+  /// 做什麼之後就可以收起來。滾動模式原本以為那段會自己滑出畫面,但固定 30 秒量測
+  /// 全程約 33 秒、視窗 30 秒,開頭段幾乎整場都在 → 滾動模式也要能藏。
   bool _hideDead = false;
+
+  /// 隱藏抬手段:固定版提早結束時,把抬起點 L 之後(手指拿開那幾筆)從圖上拿掉。
+  /// IR 在 0.1 秒內掉好幾萬,圖表自己的濾波線在邊緣甩出大擺動,同樣會把縱軸撐大。
+  bool _hideLift = false;
 
   /// 波形圖上疊原始 IR(白線,獨立刻度)—— 看濾波前的訊號長什麼樣、漂移有多大。
   bool _showRawIr = false;
@@ -1313,7 +1318,13 @@ class _K2PageState extends State<K2Page> {
   ///
   /// 放在側欄而不是標題列:它只管左欄這些數值,放在它作用的範圍內最不會誤解;
   /// 而且標題列已經有快捷鈕 + 輸入框 + 實際涵蓋 + 存快照 + 進料計數,再塞會 overflow。
-  Widget _fixedSwitch(K2FixedView? fx) {
+  /// [headInRolling]:滾動模式下波形前面接著開頭段(空轉 + 沉澱)—— 這時也顯示「隱藏空轉段」。
+  /// [hasLift]:固定版提早結束、有抬起點 L —— 顯示「隱藏抬手段」。
+  Widget _fixedSwitch(
+    K2FixedView? fx, {
+    bool headInRolling = false,
+    bool hasLift = false,
+  }) {
     final lines = <({String text, Color color})>[];
     if (_fixedMode) {
       if (fx == null) {
@@ -1441,9 +1452,9 @@ class _K2PageState extends State<K2Page> {
             ),
           ],
         ),
-        // 空轉段的開關:只有定長模式、而且真的還原到開頭時才出現。
-        // 滾動模式不需要 —— 那段本來就會自己滑出畫面。
-        if (_fixedMode && fx != null && !fx.preMissing)
+        // 空轉段的開關:定長模式真的還原到開頭時、或滾動模式畫面上接著開頭段時才出現。
+        if ((_fixedMode && fx != null && !fx.preMissing) ||
+            (!_fixedMode && headInRolling))
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: Tooltip(
@@ -1457,6 +1468,24 @@ class _K2PageState extends State<K2Page> {
                 visualDensity: VisualDensity.compact,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 onSelected: (b) => setState(() => _hideDead = b),
+              ),
+            ),
+          ),
+        // 抬手段的開關:只有提早結束(有 L 點)時才出現,定長 / 滾動都適用。
+        if (hasLift)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Tooltip(
+              message: tr('k2_hide_lift_tip'),
+              child: FilterChip(
+                label: Text(
+                  tr('k2_hide_lift'),
+                  style: const TextStyle(fontSize: 10),
+                ),
+                selected: _hideLift,
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onSelected: (b) => setState(() => _hideLift = b),
               ),
             ),
           ),
@@ -1600,7 +1629,7 @@ class _K2PageState extends State<K2Page> {
 
     // ── 隱藏空轉段:把陣列開頭那一截整個拿掉,索引全部往前移 ────────────
     //    只是顯示上的裁切 —— 那段資料本來就沒有進入任何計算。
-    final dropHead = (_hideDead && fx != null && preLen > 0)
+    final dropHead = (_hideDead && preLen > 0)
         ? math.min(fw.deadSamples, preLen)
         : 0;
     final headLen = preLen - dropHead; // 裁切後,開頭段還剩多長
@@ -1692,7 +1721,11 @@ class _K2PageState extends State<K2Page> {
             children: [
               // ── 黃:左側垂直資料面板 ──
               _sidePanel([
-                _fixedSwitch(fx),
+                _fixedSwitch(
+                  fx,
+                  headInRolling: headInRolling,
+                  hasLift: fr?.liftAbs != null,
+                ),
                 const Divider(height: 14),
                 Text(
                   trParams(_fixedMode ? 'k2_hrv_fixed' : 'k2_hrv_short', {
@@ -1790,6 +1823,14 @@ class _K2PageState extends State<K2Page> {
                               ? abs + fw.preIr.length - fw.base
                               : abs - _adapter.waveBase + preLen;
                           bool onChart(int i) => i >= 0 && i < srcIr.length;
+                          // 隱藏抬手段:陣列只留到 L(含),之後的索引一律不畫。只是顯示上的裁切。
+                          final liftAt = (_hideLift && fr?.liftAbs != null)
+                              ? toChart(fr!.liftAbs!) + 1
+                              : null;
+                          final keepTo =
+                              (liftAt != null && liftAt > dropHead && liftAt < srcIr.length)
+                                  ? liftAt
+                                  : srcIr.length;
                           final srcTroughsAlt = [
                             for (final a in fr?.compute.troughAbs ?? const <int>[])
                               if (onChart(toChart(a))) toChart(a),
@@ -1817,16 +1858,11 @@ class _K2PageState extends State<K2Page> {
 
                           List<({int from, int to})> cut(
                             List<({int from, int to})> s,
-                          ) => dropHead > 0
-                              ? [
-                                  for (final x in s)
-                                    if (x.from >= dropHead)
-                                      (
-                                        from: x.from - dropHead,
-                                        to: x.to - dropHead,
-                                      ),
-                                ]
-                              : s;
+                          ) => [
+                            for (final x in s)
+                              if (x.from >= dropHead && x.to < keepTo)
+                                (from: x.from - dropHead, to: x.to - dropHead),
+                          ];
                           final srcSpans = spans(fx, fw, _adapter.displaySpans());
                           final srcSpansAlt = [
                             for (final p in fr?.compute.rrPoints ?? const <HrvRrPoint>[])
@@ -1849,7 +1885,9 @@ class _K2PageState extends State<K2Page> {
                                   ),
                                 ],
                               ])
-                                if (onChart(toChart(abs)) && toChart(abs) >= dropHead)
+                                if (onChart(toChart(abs)) &&
+                                    toChart(abs) >= dropHead &&
+                                    toChart(abs) < keepTo)
                                   (at: toChart(abs) - dropHead, label: label, color: color),
                           ];
                           final srcBands = fx != null
@@ -1862,57 +1900,50 @@ class _K2PageState extends State<K2Page> {
                           return K2WaveChart(
                             // ⚠ shouldRepaint 不比對 ir:切換開關時 displaySamples
                             //   與 version 可能都沒變 → 不換 key 波形不會更新。
+                            // ⚠ 不可以把 keepTo 本身放進 key:它隨樣本每筆都在長,
+                            //   key 一直換 = 圖每 0.1 秒重建一次(縮放 / 點選全被清掉)。
                             key: ValueKey(
-                              '$_fixedMode/${preLen > 0}/$dropHead',
+                              '$_fixedMode/${preLen > 0}/$dropHead/${keepTo < srcIr.length}',
                             ),
-                            ir: dropHead > 0 ? srcIr.sublist(dropHead) : srcIr,
-                            red: dropHead > 0
-                                ? srcRed.sublist(dropHead)
-                                : srcRed,
+                            ir: srcIr.sublist(dropHead, keepTo),
+                            red: srcRed.sublist(dropHead, keepTo),
                             // 定長模式:IR 那條線直接畫核心的 newIrWave(= server 送出的
                             // wave);還沒到的位置(開頭段、右邊資料未齊)圖自己算。
-                            irWave: fx == null
-                                ? null
-                                : (dropHead > 0
-                                      ? fx.chartWave.sublist(dropHead)
-                                      : fx.chartWave),
-                            troughs: dropHead > 0
-                                ? [
-                                    for (final t in srcTroughs)
-                                      if (t >= dropHead) t - dropHead,
-                                  ]
-                                : srcTroughs,
-                            troughsAlt: dropHead > 0
-                                ? [
-                                    for (final t in srcTroughsAlt)
-                                      if (t >= dropHead) t - dropHead,
-                                  ]
-                                : srcTroughsAlt,
+                            irWave: fx?.chartWave.sublist(
+                              dropHead,
+                              math.min(keepTo, fx.chartWave.length),
+                            ),
+                            troughs: [
+                              for (final t in srcTroughs)
+                                if (t >= dropHead && t < keepTo) t - dropHead,
+                            ],
+                            troughsAlt: [
+                              for (final t in srcTroughsAlt)
+                                if (t >= dropHead && t < keepTo) t - dropHead,
+                            ],
                             rrSpans: cut(srcSpans),
                             rrSpansAlt: cut(srcSpansAlt),
                             showRawIr: _showRawIr,
                             // 圖上第 0 筆的絕對位置(點選的谷靠它記住,滾動時直線才跟得住):
                             // 定長 = 定長窗的換算(abs − base + 開頭段)反過來,再加上裁掉的空轉段;
-                            // 滾動 = 波形陣列的起點,前面接了開頭段就往前推 preLen。
+                            // 滾動 = 波形陣列的起點,前面接了開頭段就往前推 preLen(再加回裁掉的空轉段)。
                             absOffset: fx != null
                                 ? fw.base - fw.preIr.length + dropHead
-                                : _adapter.waveBase - preLen,
-                            bands: _paintBands(
-                              dropHead > 0
-                                  ? [
-                                      for (final b in srcBands)
-                                        if (b.to > dropHead)
-                                          (
-                                            from: b.from > dropHead
-                                                ? b.from - dropHead
-                                                : 0,
-                                            to: b.to - dropHead,
-                                            kind: b.kind,
-                                          ),
-                                    ]
-                                  : srcBands,
-                            ),
-                            events: [...chartEvents, ...fxEvents],
+                                : _adapter.waveBase - preLen + dropHead,
+                            bands: _paintBands([
+                              for (final b in srcBands)
+                                if (b.to > dropHead && b.from < keepTo)
+                                  (
+                                    from: b.from > dropHead ? b.from - dropHead : 0,
+                                    to: math.min(b.to, keepTo) - dropHead,
+                                    kind: b.kind,
+                                  ),
+                            ]),
+                            events: [
+                              for (final e in chartEvents)
+                                if (e.at < keepTo - dropHead) e,
+                              ...fxEvents,
+                            ],
                             version: ver,
                             markSeconds: preLen > 0 ? const [] : marks,
                             displaySamples: waveSamples,

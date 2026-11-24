@@ -214,6 +214,22 @@ class K2SerialAdapter extends ChangeNotifier {
   /// 固定 30 秒的結果(還沒出 / 已清除 = null)。
   K2Fixed30Result? get fixedResult => coreFixed.result;
 
+  // ── 固定核心的原始資料副本(只為了快照)──────────────────────────────
+  //
+  // 固定核心算完就清掉自己的緩衝,結果裡只有數值。提早結束(≥ 28 秒手指離開)時,
+  // 即時核心在同一批資料歸零、waveIr 被清空,快照就沒有東西可存。
+  // 所以這裡照固定核心的絕對位置自己存一份,done 那一刻切出
+  // `computeBuffer()` 當時吃的那段凍結起來(沉澱 + 窗 + 右緣)。
+  // 排列方向 = 固定核心看到的方向(指標 1 已對調),重放時傳同一份 config 即可。
+  final List<int> _fxIr = [];
+  final List<int> _fxRed = [];
+  int _fxBase = 0; // _fxIr[0] 的絕對位置
+  /// 40 秒:大於固定核心的緩衝(沉澱 + 30 秒 + 右緣 + 餘裕 ≈ 34.5 秒),不會先被裁掉。
+  static const int _fxCap = 4000;
+
+  /// done 時凍結的那段資料;init(開始量測)/ 清空時清除。aborted 沒有結果,也不會有它。
+  ({int bufStartAbs, List<int> ir, List<int> red})? fixedBuf;
+
   // ── 原始樣本滾動緩衝 —— 只為了還原「被核心丟掉的開頭」──────────────
   //
   // 核心在空轉期(1.5s)直接丟棄樣本、沉澱期(2.0s)只留在自己的緩衝裡當 baseline
@@ -378,12 +394,69 @@ class K2SerialAdapter extends ChangeNotifier {
   void reset() {
     core.reset();
     coreFixed.reset();
+    _fxIr.clear();
+    _fxRed.clear();
+    fixedBuf = null;
     _clearLocal();
     // 「清除」的語意就是全部歸零,定長窗不能留著上一段。
     fixedWindow.hardClear();
     _preDone = false;
     _log(tr('k2_log_cleared_core'));
     notifyListeners();
+  }
+
+  /// 照固定核心的絕對位置存原始資料,done 那一刻凍結成 [fixedBuf](見 [_fxIr] 的說明)。
+  ///
+  /// [before] = 餵這包之前的 `coreFixed.totalSamples`。這批有沒有進核心的時間軸:
+  ///   · 位置有前進                → 有,落在 [before, before + n)
+  ///   · 這包讓它正常結束(30 秒)  → 有(先進緩衝才算,算完歸零,所以位置看起來沒前進)
+  ///   · 提早結束 / 歸零 / 鎖定中   → 沒有(手指離開那批不進緩衝)
+  void _trackFixedRaw(Uint8List packet, int before, K2Phase phaseBefore) {
+    final res = coreFixed.result;
+    final justDone = phaseBefore != K2Phase.done && coreFixed.phase == K2Phase.done;
+    final entered = coreFixed.totalSamples > before ||
+        (justDone && res != null && res.liftAbs == null);
+    if (entered &&
+        packet.length > 4 &&
+        packet[4] == Max30102Protocol.kSubQueryFifo) {
+      // 接不上(新的一次量測、或中間有斷層)就整段重來,不硬接
+      if (_fxIr.isEmpty || before != _fxBase + _fxIr.length) {
+        _fxIr.clear();
+        _fxRed.clear();
+        _fxBase = before;
+      }
+      // 方向照固定核心 feedData 的做法(指標 1 在拆包時對調)
+      final swap =
+          coreFixed.config.channelMode == Max30102Config.channelModeSwapped;
+      for (final s in Max30102Protocol.decodeFifoResponse(packet)) {
+        _fxIr.add(swap ? s.red : s.ir);
+        _fxRed.add(swap ? s.ir : s.red);
+      }
+      final over = _fxIr.length - _fxCap;
+      if (over > 0) {
+        _fxIr.removeRange(0, over);
+        _fxRed.removeRange(0, over);
+        _fxBase += over;
+      }
+    }
+    if (justDone && res != null) {
+      // = computeBuffer() 吃的那段:起點 = 窗起點 − 沉澱;終點 = 正常 窗尾 + 右緣 / 提早 L
+      final from = res.windowStartAbs - coreFixed.config.settleSamples;
+      final to = res.liftAbs ?? res.windowEndAbs + Max30102K2Fixed30.hold;
+      final lo = from - _fxBase, hi = to - _fxBase;
+      if (lo >= 0 && hi <= _fxIr.length) {
+        fixedBuf = (
+          bufStartAbs: from,
+          ir: _fxIr.sublist(lo, hi),
+          red: _fxRed.sublist(lo, hi),
+        );
+      } else {
+        _log(trParams('k2_log_fx_buf_miss', {
+          'need': '$from~$to',
+          'have': '$_fxBase~${_fxBase + _fxIr.length}',
+        }));
+      }
+    }
   }
 
   /// 把核心丟掉的開頭(空轉期 + 沉澱期)從原始緩衝裡撈回來,交給定長窗顯示。
@@ -553,8 +626,10 @@ class K2SerialAdapter extends ChangeNotifier {
     );
     // 固定 30 秒對照:同一包原封丟進去
     final phaseBefore = coreFixed.phase;
+    final fxBefore = coreFixed.totalSamples;
     coreFixed.feedData(packet);
     final phaseNow = coreFixed.phase;
+    _trackFixedRaw(packet, fxBefore, phaseBefore);
     if (phaseNow != phaseBefore) {
       if (phaseNow == K2Phase.done) {
         // 軟體收到 done 會下 RESET 關燈並停在結果畫面 —— 照做
@@ -573,8 +648,15 @@ class K2SerialAdapter extends ChangeNotifier {
     // 核心自行歸零過 → 我們存的座標全失效,一起丟掉重來。
     // 兩種來源:①免洗模式下確認手指離開(常態) ②絕對索引到頂(約 497 天才一次)。
     // 旗標只有一個、分不出來,所以訊息寫中性的。
+    //
+    // 例外:固定核心在**這一批**提早結束(≥ 28 秒手指離開)—— 結束的原因就是手指離開,
+    // 兩者必然同一批。這時畫面保留,與正常結束(done 後停輪詢、收不到手指離開)一致;
+    // 下次「開始量測」/「清空」走 reset() 才清。即時核心內部照樣歸零。
+    final fxEarlyDone = phaseBefore != K2Phase.done &&
+        phaseNow == K2Phase.done &&
+        coreFixed.result?.liftAbs != null;
     if (r.didReset) {
-      _clearLocal();
+      if (!fxEarlyDone) _clearLocal();
       _preDone = false; // 下一次量測要重新還原它自己的開頭
       _log(tr('k2_log_core_reset'));
     }
@@ -602,7 +684,8 @@ class K2SerialAdapter extends ChangeNotifier {
 
     if (r.computed != null) {
       final c = r.computed!;
-      latest = c;
+      // 提早結束那一批是 noFinger:不覆蓋,谷標與 RR 數字(讀 latest)才留得住,同正常結束
+      if (!fxEarlyDone) latest = c;
       // LF 實驗:錄製中才會真的收,沒在錄就直接返回。
       // 傳 core.totalSamples 讓它自己算進度,順便偵測核心歸零
       // (免洗模式手指離開 → 索引倒退 → 實驗必須中止,不能把兩段接起來)。
@@ -854,6 +937,15 @@ class K2SerialAdapter extends ChangeNotifier {
             'spo2': fixedResult!.compute.spo2,
             'channelOrient': fixedResult!.compute.orient.name,
             'sqiOk': fixedResult!.compute.sqiOk,
+            // computeBuffer() 當時吃的那段(沉澱 + 窗 + 右緣),方向 = 固定核心看到的方向。
+            // 重放:computeBuffer(red: bufRed, ir: bufIr, bufStartAbs, windowStartAbs,
+            //        windowEndAbs, liftAbs, config: 同一份設定) → 應與上面的結果相同。
+            if (fixedBuf != null) ...{
+              'bufStartAbs': fixedBuf!.bufStartAbs,
+              'bufIr': fixedBuf!.ir,
+              'bufRed': fixedBuf!.red,
+              'channelMode': coreFixed.config.channelMode,
+            },
           },
       },
     };
@@ -865,7 +957,8 @@ class K2SerialAdapter extends ChangeNotifier {
     int? windowSec,
     bool full = false,
   }) async {
-    if ((fixed?.ir ?? waveIr).isEmpty) {
+    // 即時版波形是空的、但有凍結的固定版資料時照樣存
+    if ((fixed?.ir ?? waveIr).isEmpty && fixedBuf == null) {
       _log(tr('k2_log_no_wave'));
       notifyListeners();
       return null;

@@ -668,6 +668,10 @@ class LocalizationService {
           '把開頭空轉期那 1.5 秒從圖上拿掉(只是顯示,那段本來就沒進計算)。'
           '先按開始、手指才壓上去時,IR 會從 5 萬爬到 9 萬,縱軸會被那根大波吃掉,'
           '後面真正的脈搏被壓成一條直線。確認過核心在做什麼之後就可以收起來。',
+      'k2_hide_lift': '隱藏抬手段',
+      'k2_hide_lift_tip':
+          '提早結束時,把抬起點 L 之後(手指拿開那幾筆)從圖上拿掉(只是顯示,那段本來就沒進計算)。'
+          'IR 會在 0.1 秒內掉好幾萬,濾波線在邊緣甩出大擺動,縱軸被撐大、前面的脈搏被壓成一條直線。',
       'k2_snap_full': '完整',
       'k2_snap_full_tip':
           '完整存檔:快照額外寫入「核心丟掉的開頭段(空轉 + 沉澱)、'
@@ -745,6 +749,7 @@ class LocalizationService {
       'k2_ev_fx_cut': '切點 L−154',
       'k2_log_fx_done': '固定 30 秒出結果 → 自動送 RESET 關燈、停止輪詢(模擬軟體)',
       'k2_log_fx_aborted': '固定 30 秒中止:倒數中手指離開 → 停止輪詢,請放好手指後按「開始量測」',
+      'k2_log_fx_buf_miss': '⚠️ 固定版原始資料對不上(需要 {need},手上 {have}),快照不含 bufIr',
       'k2_toggle_raw_ir': '原始 IR(白)',
       'k2_chart_raw_ir': '原始 IR(獨立刻度)p2p {v}',
       'k2_chart_zoom': '時間 ×{x} · 振幅 ×{y} · 雙擊還原',
@@ -1675,6 +1680,13 @@ class LocalizationService {
           'only; that segment never enters any calculation). When start is '
           'pressed before the finger lands, IR ramps from 50k to 90k and that '
           'swing takes over the vertical scale, flattening the real pulse.',
+      'k2_hide_lift': 'Hide lift-off',
+      'k2_hide_lift_tip':
+          'On an early stop, removes everything after the lift point L (the '
+          'samples where the finger came off) from the chart (display only; '
+          'that segment never enters any calculation). IR drops by tens of '
+          'thousands within 0.1 s, the filtered line overshoots at the edge '
+          'and takes over the vertical scale, flattening the real pulse.',
       'k2_snap_full': 'Full',
       'k2_snap_full_tip':
           'Full snapshot: also writes the head segment the core '
@@ -1763,6 +1775,8 @@ class LocalizationService {
           '(simulating the station)',
       'k2_log_fx_aborted': 'Fixed 30 s aborted: finger removed during the countdown → '
           'polling stopped; place the finger and press Start',
+      'k2_log_fx_buf_miss': '⚠️ Fixed-mode raw data out of range (need {need}, have {have}); '
+          'snapshot will not include bufIr',
       'k2_toggle_raw_ir': 'raw IR (white)',
       'k2_chart_raw_ir': 'raw IR (own scale) p2p {v}',
       'k2_chart_zoom': 'time ×{x} · amplitude ×{y} · double-click to reset',

@@ -5,5 +5,9 @@ App 沒有獨立版本號，檔名用日期。
 
 | 日期 | 檔案 | 位置 | 換掉什麼 |
 |---|---|---|---|
+| 2026-11-24 | [2026-11-24.md](2026-11-24.md) | `k2_core_fixed30.dart` `computeBuffer()` | 固定版 classify 基準：局部 ±4 拍中位數 → 整段 RR 中位數 |
+| 2026-11-24 | [2026-11-24.md](2026-11-24.md) | `k2_serial_adapter.dart` `saveSnapshot()` | 空波形檢查：只看即時版波形 → 有凍結的固定版資料也可存 |
+| 2026-11-24 | [2026-11-24.md](2026-11-24.md) | `k2_serial_adapter.dart` `_onPacket()` | 手指離開一律清畫面 → 固定版提早結束那一批不清、不覆蓋 `latest` |
+| 2026-11-24 | [2026-11-24.md](2026-11-24.md) | `k2_page.dart` 波形圖 / `_fixedSwitch()` | 「隱藏空轉段」只在定長模式 → 滾動模式有開頭段時也可用 |
 | 2026-11-23 | [2026-11-23.md](2026-11-23.md) | `k2_serial_adapter.dart` `startMeasurement()` | 開始量測：歸零 → 輪詢 → init → init 等到回覆成功才歸零、輪詢 |
 | 2026-11-19 | [2026-11-19.md](2026-11-19.md) | `main_navigation_page.dart` `_applyStm32Mode()` | 停心跳的頁面：只有 K2 頁 → K2 頁 + MAX 晶片頁 |

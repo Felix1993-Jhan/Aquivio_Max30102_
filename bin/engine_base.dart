@@ -78,7 +78,8 @@ abstract class VitalsEngine {
   ///
   /// 由 [SerialSource.resetChip] 設 true、[SerialSource.initChip] 成功後設 false
   /// (含開串口時的自動 init);切換進料模式時也清掉(見 `_handleMode`)。
-  /// feed 模式下 server 不知道上層有沒有真的送出 reset,所以不會動這個旗標。
+  /// feed 模式(0.0.1-fixed30s 起):收到 `/chip/reset` 就設 true、`/chip/init` 設 false ——
+  /// server 不知道上層有沒有真的送出,一律當作送出了(見 `_handleChipCommand`)。
   bool chipAsleep = false;
 
   /// 立刻推一筆現況給 WS 訂閱者(不等下一次計算)。
