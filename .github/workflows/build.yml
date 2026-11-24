@@ -8,6 +8,14 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+    # 手動觸發時選要建哪個平台的 server(預設全部,行為同以前)。
+    # 只補某一個平台時選它就好,不必三個一起重跑。
+    inputs:
+      target:
+        description: '要建置的 server 平台'
+        type: choice
+        default: all
+        options: [ all, linux, macos, windows ]
 
 jobs:
   # ══════════════════════════════════════════════════════════════
@@ -100,7 +108,9 @@ jobs:
   build-server:
     name: Build Linux Server (AMD64)
     runs-on: ubuntu-latest
-    if: github.repository == 'Felix1993-Jhan/Aquivio_Max30102_' || github.event_name == 'workflow_dispatch'
+    if: >-
+      (github.event_name != 'workflow_dispatch' && github.repository == 'Felix1993-Jhan/Aquivio_Max30102_') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'linux'))
 
     steps:
     - name: Checkout code
@@ -196,8 +206,10 @@ jobs:
   #    直接上傳的話對方解開後 server 跟 run.sh 都不能執行。
   build-server-macos:
     name: Build macOS Server (arm64)
-    runs-on: macos-14
-    if: github.event_name == 'workflow_dispatch'
+    # macos-14 已於 2026-11-02 被 GitHub 退役(指定它會直接報 "configuration ... is not supported")。
+    # ⚠️ 換 runner 版本會連帶改變 Homebrew dylib 的最低 macOS 版本,見下方 Bundle 步驟印出的 minos。
+    runs-on: macos-15
+    if: github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'macos')
 
     steps:
     - name: Checkout code
@@ -228,6 +240,8 @@ jobs:
         echo "--- dylib 架構與相依(應為 arm64,只連到系統元件)---"
         file dist/libserialport.dylib
         otool -L dist/libserialport.dylib
+        echo "--- dylib 最低 macOS 版本(minos;比對方的 macOS 新就載入不了)---"
+        otool -l dist/libserialport.dylib | grep -A4 LC_BUILD_VERSION
 
     - name: Smoke test (feed mode)
       # feed 模式不開串口、不載入 libserialport,只驗證執行檔在 macOS 上跑得起來。
@@ -294,7 +308,7 @@ jobs:
   build-server-windows:
     name: Build Windows Server (x64)
     runs-on: windows-latest
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'windows')
 
     steps:
     - name: Checkout code
