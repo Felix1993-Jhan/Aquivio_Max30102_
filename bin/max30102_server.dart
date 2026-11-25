@@ -260,7 +260,13 @@ class SerialSource extends FeedSource {
       ..baudRate = baud
       ..bits = 8
       ..parity = SerialPortParity.none
-      ..stopBits = 1;
+      ..stopBits = 1
+      // 明確關掉流量控制(XON/XOFF + RTS/CTS;RTS/DTR 線路不動)。
+      // 沒指定的話 libserialport 沿用串口原本的設定,而 Linux 開機後預設 IXON 開 ——
+      // 核心會把資料裡的 0x11/0x13 當流控字元吃掉 → 封包少 1 byte、checksum 不過、整包被丟
+      // (2026-11-25 Linux 實測:stty ixon 82.9 筆/秒且後段停滯;-ixon 100.3 筆/秒)。
+      // Windows 預設不開所以沒事。App 的 SerialPortManager 也是同一行。
+      ..setFlowControl(SerialPortFlowControl.none);
     _port = port;
 
     final reader = SerialPortReader(port);
