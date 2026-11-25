@@ -3,10 +3,12 @@ name: Build MAX30102 Tester
 # 這個 repo 的 Flutter 專案就在 repo 根,不在任何子資料夾裡
 # → 不需要 paths 過濾,也不需要 working-directory,所有路徑從根算。
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+  # 〔0.0.1-fixed30s 舊寫法:push / PR 到 main 自動建 Linux server。
+  #   改成只手動觸發 —— 需要產物時再到 Actions 頁按 Run workflow。〕
+  # push:
+  #   branches: [ main, master ]
+  # pull_request:
+  #   branches: [ main, master ]
   workflow_dispatch:
     # 手動觸發時選要建哪個平台的 server(預設全部,行為同以前)。
     # 只補某一個平台時選它就好,不必三個一起重跑。
